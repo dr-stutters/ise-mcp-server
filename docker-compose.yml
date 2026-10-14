@@ -1,0 +1,37 @@
+# Template: replace ise-mcp-server (e.g. ise-mcp-server), 8033 (host port) and ISE (e.g. ISE).
+#
+#   cp .env.example .env    # set ISE_URL/USERNAME/PASSWORD and MCP_AUTH_TOKENS (ise-mcp-server token <name>)
+#   CORE_READ_TOKEN=... docker compose up -d --build
+services:
+  ise-mcp-server:
+    build:
+      context: .
+      secrets:
+        - core_read_token
+    image: ise-mcp-server:latest
+    container_name: ise-mcp-server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MCP_TRANSPORT: http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      MCP_CACHE_DIR: /cache
+    ports:
+      - "${MCP_PUBLISH_PORT:-8033}:8000"
+    volumes:
+      - spec-cache:/cache
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  core_read_token:
+    environment: CORE_READ_TOKEN
+
+volumes:
+  spec-cache:

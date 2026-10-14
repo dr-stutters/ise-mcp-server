@@ -26,12 +26,17 @@ from ise_mcp.tools import (
 )
 
 INSTRUCTIONS = """
-Tools for Cisco Identity Services Engine (ISE). ISE has three REST surfaces and this server uses all
-three: OpenAPI (/api/v1: policy sets, endpoints, TrustSec matrix, deployment, certs, licensing),
-ERS (/ers/config: network devices, internal users, identity/endpoint groups, SGTs, SGACLs,
-authorization profiles, dACLs, ANC) and MnT (/admin/API/mnt: live sessions, auth status, failure
-reasons, CoA). Call ise_status first: it reports which surfaces answer (ERS is often disabled or
-firewalled; MnT only has data when RADIUS sessions exist).
+Tools for Cisco Identity Services Engine (ISE) across its three REST surfaces: OpenAPI (/api/v1: policy
+sets, endpoints, TrustSec matrix, deployment, certs, licensing), ERS (/ers/config: network devices,
+internal users, identity/endpoint groups, SGTs, SGACLs, authorization profiles, dACLs, ANC) and MnT
+(/admin/API/mnt: live sessions, auth history, failure reasons, CoA). Call ise_status first if anything
+fails: it reports which surfaces answer (ERS is often disabled or firewalled).
+Start here: "why can't X connect?" -> ise_why_auth_failed (MAC preferred); "what is this device?" ->
+ise_endpoint_360; "which NAD is 10.1.2.3?" -> ise_get_nad; "what does policy do?" -> ise_list_policy_sets
+then ise_get_policy_set. MnT can only search auth history by MAC, and returns nothing when no RADIUS
+traffic exists. Names or ids are accepted wherever a tool takes an object. Shared secrets, SNMP
+communities and passwords are always masked. For anything without a tool: ise_search_spec ->
+ise_get_definition -> ise_api_call(source=openapi|ers|mnt).
 """.strip()
 
 SPEC = ServerSpec(
