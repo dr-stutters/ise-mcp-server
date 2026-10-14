@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 (2026-10-14)
+
+- Core 0.1.1: MnT calls use the normal auth/retry path (`ok_status`), nested secrets are masked in the
+  audit log, and flag values such as `enableMultiSecret` are no longer shown as `********`.
+- Docker image includes LICENSE; `.dockerignore` added.
+
 ## 0.1.0 (2026-10-14)
 
 First release, built on stutters-mcp-core 0.1.0.
