@@ -5,49 +5,14 @@ from __future__ import annotations
 
 import json
 import secrets
-from typing import Any
 
 import pytest
-from fastmcp import Client
 
-from tests.live.conftest import live_server
+from tests.live.conftest import Session
 
 pytestmark = pytest.mark.live
 
 RUN = secrets.token_hex(3)
-
-
-class Session:
-    def __init__(self, client: Client) -> None:  # type: ignore[type-arg]
-        self.client = client
-
-    async def call(self, name: str, args: dict[str, Any], *, ok: bool = True) -> Any:
-        r = await self.client.call_tool(name, args, raise_on_error=False)
-        text = "\n".join(getattr(x, "text", "") for x in r.content)
-        if ok:
-            assert not r.is_error, f"{name} failed: {text}"
-        if r.is_error:
-            return {"error": text}
-        if r.structured_content is not None:
-            return r.structured_content
-        try:
-            return json.loads(text)
-        except ValueError:
-            return text
-
-    async def apply(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
-        preview = await self.call(name, args)
-        assert preview["status"] == "preview", preview
-        done = await self.call(name, {**args, "confirm": preview["confirm"]})
-        assert done["status"] == "applied", done
-        return {"preview": preview, "applied": done}
-
-
-@pytest.fixture
-async def ise() -> Any:
-    server = live_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
-    async with Client(server) as c:
-        yield Session(c)
 
 
 async def test_nad_lifecycle_and_masking(ise: Session) -> None:
@@ -82,12 +47,7 @@ async def test_nad_lifecycle_and_masking(ise: Session) -> None:
         assert secret not in json.dumps(upd)
         assert (await ise.call("ise_get_nad", {"device": name}))["description"] == "mcp-test updated"
     finally:
-        nad = await ise.call("ise_get_nad", {"device": name}, ok=False)
-        if "id" in nad:
-            await ise.apply(
-                "ise_api_call",
-                {"method": "DELETE", "path": f"/ers/config/networkdevice/{nad['id']}", "source": "ers"},
-            )
+        await ise.apply("ise_delete_nad", {"device": name})
     gone = await ise.call("ise_get_nad", {"device": name}, ok=False)
     assert "error" in gone
 
@@ -197,9 +157,4 @@ async def test_authz_rule_lifecycle(ise: Session) -> None:
         assert mine and mine[0]["state"] == "disabled"
         assert "Wired_MAB AND IdentityGroup:Name equals" in mine[0]["condition"]
     finally:
-        ps = await ise.call("ise_get_policy_set", {"policy_set": "Default"})
-        for r in ps["authorization"]:
-            if r["name"] == rule:
-                ps_id = ps["policy_set"]["id"]
-                path = f"/api/v1/policy/network-access/policy-set/{ps_id}/authorization/{r['id']}"
-                await ise.apply("ise_api_call", {"method": "DELETE", "path": path})
+        await ise.apply("ise_delete_policy_rule", {"policy_set": "Default", "rule": rule})

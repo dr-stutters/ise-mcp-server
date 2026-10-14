@@ -195,3 +195,13 @@ async def openapi_all(app: IseApp, path: str, cap: int = 2000) -> list[Any]:
             break
         page += 1
     return out
+
+
+async def anc_assignments(app: IseApp, mac: str | None = None) -> list[dict[str, Any]]:
+    """Endpoints with an ANC policy applied ({id, macAddress, policyName}); ERS can't filter these by
+    MAC, so the (normally short) list is fetched in full and filtered here."""
+    page = await app.ers_pager.fetch_page(app.ers, "/ers/config/ancendpoint", limit=5000)
+    full = await gather_limited(page.items, lambda i: app.ers_get("ancendpoint", str(i["id"])))
+    if mac:
+        full = [e for e in full if str(e.get("macAddress", "")).upper() == mac.upper()]
+    return full

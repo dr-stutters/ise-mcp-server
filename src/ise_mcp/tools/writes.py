@@ -898,7 +898,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         ctx: Context,
         name: Annotated[str, Field(description="ANC policy name, e.g. 'Quarantine'")],
         actions: Annotated[
-            list[Literal["QUARANTINE", "PORTBOUNCE", "SHUTDOWN", "RE_AUTHENTICATE"]],
+            list[Literal["QUARANTINE", "PORTBOUNCE", "SHUTDOWN", "REAUTHENTICATE"]],
             Field(description="What applying the policy does (QUARANTINE needs a matching authz rule)"),
         ],
         confirm: Confirm = None,

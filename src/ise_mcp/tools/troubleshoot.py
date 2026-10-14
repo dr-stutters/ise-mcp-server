@@ -20,7 +20,12 @@ from stutters_mcp_core import (
 
 from ise_mcp.client import IseApp
 from ise_mcp.knowledge import decode_steps
-from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, ers_list, ers_name_map, normalize_mac
+from ise_mcp.tools._common import (
+    DEFAULT_LOOKBACK_MINUTES,
+    anc_assignments,
+    ers_name_map,
+    normalize_mac,
+)
 from ise_mcp.tools.endpoints import endpoint_row, profile_name
 from ise_mcp.tools.identity import user_row
 from ise_mcp.tools.network import find_nads_for_ip, nad_summary
@@ -50,12 +55,8 @@ async def internal_user_facts(app: IseApp, username: str) -> dict[str, Any]:
 
 
 async def anc_for(app: IseApp, mac: str) -> str | None:
-    page = await ers_list(
-        app, "ancendpoint", filters=[f"macAddress.EQ.{mac}"], limit=5, offset=0, detail=True
-    )
-    for e in page.items:
-        if str(e.get("macAddress", "")).upper() == mac:
-            return str(e.get("policyName") or "unknown")
+    for e in await anc_assignments(app, mac):
+        return str(e.get("policyName") or "unknown")
     return None
 
 
