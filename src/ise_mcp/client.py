@@ -199,11 +199,15 @@ class IseApp:
         return data
 
     async def _mnt_raw(self, path: str) -> httpx.Response:
+        """Authenticated GET that returns the response even for 4xx/5xx (MnT error bodies are XML)."""
         if not SAFE_MNT_PATH.match(path) or ".." in path:
             raise InvalidRequest(f"Invalid MnT path {path!r}")
-        """Authenticated GET that returns the response even for 4xx/5xx (MnT error bodies are XML)."""
-        auth = await self.mnt.auth.headers(self.mnt)
-        return await self.mnt.send_raw("GET", "/admin/API/mnt/" + path.lstrip("/"), headers=auth)
+        return await self.mnt.request(  # type: ignore[no-any-return]
+            "GET",
+            "/admin/API/mnt/" + path.lstrip("/"),
+            expect="response",
+            ok_status=range(400, 600),
+        )
 
     async def failure_reasons(self) -> dict[str, dict[str, Any]]:
         """All MnT failure reasons keyed by numeric code (cached for the server's lifetime)."""

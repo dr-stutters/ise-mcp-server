@@ -114,8 +114,7 @@ async def resolve_nad(app: IseApp, key: str) -> dict[str, Any]:
 
 
 def unmask_flags(nad: dict[str, Any]) -> dict[str, Any]:
-    """Rename boolean-ish flags whose names contain 'secret' so the secret mask doesn't hide them.
-    TODO(core): an allow-list for flag keys like enableMultiSecret would make this unnecessary."""
+    """Expose enableMultiSecret (a "true"/"false" string) as a real boolean."""
     auth = nad.get("authenticationSettings")
     if isinstance(auth, dict) and "enableMultiSecret" in auth:
         auth["multiSecretEnabled"] = str(auth.pop("enableMultiSecret")).lower() == "true"

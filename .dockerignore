@@ -1,0 +1,16 @@
+# Copy to .dockerignore in the server repo. Keeps lab credentials and local state out of the build context.
+.env
+.env.*
+!.env.example
+.git
+.github
+.venv
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+tests
+scripts
+docs
+*.pem
+*.key
