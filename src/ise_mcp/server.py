@@ -12,7 +12,17 @@ from stutters_mcp_core import ServerSpec, build_server
 from ise_mcp.client import IseApp
 from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources
-from ise_mcp.tools import endpoints, identity, network, policy, sessions, system, troubleshoot, trustsec
+from ise_mcp.tools import (
+    endpoints,
+    identity,
+    network,
+    policy,
+    sessions,
+    system,
+    troubleshoot,
+    trustsec,
+    writes,
+)
 
 INSTRUCTIONS = """
 Tools for Cisco Identity Services Engine (ISE). ISE has three REST surfaces and this server uses all
@@ -51,6 +61,7 @@ def create_server(
             policy.register,
             trustsec.register,
             system.register,
+            writes.register,
         ],
         status=IseApp.status,
         spec_sources=spec_sources,
