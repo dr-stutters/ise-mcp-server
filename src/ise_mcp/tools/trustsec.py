@@ -11,7 +11,7 @@ from stutters_mcp_core import ResponseFormat, ToolRegistrar, get_client, list_re
 from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list, ers_name_map, normalize_mac, openapi_all
+from ise_mcp.tools._common import anc_assignments, ers_list, ers_name_map, normalize_mac, openapi_all
 
 
 def sgt_row(s: dict[str, Any]) -> dict[str, Any]:
@@ -152,7 +152,7 @@ def register(reg: ToolRegistrar) -> None:
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
         """List Adaptive Network Control (ANC) policies and their actions (QUARANTINE, PORTBOUNCE,
-        SHUTDOWN, RE_AUTHENTICATE). Policy names are used by ise_apply_anc."""
+        SHUTDOWN, REAUTHENTICATE). Policy names are used by ise_apply_anc."""
         app: IseApp = get_client(ctx)
         page = await ers_list(
             app,
@@ -175,14 +175,8 @@ def register(reg: ToolRegistrar) -> None:
         """List endpoints that currently have an ANC policy applied (e.g. quarantined), with the policy
         name. Clear one with ise_clear_anc."""
         app: IseApp = get_client(ctx)
-        filters = [f"macAddress.EQ.{normalize_mac(mac)}"] if mac else None
-        page = await ers_list(
-            app,
-            "ancendpoint",
-            filters=filters,
-            limit=limit,
-            offset=offset,
-            detail=True,
-            shape=lambda e: {"mac": e.get("macAddress"), "policy": e.get("policyName"), "id": e.get("id")},
-        )
-        return list_result(page, fmt=response_format)
+        rows = [
+            {"mac": e.get("macAddress"), "policy": e.get("policyName"), "id": e.get("id")}
+            for e in await anc_assignments(app, normalize_mac(mac) if mac else None)
+        ]
+        return list_result(page_of(rows, limit=limit, offset=offset), fmt=response_format)

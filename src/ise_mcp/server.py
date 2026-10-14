@@ -13,6 +13,7 @@ from ise_mcp.client import IseApp
 from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
+    dangerous,
     endpoints,
     identity,
     network,
@@ -62,6 +63,7 @@ def create_server(
             trustsec.register,
             system.register,
             writes.register,
+            dangerous.register,
         ],
         status=IseApp.status,
         spec_sources=spec_sources,
