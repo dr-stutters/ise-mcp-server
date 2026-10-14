@@ -19,17 +19,19 @@ def element_to_dict(el: Element) -> Any:
     """Attributes and child elements become keys; repeated child tags become lists; a leaf element
     becomes its text (or None when empty). Use `as_list` where a tag may appear once or many times."""
     children = list(el)
-    if not children and not el.attrib:
+    # Namespaced attributes (xsi:type and friends) are schema noise, not data.
+    attrib = {k: v for k, v in el.attrib.items() if not k.startswith("{")}
+    if not children and not attrib:
         text = (el.text or "").strip()
         return text or None
-    out: dict[str, Any] = dict(el.attrib)
+    out: dict[str, Any] = dict(attrib)
     counts: dict[str, int] = {}
     for child in children:
         counts[_tag(child)] = counts.get(_tag(child), 0) + 1
     for child in children:
         key = _tag(child)
         value = element_to_dict(child)
-        if key in el.attrib:
+        if key in attrib:
             key = f"{key}_element"
         if counts[_tag(child)] > 1:
             out.setdefault(key, []).append(value)

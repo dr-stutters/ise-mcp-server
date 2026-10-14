@@ -75,9 +75,9 @@ def test_mnt_error_detail() -> None:
 
 
 async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
-    mock.get("/api/v1/deployment/node").respond(json=NODES)
-    mock.get("/ers/config/op/systemconfig/iseversion").respond(json=ISEVERSION)
-    mock.get("/admin/API/mnt/Version").respond(text=MNT_VERSION)
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
+    mock.get("/ers/config/op/systemconfig/iseversion", name="iseversion").respond(json=ISEVERSION)
+    mock.get("/admin/API/mnt/Version", name="mntversion").respond(text=MNT_VERSION)
     out = await call_tool(make_server(), "ise_status")
     ise = out["ise"]
     assert ise["version"] == "3.5.0.527"
@@ -88,9 +88,11 @@ async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
 
 
 async def test_status_ers_down(mock: respx.MockRouter) -> None:
-    mock.get("/api/v1/deployment/node").respond(json=NODES)
-    mock.get("/ers/config/op/systemconfig/iseversion").mock(side_effect=httpx.ConnectTimeout("t"))
-    mock.get("/admin/API/mnt/Version").respond(text=MNT_VERSION)
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
+    mock.get("/ers/config/op/systemconfig/iseversion", name="iseversion").mock(
+        side_effect=httpx.ConnectTimeout("t")
+    )
+    mock.get("/admin/API/mnt/Version", name="mntversion").respond(text=MNT_VERSION)
     out = await call_tool(make_server(), "ise_status")
     ise = out["ise"]
     assert ise["surfaces"]["ers"]["ok"] is False
@@ -99,9 +101,10 @@ async def test_status_ers_down(mock: respx.MockRouter) -> None:
     assert ise["version"] == "3.5.0.527"  # falls back to MnT
 
 
-async def test_status_nothing_answers(mock: respx.MockRouter) -> None:
-    mock.route().mock(side_effect=httpx.ConnectError("refused"))
-    out = await call_tool(make_server(), "ise_status")
+async def test_status_nothing_answers() -> None:
+    with respx.mock(base_url=BASE) as r:
+        r.route().mock(side_effect=httpx.ConnectError("refused"))
+        out = await call_tool(make_server(), "ise_status")
     assert "No ISE API surface answered" in out["ise"]["error"]
 
 
@@ -181,9 +184,11 @@ async def test_failure_reasons_cached(mock: respx.MockRouter) -> None:
 
 
 async def test_status_malformed_surface(mock: respx.MockRouter) -> None:
-    mock.get("/api/v1/deployment/node").respond(json=NODES)
-    mock.get("/ers/config/op/systemconfig/iseversion").respond(json={"OperationResult": None})
-    mock.get("/admin/API/mnt/Version").respond(text=MNT_VERSION)
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
+    mock.get("/ers/config/op/systemconfig/iseversion", name="iseversion").respond(
+        json={"OperationResult": None}
+    )
+    mock.get("/admin/API/mnt/Version", name="mntversion").respond(text=MNT_VERSION)
     out = await call_tool(make_server(), "ise_status")
     assert out["ise"]["surfaces"]["ers"]["ok"] is False
     assert out["ise"]["surfaces"]["mnt"]["ok"] is True

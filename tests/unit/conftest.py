@@ -32,6 +32,14 @@ def make_server(**kw: Any) -> FastMCP[Any]:
 @pytest.fixture
 def mock() -> Iterator[respx.MockRouter]:
     with respx.mock(base_url=BASE, assert_all_called=False) as router:
+        # Startup status probe; tests that care re-register these routes under the same names.
+        router.get("/api/v1/deployment/node", name="nodes").respond(json={"response": []})
+        router.get("/ers/config/op/systemconfig/iseversion", name="iseversion").respond(
+            json={"OperationResult": {"resultValue": [{"name": "version", "value": "3.5.0.527"}]}}
+        )
+        router.get("/admin/API/mnt/Version", name="mntversion").respond(
+            text=xml("<product><version>3.5.0.527</version></product>")
+        )
         yield router
 
 
@@ -41,3 +49,32 @@ def xml(body: str) -> str:
 
 def ers_page(resources: list[dict[str, Any]], total: int | None = None) -> dict[str, Any]:
     return {"SearchResult": {"total": len(resources) if total is None else total, "resources": resources}}
+
+
+FIXTURES = __import__("pathlib").Path(__file__).parent.parent / "fixtures"
+
+
+def fixture_text(name: str) -> str:
+    return (FIXTURES / name).read_text()
+
+
+def fixture_json(name: str) -> Any:
+    import json
+
+    return json.loads(fixture_text(name))
+
+
+FAILURE_REASONS_XML = xml(
+    '<failureReasonList><failureReason id="22040"><code>22040 Wrong password</code><cause>Wrong password'
+    "</cause><resolution>Check the user for credentials.</resolution></failureReason>"
+    '<failureReason id="22056"><code>22056 Subject not found in the applicable identity store(s)</code>'
+    "<cause>Subject not found.</cause><resolution>Check the stores.</resolution></failureReason>"
+    '<failureReason id="11036"><code>11036 The Message-Authenticator RADIUS attribute is invalid</code>'
+    "<cause>Mismatched Shared Secrets.</cause><resolution>Check the shared secrets.</resolution>"
+    "</failureReason></failureReasonList>"
+)
+
+MISSING_SESSION = xml(
+    "<mnt-rest-result><http-code>500</http-code><cpm-code>34110</cpm-code><internal-error-info>Session data "
+    "is not available.</internal-error-info></mnt-rest-result>"
+)
