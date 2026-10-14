@@ -3,6 +3,7 @@ devices, policy and certificates. All are preview-first and state the blast radi
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
+import re
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
@@ -22,7 +23,7 @@ from stutters_mcp_core import (
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import anc_assignments, normalize_mac, openapi_all
 from ise_mcp.tools.network import nad_summary, resolve_nad
-from ise_mcp.tools.policy import PolicyKind, policy_set_rules, resolve_policy_set
+from ise_mcp.tools.policy import PolicyKind, list_policy_sets, policy_set_rules, resolve_policy_set
 from ise_mcp.tools.sessions import find_session
 from ise_mcp.tools.writes import fingerprint
 
@@ -46,7 +47,9 @@ def coa_result(data: Any) -> dict[str, Any]:
     return out
 
 
-SESSION_KEYS = ("audit_session_id", "acs_server", "nas_ip_address", "nas_port_id", "framed_ip_address")
+# What identifies the session a CoA targets. The framed IP is left out: it often appears a moment after
+# the session starts (DHCP), which would refuse a confirm for the same session.
+SESSION_KEYS = ("audit_session_id", "acs_server", "nas_ip_address", "nas_port_id")
 
 
 def session_fingerprint(session: dict[str, Any] | None) -> str:
@@ -64,6 +67,20 @@ async def session_or_blocker(app: IseApp, mac: str) -> tuple[dict[str, Any] | No
     if not session.get("acs_server"):
         return session, ["MnT doesn't say which PSN owns this session; can't route the CoA"]
     return session, []
+
+
+async def anc_rules(app: IseApp, policy: str) -> list[str]:
+    """'PolicySet / Rule' for network-access authorization rules/exceptions whose condition mentions
+    Session:ANCPolicy with this policy name (library conditions are matched by text only)."""
+    out: list[str] = []
+    for ps in await list_policy_sets(app, "network-access"):
+        rules = await policy_set_rules(app, "network-access", str(ps["id"]))
+        for section in ("authorization", "local_exceptions"):
+            for r in rules[section]:
+                cond = str(r.get("condition") or "")
+                if re.search(rf"ANCPolicy (equals|in|contains) {re.escape(policy)}(\b|\)|$)", cond, re.I):
+                    out.append(f"{ps.get('name')} / {r.get('name')}")
+    return out
 
 
 def register(reg: ToolRegistrar) -> None:
@@ -194,15 +211,31 @@ def register(reg: ToolRegistrar) -> None:
             raise NotFound(f"No ANC policy {policy!r}; see ise_list_anc_policies.", 404)
         anc = await app.ers_get("ancpolicy", str(hit["id"]))
         session = await find_session(app, mac=mac_n)
+        warnings: list[str] = []
+        rules: list[str] = []
+        if "QUARANTINE" in (anc.get("actions") or []):
+            rules = await anc_rules(app, str(anc.get("name") or hit["name"]))
+            if not rules:
+                warnings.append(
+                    "No network-access authorization rule matches Session:ANCPolicy for this policy, so "
+                    "QUARANTINE changes nothing: add one first (ise_create_authz_rule with condition "
+                    f"'Session:ANCPolicy equals {anc.get('name') or hit['name']}')"
+                )
         plan = Plan(
             f"Apply ANC policy {policy} to {mac_n}",
             details={
                 "actions": anc.get("actions"),
+                "authz_rules_matching_it": rules or None,
                 "live_session": bool(session),
                 "nad": (session or {}).get("network_device_name"),
             },
-            side_effects=[f"Actions: {', '.join(anc.get('actions') or [])}"],
-            fingerprint=fingerprint({"policy": anc, "session": session_fingerprint(session)}),
+            side_effects=[
+                f"Actions: {', '.join(anc.get('actions') or [])}",
+                "ISE sends a CoA to the live session itself, so the new authorization applies at once",
+                *warnings,
+            ],
+            # Only the policy: the session may legitimately churn (reauth) between preview and confirm.
+            fingerprint=fingerprint(anc),
         )
         body = {
             "OperationAdditionalData": {
@@ -238,6 +271,10 @@ def register(reg: ToolRegistrar) -> None:
             details={"applied": [c.get("policyName") for c in current]},
             blockers=blockers,
             fingerprint=fingerprint(current),
+            side_effects=[
+                "ISE ends the live session (CoA); the endpoint re-authenticates with normal policy. An idle "
+                "MAB endpoint only re-authenticates when it next sends traffic"
+            ],
         )
         body = {"OperationAdditionalData": {"additionalData": [{"name": "macAddress", "value": mac_n}]}}
         return await preview_or_apply(

@@ -11,11 +11,11 @@ from tests.unit.conftest import MISSING_SESSION, ers_page, fixture_text, make_se
 MAC = "02:00:5E:00:00:01"
 
 
-async def two_step(name: str, args: dict[str, Any]) -> tuple[Any, Any]:
+async def two_step(name: str, args: dict[str, Any], *, apply: bool = True) -> tuple[Any, Any]:
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
     async with Client(server) as c:
         preview = (await c.call_tool(name, args)).structured_content
-        if preview.get("status") != "preview":
+        if preview.get("status") != "preview" or not apply:
             return preview, None
         applied = (await c.call_tool(name, {**args, "confirm": preview["confirm"]})).structured_content
         return preview, applied
@@ -63,9 +63,29 @@ async def test_apply_and_clear_anc(mock: respx.MockRouter) -> None:
         json={"ErsAncPolicy": {"id": "a1", "name": "Quarantine", "actions": ["QUARANTINE"]}}
     )
     mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(500, text=MISSING_SESSION)
+    mock.get("/api/v1/policy/network-access/policy-set").respond(
+        json={"response": [{"id": "s1", "name": "Wired"}]}
+    )
+    rules = mock.get("/api/v1/policy/network-access/policy-set/s1/authorization").respond(
+        json={"response": []}
+    )
+    mock.get("/api/v1/policy/network-access/policy-set/s1/authentication").respond(json={"response": []})
+    mock.get("/api/v1/policy/network-access/policy-set/s1/exception").respond(json={"response": []})
     apply = mock.put("/ers/config/ancendpoint/apply").respond(204)
+    # No rule matches Session:ANCPolicy -> the preview warns that QUARANTINE would do nothing
+    preview, _ = await two_step("ise_apply_anc", {"mac": MAC, "policy": "Quarantine"}, apply=False)
+    assert any("changes nothing" in s for s in preview["side_effects"])
+    anc_cond = {
+        "conditionType": "ConditionAttributes",
+        "dictionaryName": "Session",
+        "attributeName": "ANCPolicy",
+        "operator": "equals",
+        "attributeValue": "Quarantine",
+    }
+    rules.respond(json={"response": [{"rule": {"id": "r1", "name": "Q", "rank": 0, "condition": anc_cond}}]})
     preview, applied = await two_step("ise_apply_anc", {"mac": MAC, "policy": "Quarantine"})
     assert preview["preview"]["actions"] == ["QUARANTINE"]
+    assert preview["preview"]["authz_rules_matching_it"] == ["Wired / Q"]
     assert applied["status"] == "applied"
     sent = json.loads(apply.calls.last.request.content)["OperationAdditionalData"]["additionalData"]
     assert {"name": "macAddress", "value": MAC} in sent and {

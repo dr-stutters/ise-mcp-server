@@ -177,7 +177,9 @@ async def test_endpoint_360(mock: respx.MockRouter) -> None:
         json={"ProfilerProfile": {"id": "p1", "name": "Cisco-Device"}}
     )
     mock.get("/ers/config/ancendpoint").respond(json=ers_page([]))
+    mock.get("/api/v1/endpoint/getRejected").respond(json={"response": [MAC_OK.lower()]})
     out = await call_tool(make_server(), "ise_endpoint_360", {"mac": MAC_OK})
+    assert "rejected" in out["rejected"]
     assert out["endpoint"]["group"] == "mcp-test-endpoints"
     assert out["endpoint"]["profile"] == "Cisco-Device"
     assert out["session"]["matched_policy"]["policy_set"] == "Default"

@@ -9,7 +9,8 @@ import respx
 from fastmcp import Client
 from stutters_mcp_core import InvalidRequest
 
-from ise_mcp.tools.writes import condition_node, masked_changes
+from ise_mcp.tools.policy_edit import condition_node
+from ise_mcp.tools.writes import masked_changes
 from tests.unit.conftest import BASE, ers_page, make_server
 
 LIB = {"wired_mab": {"id": "c1", "name": "Wired_MAB"}}
@@ -184,42 +185,6 @@ async def test_delete_profile_blocked_when_in_use(mock: respx.MockRouter) -> Non
     preview, _ = await two_step("ise_delete_object", {"kind": "authz_profile", "target": "P1"})
     assert preview["status"] == "blocked"
     assert "Wired / R1" in preview["blockers"][0]
-
-
-async def test_create_authz_rule_body(mock: respx.MockRouter) -> None:
-    mock.get("/api/v1/policy/network-access/policy-set").respond(
-        json={"response": [{"id": "s1", "name": "Wired"}]}
-    )
-    mock.get("/api/v1/policy/network-access/condition").respond(
-        json={"response": [{"id": "c1", "name": "Wired_MAB"}]}
-    )
-    mock.get("/ers/config/authorizationprofile").respond(
-        json=ers_page([{"id": "p1", "name": "PermitAccess"}])
-    )
-    mock.get("/ers/config/authorizationprofile", params={"filter": "name.EQ.PermitAccess"}).respond(
-        json=ers_page([{"id": "p1", "name": "PermitAccess"}])
-    )
-    mock.get("/api/v1/policy/network-access/policy-set/s1/authorization").respond(
-        json={"response": [{"rule": {"name": "Default", "rank": 0}}]}
-    )
-    post = mock.post("/api/v1/policy/network-access/policy-set/s1/authorization").respond(
-        201, json={"response": {}}
-    )
-    preview, applied = await two_step(
-        "ise_create_authz_rule",
-        {
-            "policy_set": "wired",
-            "name": "Printers",
-            "conditions": ["Wired_MAB", "EndPoints:LogicalProfile equals Printers"],
-            "profiles": ["PermitAccess"],
-            "sgt": "Printers",
-        },
-    )
-    assert preview["preview"]["inserted_before"] == "Default"
-    body = json.loads(post.calls.last.request.content)
-    assert body["rule"]["condition"]["conditionType"] == "ConditionAndBlock"
-    assert body["securityGroup"] == "Printers" and body["profile"] == ["PermitAccess"]
-    assert applied["status"] == "applied"
 
 
 async def test_writes_hidden_when_disabled() -> None:

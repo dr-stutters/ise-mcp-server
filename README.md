@@ -24,6 +24,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   cause, resolution and likely fix, the execution steps, the NAD that covers the NAS IP (or the fact that none
   does), the internal user's state, and the matched policy set and rules.
 - **`ise_endpoint_360`**: the endpoint record, live session, recent authentications and ANC state.
+- **Policy editing with validation**: create/update policy sets and authentication/authorization rules for
+  network access and device admin (TACACS+). Conditions are written as `Dictionary:Attribute operator value`
+  and checked against ISE's dictionaries in the preview ("did you mean ...?").
 - **`ise_audit_nads`**: finds missing, short or reused shared secrets, NADs in default groups only,
   overlapping ranges and default SNMP communities, without ever showing a secret.
 - Spec tools cover all three surfaces. They search the OpenAPI groups, a spec synthesised from the ERS SDK data
@@ -129,10 +132,10 @@ the spec cache.
 
 ## Tools
 
-Tool counts with writes and dangerous enabled. With the defaults (read-only), the 38 read tools plus
+Tool counts with writes and dangerous enabled. With the defaults (read-only), the 41 read tools plus
 `ise_api_call` (GET-only) are registered.
 
-### Read (38)
+### Read (41)
 
 | Tool | What it does |
 |---|---|
@@ -178,8 +181,10 @@ SHUTDOWN, REAUTHENTICATE). |
 Airespace/filter ACL, web redirection, reauth timer and voice domain. |
 | `ise_list_certificates` | List system (per-node identity) or trusted certificates with what they are used for, issuer,
 expiry and days left. |
+| `ise_list_command_sets` | List TACACS+ command sets: each command as 'GRANT command args' and whether unmatched commands are permitted. |
 | `ise_list_conditions` | List reusable library conditions (e.g. |
 | `ise_list_dacls` | List downloadable ACLs (dACLs) with IP version, number of ACEs and the first ACE. |
+| `ise_list_dictionary_attributes` | List the dictionary attributes policy conditions can use, with type and allowed values (Radius:NAS-Port-Type, Session:ANCPolicy, DEVICE:Location...). |
 | `ise_list_endpoint_groups` | List endpoint identity groups (e.g. |
 | `ise_list_endpoints` | List endpoints ISE knows about (seen via RADIUS/profiling or added by hand): MAC, endpoint
 identity group, whether the group is static, profile, IP and description. |
@@ -206,20 +211,20 @@ its allowed-protocols service, hit count and id. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id.
 SGT names/values appear in authorization rules, the egress matrix and IP-SGT mappings. |
+| `ise_list_shell_profiles` | List TACACS+ shell profiles and the attributes they send at login (priv-lvl, idletime, WLC role1...). |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (15)
+### Write (21)
 
 | Tool | What it does |
 |---|---|
 | `ise_create_anc_policy` | Create an Adaptive Network Control policy that ise_apply_anc can put on endpoints. |
+| `ise_create_authn_rule` | Add an authentication rule: conditions -> identity source, with if-fail / if-not-found / if-process-fail actions. |
 | `ise_create_authz_profile` | Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL,
 reauth timer, voice domain. |
-| `ise_create_authz_rule` | Add an authorization rule to a network-access policy set: conditions -> profiles (+ SGT).
-Rule order matters: the first match wins, so the preview shows the rules it lands between.
-Preview-first. |
+| `ise_create_authz_rule` | Add an authorization rule or local exception: network access (conditions -> profiles + SGT) or device admin (conditions -> command sets + shell profile). Conditions and names are checked first; the preview shows where it lands. |
 | `ise_create_group` | Create a user identity group or an endpoint identity group, for policy to match on and for
 users/endpoints to be placed in. |
 | `ise_create_internal_user` | Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given
@@ -228,21 +233,26 @@ identity groups. |
 requests. |
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an
 existing parent, so devices can be grouped and policy can match on it. |
+| `ise_create_policy_set` | Create a network-access or device-admin policy set (conditions + allowed protocols); the preview shows where it lands. |
 | `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
-SGACL, device group or ANC policy. |
+SGACL, device group, ANC policy, TACACS+ command set or shell profile. |
+| `ise_set_command_set` | Create a TACACS+ command set or replace its commands ('PERMIT show .*', 'DENY_ALWAYS reload'). |
 | `ise_set_dacl` | Create a downloadable ACL, or replace an existing one's ACEs. |
 | `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which
 SGACLs apply and the final catch-all. |
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group and description, e.g. |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
+| `ise_set_shell_profile` | Create or update a TACACS+ shell profile (privilege, idle timeout, other attributes). |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or
 description. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description.
 Only the given fields change. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port or name.
 Only the given fields change. |
+| `ise_update_policy_rule` | Change one rule: state, rank, name, conditions, profiles/SGT, command sets/shell profile, identity source. |
+| `ise_update_policy_set` | Change a policy set: state, conditions, allowed protocols, rank, name, description. |
 
-### Dangerous (9)
+### Dangerous (10)
 
 | Tool | What it does |
 |---|---|
@@ -258,6 +268,7 @@ policy (group, profile, ANC) applies now instead of at the next reauth. |
 | `ise_delete_nad` | Delete a network device. |
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
 | `ise_delete_policy_set` | Delete a whole policy set with all its rules. |
+| `ise_update_node_services` | Enable or disable node services, e.g. DeviceAdmin for TACACS+ (disabling Session on the only PSN is blocked). |
 
 ## Testing
 
@@ -265,6 +276,8 @@ policy (group, profile, ANC) applies now instead of at the next reauth. |
 uv run pytest                          # unit tests (respx-mocked, includes the tool contract)
 uv run python scripts/seed_lab.py      # lab only: mcp-test-* objects + real RADIUS traffic for MnT
 uv run pytest tests/live -m live       # live tests against ISE_URL (skipped if unreachable)
+uv run python scripts/lab_policy.py up # ISE side of the CML 'ise-access' lab (switch + client); 'down' removes it
+ISE_LIVE_SWITCH_MAC=<client MAC> uv run pytest tests/live -m live -k switch   # session/CoA/ANC via the real switch
 ```
 
 `scripts/seed_lab.py` creates a NAD for this host's source IP and an internal user, then sends RADIUS
@@ -279,6 +292,10 @@ write tests create and delete `mcp-test-*` objects.
   user has a live session.
 - The ERS spec is synthesised from ISE's SDK data model. It covers the fields, types and enums, but not
   the JSON wrapper name or which operations each resource really supports.
-- pxGrid is out of scope.
+- pxGrid is out of scope. TACACS+ live logs have no REST API; device-admin rule hit counts
+  (`ise_get_policy_set kind=device-admin`) show which rules matched.
+- Condition values for `DEVICE:Location`/`Device Type` are written without the root
+  (`All Locations#Sydney`); the tools strip `Location#` if it is given.
+- See docs/GAP-ANALYSIS.md for what is and isn't covered, and why.
 
 Not affiliated with or endorsed by Cisco Systems, Inc. MIT licensed.

@@ -14,10 +14,12 @@ from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
     dangerous,
+    device_admin,
     endpoints,
     identity,
     network,
     policy,
+    policy_edit,
     sessions,
     system,
     troubleshoot,
@@ -34,7 +36,13 @@ fails: it reports which surfaces answer (ERS is often disabled or firewalled).
 Start here: "why can't X connect?" -> ise_why_auth_failed (MAC preferred); "what is this device?" ->
 ise_endpoint_360; "which NAD is 10.1.2.3?" -> ise_get_nad; "what does policy do?" -> ise_list_policy_sets
 then ise_get_policy_set. MnT can only search auth history by MAC, and returns nothing when no RADIUS
-traffic exists. Names or ids are accepted wherever a tool takes an object. Shared secrets, SNMP
+traffic exists. Policy changes (writes): ise_create_policy_set -> ise_create_authn_rule ->
+ise_create_authz_rule, then ise_update_policy_rule; conditions are 'Dictionary:Attribute operator value' or
+library condition names (ise_list_dictionary_attributes, ise_list_conditions) and are checked before
+anything is sent. Device admin (TACACS+): kind='device-admin' on the policy tools, plus
+ise_set_command_set / ise_set_shell_profile; the node needs the DeviceAdmin service. Quarantine: an authz
+rule on 'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Names or ids are accepted wherever
+a tool takes an object. Shared secrets, SNMP
 communities and passwords are always masked. For anything without a tool: ise_search_spec ->
 ise_get_definition -> ise_api_call(source=openapi|ers|mnt).
 """.strip()
@@ -68,6 +76,8 @@ def create_server(
             trustsec.register,
             system.register,
             writes.register,
+            policy_edit.register,
+            device_admin.register,
             dangerous.register,
         ],
         status=IseApp.status,
