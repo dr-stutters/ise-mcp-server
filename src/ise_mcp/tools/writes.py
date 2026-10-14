@@ -32,7 +32,7 @@ from stutters_mcp_core.formatting import MASK, is_secret_key
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, ers_resolve, is_uuid, normalize_mac
 from ise_mcp.tools.network import resolve_nad
-from ise_mcp.tools.policy import resolve_policy_set, rules_using_profile
+from ise_mcp.tools.policy import rules_using_profile
 
 # --- helpers ------------------------------------------------------------------------------------
 
@@ -146,6 +146,8 @@ DELETE_KINDS = {
     "sgacl": "sgacl",
     "ndg": "networkdevicegroup",
     "anc_policy": "ancpolicy",
+    "command_set": "tacacscommandsets",
+    "shell_profile": "tacacsprofile",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -730,6 +732,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         if hit:
             current = await app.ers_get("downloadableacl", str(hit["id"]))
             desired = deep_merge(current, body)
+            if desired == current:
+                raise InvalidRequest(f"dACL {name!r} already has exactly these ACEs and settings")
             plan = Plan(
                 f"Update dACL {name}",
                 details={"changes": field_changes(current, desired)},
@@ -917,97 +921,6 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             apply=lambda: ers_post(app, "ancpolicy", "ErsAncPolicy", body),
         )
 
-    # --- policy rules --------------------------------------------------------------------------
-
-    @reg.write(title="Create authorization rule")
-    async def ise_create_authz_rule(
-        ctx: Context,
-        policy_set: Annotated[str, Field(description="Policy set name or id (see ise_list_policy_sets)")],
-        name: Annotated[str, Field(description="Rule name")],
-        conditions: Annotated[
-            list[str],
-            Field(
-                description="Conditions AND-ed together. Each is a library condition name "
-                "(e.g. 'Wired_802.1X', see ise_list_conditions) or "
-                "'Dictionary:Attribute operator value', e.g. "
-                "'IdentityGroup:Name equals User Identity Groups:Employee'"
-            ),
-        ],
-        profiles: Annotated[
-            list[str], Field(description="Authorization profile names (see ise_list_authz_profiles)")
-        ],
-        sgt: Annotated[str | None, Field(description="Security group to assign (SGT name)")] = None,
-        rank: Annotated[int, Field(ge=0, description="Position (0 = first); existing rules shift down")] = 0,
-        enabled: Annotated[bool, Field(description="Create enabled (true) or disabled")] = True,
-        confirm: Confirm = None,
-    ) -> dict[str, Any]:
-        """Add an authorization rule to a network-access policy set: conditions -> profiles (+ SGT).
-        Rule order matters: the first match wins, so the preview shows the rules it lands between.
-        Preview-first. Disable or delete with ise_delete_policy_rule (dangerous tier)."""
-        app: IseApp = get_client(ctx)
-        ps = await resolve_policy_set(app, "network-access", policy_set)
-        base = f"/api/v1/policy/network-access/policy-set/{ps['id']}/authorization"
-        library = (await app.openapi.get("/api/v1/policy/network-access/condition")).get("response") or []
-        by_name = {str(c.get("name")).lower(): c for c in library if isinstance(c, dict)}
-        children = [condition_node(c, by_name) for c in conditions]
-        if not children:
-            raise InvalidRequest("Give at least one condition")
-        condition = (
-            children[0]
-            if len(children) == 1
-            else {"conditionType": "ConditionAndBlock", "isNegate": False, "children": children}
-        )
-        for p in profiles:
-            if not await exists(app, "authorizationprofile", p):
-                raise NotFound(f"No authorization profile {p!r}; see ise_list_authz_profiles.", 404)
-        body: dict[str, Any] = {
-            "rule": {
-                "name": name,
-                "rank": rank,
-                "state": "enabled" if enabled else "disabled",
-                "default": False,
-                "condition": condition,
-            },
-            "profile": profiles,
-        }
-        if sgt:
-            body["securityGroup"] = sgt
-        existing = (await app.openapi.get(base)).get("response") or []
-        names = [str((r.get("rule") or {}).get("name")) for r in existing]
-        blockers = [f"Rule {name!r} already exists in {ps['name']}"] if name in names else []
-        ordered = sorted(existing, key=lambda r: (r.get("rule") or {}).get("rank", 0))
-        around = [str((r.get("rule") or {}).get("name")) for r in ordered]
-        details = {
-            "policy_set": ps["name"],
-            "rule": name,
-            "conditions": conditions,
-            "profiles": profiles,
-            "sgt": sgt,
-            "rank": rank,
-            "inserted_before": around[rank] if rank < len(around) else None,
-        }
-        return await preview_or_apply(
-            ctx,
-            tool="ise_create_authz_rule",
-            args={
-                "policy_set": policy_set,
-                "name": name,
-                "conditions": conditions,
-                "profiles": profiles,
-                "sgt": sgt,
-                "rank": rank,
-                "enabled": enabled,
-            },
-            confirm=confirm,
-            plan=Plan(
-                f"Add authorization rule {name} to {ps['name']}",
-                details=details,
-                blockers=blockers,
-                fingerprint=fingerprint(names),
-            ),
-            apply=lambda: app.openapi.post(base, body),
-        )
-
     @reg.write(title="Delete an ISE object", destructive=True)
     async def ise_delete_object(
         ctx: Context,
@@ -1023,6 +936,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "sgacl",
                 "ndg",
                 "anc_policy",
+                "command_set",
+                "shell_profile",
             ],
             Field(description="What to delete"),
         ],
@@ -1030,9 +945,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
-        SGACL, device group or ANC policy. Preview-first: shows the object and what still references it
-        (e.g. rules using a profile, which blocks the delete). Network devices and policy are deleted
-        with the dangerous-tier tools."""
+        SGACL, device group, ANC policy, or TACACS+ command set / shell profile. Preview-first: shows
+        the object and what still references it (e.g. rules using a profile, which blocks the delete).
+        Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]
         if kind == "endpoint":
@@ -1054,6 +969,11 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             users = await rules_using_profile(app, name)
             if users:
                 blockers.append(f"Used by authorization rule(s): {', '.join(users)}")
+        if kind in ("command_set", "shell_profile"):
+            field = "commands" if kind == "command_set" else "profile"
+            users = await rules_using_profile(app, name, "device-admin", field)
+            if users:
+                blockers.append(f"Used by device-admin rule(s): {', '.join(users)}")
         if kind == "dacl":
             page = await app.ers_pager.fetch_page(app.ers, "/ers/config/authorizationprofile", limit=5000)
             for prof in page.items:
@@ -1084,55 +1004,3 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             plan=plan,
             apply=apply,
         )
-
-
-_OPERATORS = (
-    "notEquals",
-    "equals",
-    "contains",
-    "notContains",
-    "startsWith",
-    "notStartsWith",
-    "endsWith",
-    "notEndsWith",
-    "in",
-    "notIn",
-    "matches",
-    "greaterThan",
-    "lessThan",
-)
-_EXPR = re.compile(
-    r"^\s*(?P<dict>[^:]+):(?P<attr>\S+)\s+(?P<op>" + "|".join(_OPERATORS) + r")\s+(?P<value>.+?)\s*$",
-    re.IGNORECASE,
-)
-
-
-def condition_node(text: str, library: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """A library condition name -> ConditionReference; 'Dict:Attr op value' -> ConditionAttributes."""
-    neg = False
-    raw = text.strip()
-    if raw.upper().startswith("NOT "):
-        neg, raw = True, raw[4:].strip()
-    if raw.lower() in library:
-        c = library[raw.lower()]
-        return {
-            "conditionType": "ConditionReference",
-            "isNegate": neg,
-            "id": c.get("id"),
-            "name": c.get("name"),
-        }
-    m = _EXPR.match(raw)
-    if not m:
-        raise InvalidRequest(
-            f"Condition {text!r} is neither a library condition (see ise_list_conditions) nor "
-            "'Dictionary:Attribute operator value'"
-        )
-    op = next(o for o in _OPERATORS if o.lower() == m.group("op").lower())
-    return {
-        "conditionType": "ConditionAttributes",
-        "isNegate": neg,
-        "dictionaryName": m.group("dict").strip(),
-        "attributeName": m.group("attr"),
-        "operator": op,
-        "attributeValue": m.group("value"),
-    }

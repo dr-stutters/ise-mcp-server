@@ -278,9 +278,62 @@ def register(reg: ToolRegistrar) -> None:
             rows = [r for r in rows if name.lower() in str(r["name"]).lower()]
         return list_result(page_of(rows, limit=limit, offset=offset), fmt=response_format)
 
+    @reg.read(title="List policy dictionary attributes")
+    async def ise_list_dictionary_attributes(
+        ctx: Context,
+        kind: PolicyKind = "network-access",
+        scope: Annotated[
+            Literal["authorization", "authentication", "policyset"],
+            Field(description="Which conditions the attributes are for (they differ slightly)"),
+        ] = "authorization",
+        dictionary: Annotated[
+            str | None,
+            Field(
+                description="Only this dictionary, e.g. Radius, Session, DEVICE, IdentityGroup, EndPoints, "
+                "Network Access, Cisco, Normalised Radius, TACACS (case-insensitive)"
+            ),
+        ] = None,
+        name: Annotated[str | None, Field(description="Filter: attribute name contains")] = None,
+        limit: Annotated[int, Field(ge=1, le=500)] = 50,
+        offset: Annotated[int, Field(ge=0)] = 0,
+        response_format: ResponseFormat = "json",
+    ) -> ToolResult:
+        """List the dictionary attributes policy conditions can use, with data type and allowed values
+        (e.g. Radius:NAS-Port-Type -> Ethernet, Virtual...; Session:ANCPolicy; DEVICE:Location;
+        Network Access:EapAuthentication -> EAP-TLS...). Write conditions as 'Dictionary:Attribute
+        operator value' using these names and the allowed value names."""
+        from ise_mcp.tools.policy_edit import dictionary_attributes  # avoid an import cycle
 
-async def rules_using_profile(app: IseApp, profile: str, kind: str = "network-access") -> list[str]:
-    """'PolicySet / Rule' for every authorization rule (or exception) whose profiles include `profile`."""
+        app: IseApp = get_client(ctx)
+        attrs = await dictionary_attributes(app, kind, scope)
+        if dictionary:
+            attrs = [a for a in attrs if str(a.get("dictionaryName")).lower() == dictionary.lower()]
+        if name:
+            attrs = [a for a in attrs if name.lower() in str(a.get("name")).lower()]
+        rows = []
+        for a in attrs:
+            allowed = [str(v.get("key")) for v in a.get("allowedValues") or [] if isinstance(v, dict)]
+            row = {
+                "attribute": f"{a.get('dictionaryName')}:{a.get('name')}",
+                "type": a.get("dataType"),
+                "allowed": (", ".join(allowed[:30]) + (" ..." if len(allowed) > 30 else "")) or None,
+            }
+            rows.append({k: v for k, v in row.items() if v})
+        if not rows and dictionary:
+            dicts = sorted(
+                {str(a.get("dictionaryName")) for a in await dictionary_attributes(app, kind, scope)}
+            )
+            return object_result(
+                {"results": [], "note": f"No attributes; dictionaries are: {', '.join(dicts)}"}
+            )
+        return list_result(page_of(rows, limit=limit, offset=offset), fmt=response_format)
+
+
+async def rules_using_profile(
+    app: IseApp, profile: str, kind: str = "network-access", field: str = "profile"
+) -> list[str]:
+    """'PolicySet / Rule' for every authorization rule (or exception) whose `field` (profiles, or for
+    device admin the shell profile / command sets) includes `profile`."""
     out: list[str] = []
     try:
         sets = await list_policy_sets(app, kind)
@@ -290,6 +343,7 @@ async def rules_using_profile(app: IseApp, profile: str, kind: str = "network-ac
         rules = await policy_set_rules(app, kind, str(ps["id"]))
         for section in ("authorization", "local_exceptions"):
             for r in rules[section]:
-                if profile in (r.get("profile") or []):
+                value = r.get(field) or []
+                if profile == value or (isinstance(value, list) and profile in value):
                     out.append(f"{ps.get('name')} / {r.get('name')}")
     return out

@@ -68,6 +68,12 @@ async def get_endpoint(app: IseApp, mac: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+async def is_rejected(app: IseApp, mac: str) -> bool:
+    data = await app.openapi.get("/api/v1/endpoint/getRejected")
+    items = data.get("response", data) if isinstance(data, dict) else data
+    return any(mac.upper() in str(i).upper() for i in items or [])
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Why did authentication fail?")
     async def ise_why_auth_failed(
@@ -122,8 +128,12 @@ def register(reg: ToolRegistrar) -> None:
             )
             out["endpoint_known_to_ise"] = bool(endpoint and not endpoint.get("error"))
             out["next_steps"] = [
-                "Check the switch/WLC RADIUS server config points at this ISE (1812/1813)",
-                "Check the NAD exists in ISE for the RADIUS source IP (ise_get_nad <ip>)",
+                "Check the NAD exists in ISE for the switch's RADIUS source IP (ise_get_nad <ip>): ISE "
+                "silently drops RADIUS from unknown devices (11007), which the switch logs as 'RADIUS "
+                "server not responding' / 'AAA Server Down', and MnT keeps no record for the MAC",
+                "Check the shared secret matches on both sides (a mismatch is also dropped: 11036)",
+                "Check the switch/WLC RADIUS server config points at this ISE (1812/1813) and that the "
+                "port actually tries MAB/802.1X (an idle MAB client must send traffic first)",
                 "Widen `minutes` if the attempt was earlier",
             ]
             return object_result(out)
@@ -202,16 +212,18 @@ def register(reg: ToolRegistrar) -> None:
     ) -> ToolResult:
         """Everything ISE knows about one endpoint, in one call: the endpoint record (identity group,
         static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN),
-        the last authentication attempts with decoded failures, and any ANC policy applied. Start here
+        the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE
+        has it on the rejected-endpoints list. Start here
         for 'what is this device and what happened to it?'."""
         app: IseApp = get_client(ctx)
         mac_n = normalize_mac(mac)
-        endpoint, session, history, anc, groups = await asyncio.gather(
+        endpoint, session, history, anc, groups, rejected = await asyncio.gather(
             _safe(get_endpoint(app, mac_n)),
             _safe(find_session(app, mac=mac_n)),
             _safe(auth_history(app, mac_n, DEFAULT_LOOKBACK_MINUTES, 5)),
             _safe(anc_for(app, mac_n)),
             _safe(ers_name_map(app, "endpointgroup")),
+            _safe(is_rejected(app, mac_n)),
         )
         out: dict[str, Any] = {"mac": mac_n}
         if isinstance(endpoint, dict) and "error" not in endpoint:
@@ -230,4 +242,9 @@ def register(reg: ToolRegistrar) -> None:
         else:
             out["recent_auths"] = history
         out["anc_policy"] = anc or "none"
+        if rejected is True:
+            out["rejected"] = (
+                "ISE lists this endpoint as rejected (Context Visibility > Rejected Endpoints); release it "
+                "with ise_api_call PUT /api/v1/endpoint/releaseRejectedEndpoints"
+            )
         return object_result(out)

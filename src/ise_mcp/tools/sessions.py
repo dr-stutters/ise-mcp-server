@@ -138,6 +138,12 @@ async def find_session(
         session["attributes"] = attrs
     for noisy in ("execution_steps",):
         session.pop(noisy, None)
+    if not session.get("selected_azn_profiles") and not session.get("authentication_method"):
+        # MnT returns the session's latest event, which can be accounting or a CoA without the auth result.
+        session["note"] = (
+            "MnT's latest event for this session is accounting/CoA, so the authorization result and "
+            "matched policy are not in it; see ise_get_auth_history for the last authentication."
+        )
     return session
 
 
