@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
-from stutters_mcp_core import AuthError, InvalidRequest, NotFound, UpstreamError
+from stutters_mcp_core import AuthError, InvalidRequest, NotFound, UpstreamError, ValidationFailed
 from stutters_mcp_core.http import ApiClient, BasicAuth, PageNumber, RateLimiter, default_error_detail
 
 from ise_mcp.config import Settings
@@ -149,14 +149,21 @@ class IseApp:
         return out
 
     async def ers_find(self, resource: str, name: str) -> dict[str, Any] | None:
-        """Exact-name lookup via the ERS name filter; None if not found."""
-        page = await self.ers_pager.fetch_page(
-            self.ers, f"/ers/config/{self._res(resource)}", {"filter": f"name.EQ.{name}"}, limit=5
-        )
-        for r in page.items:
+        """Exact-name lookup ({"id", "name", ...}); None if not found. Uses the ERS name filter, or for
+        resources that don't support it (e.g. authorizationprofile) a scan of the collection."""
+        path = f"/ers/config/{self._res(resource)}"
+        try:
+            page = await self.ers_pager.fetch_page(self.ers, path, {"filter": f"name.EQ.{name}"}, limit=5)
+            items = page.items
+        except ValidationFailed as e:
+            if "filter" not in str(e).lower():
+                raise
+            items = (await self.ers_pager.fetch_page(self.ers, path, limit=5000)).items
+        for r in items:
             if isinstance(r, dict) and r.get("name") == name:
                 return r
-        return None
+        lowered = [r for r in items if isinstance(r, dict) and str(r.get("name", "")).lower() == name.lower()]
+        return lowered[0] if len(lowered) == 1 else None
 
     async def ers_create(self, resource: str, body: dict[str, Any]) -> dict[str, Any]:
         """POST and return {"id": ..., "location": ...} from the Location header."""

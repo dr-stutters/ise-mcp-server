@@ -1,0 +1,387 @@
+{
+  "version" : "1.0.0",
+  "response" : [ {
+    "rule" : {
+      "default" : false,
+      "id" : "a0cdd350-6ac0-47ef-8390-63e2acf6c0f1",
+      "name" : "Wireless Block List Default",
+      "hitCounts" : 0,
+      "rank" : 0,
+      "state" : "enabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wireless_Access",
+          "id" : "98fecc17-557a-460f-b532-70ccb006def9",
+          "description" : "Default condition used to match any authentication request from Cisco Wireless LAN Controller."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionAttributes",
+          "isNegate" : false,
+          "dictionaryName" : "IdentityGroup",
+          "attributeName" : "Name",
+          "operator" : "equals",
+          "dictionaryValue" : null,
+          "attributeValue" : "Endpoint Identity Groups:Blocked List"
+        } ]
+      }
+    },
+    "profile" : [ "Block_Wireless_Access" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/a0cdd350-6ac0-47ef-8390-63e2acf6c0f1",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "e31bdeb1-e1e3-423f-b1c1-acc5e6e67efd",
+      "name" : "Profiled Cisco IP Phones",
+      "hitCounts" : 0,
+      "rank" : 1,
+      "state" : "enabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAttributes",
+        "isNegate" : false,
+        "dictionaryName" : "IdentityGroup",
+        "attributeName" : "Name",
+        "operator" : "equals",
+        "dictionaryValue" : null,
+        "attributeValue" : "Endpoint Identity Groups:Profiled:Cisco-IP-Phone"
+      }
+    },
+    "profile" : [ "Cisco_IP_Phones" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/e31bdeb1-e1e3-423f-b1c1-acc5e6e67efd",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "91df9e50-da5d-4b56-90e9-844cbbfb0053",
+      "name" : "Profiled Non Cisco IP Phones",
+      "hitCounts" : 0,
+      "rank" : 2,
+      "state" : "enabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionReference",
+        "isNegate" : false,
+        "name" : "Non_Cisco_Profiled_Phones",
+        "id" : "c9260a79-93b2-4f07-92d6-dde2f20fe70f",
+        "description" : "Default condition used to match Non Cisco IP Phones"
+      }
+    },
+    "profile" : [ "Non_Cisco_IP_Phones" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/91df9e50-da5d-4b56-90e9-844cbbfb0053",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "5637a31c-ecf6-45e6-bfa2-13dc5482777e",
+      "name" : "Unknown_Compliance_Redirect",
+      "hitCounts" : 0,
+      "rank" : 3,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Network_Access_Authentication_Passed",
+          "id" : "6935acc9-72ef-4b91-b291-621deeaa8234",
+          "description" : "Default condition used for basic Network Access requiring that authentication was successful."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Compliance_Unknown_Devices",
+          "id" : "b46d1651-5cd7-410e-a9ee-45a49c44bf66",
+          "description" : "Default condition for unknown compliance devices"
+        } ]
+      }
+    },
+    "profile" : [ "Cisco_Temporal_Onboard" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/5637a31c-ecf6-45e6-bfa2-13dc5482777e",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "c28981fe-d1d6-480e-959d-894909a6437a",
+      "name" : "NonCompliant_Devices_Redirect",
+      "hitCounts" : 0,
+      "rank" : 4,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Network_Access_Authentication_Passed",
+          "id" : "6935acc9-72ef-4b91-b291-621deeaa8234",
+          "description" : "Default condition used for basic Network Access requiring that authentication was successful."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Non_Compliant_Devices",
+          "id" : "c9b05872-e77f-47a7-824c-26cfe14a8d61",
+          "description" : "Default condition for non-compliant devices"
+        } ]
+      }
+    },
+    "profile" : [ "Cisco_Temporal_Onboard" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/c28981fe-d1d6-480e-959d-894909a6437a",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "dd50a74a-0d00-49c4-853e-1382daee21f1",
+      "name" : "Compliant_Devices_Access",
+      "hitCounts" : 0,
+      "rank" : 5,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Network_Access_Authentication_Passed",
+          "id" : "6935acc9-72ef-4b91-b291-621deeaa8234",
+          "description" : "Default condition used for basic Network Access requiring that authentication was successful."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Compliant_Devices",
+          "id" : "6a09f85e-ae08-4516-bb17-5eca4243a28e",
+          "description" : "Default condition for compliant devices"
+        } ]
+      }
+    },
+    "profile" : [ "PermitAccess" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/dd50a74a-0d00-49c4-853e-1382daee21f1",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "16e07926-13f4-4d39-8790-d092471afc6a",
+      "name" : "Employee_EAP-TLS",
+      "hitCounts" : 0,
+      "rank" : 6,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wireless_802.1X",
+          "id" : "195babd4-83a8-4334-8c4b-71f11c54cbc3",
+          "description" : "A condition to match 802.1X based authentication requests from wireless LAN controllers, according to the corresponding 802.1x attributes defined in the device profile."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "BYOD_is_Registered",
+          "id" : "28682dd3-a83c-4bb3-9820-8f765df84505",
+          "description" : "Default condition for BYOD flow for any device that has passed the NSP process"
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "EAP-TLS",
+          "id" : "542f03e4-d2a9-43fa-b179-4a130665f577",
+          "description" : "Default condition for BYOD flow for any device that has passed the NSP process"
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "MAC_in_SAN",
+          "id" : "8ea56942-7b56-4b9b-9fe2-404657e0aae8",
+          "description" : "Default condition for BYOD flow for any device that has passed the NSP process"
+        } ]
+      }
+    },
+    "profile" : [ "PermitAccess" ],
+    "securityGroup" : "BYOD",
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/16e07926-13f4-4d39-8790-d092471afc6a",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "ca2f613b-9b01-4bea-9cb0-d3d006da1cef",
+      "name" : "Employee_Onboarding",
+      "hitCounts" : 0,
+      "rank" : 7,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wireless_802.1X",
+          "id" : "195babd4-83a8-4334-8c4b-71f11c54cbc3",
+          "description" : "A condition to match 802.1X based authentication requests from wireless LAN controllers, according to the corresponding 802.1x attributes defined in the device profile."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "EAP-MSCHAPv2",
+          "id" : "640bfaed-e942-4c03-b920-6e9a9c99ec1f",
+          "description" : "Default condition for BYOD Onboarding flow"
+        } ]
+      }
+    },
+    "profile" : [ "NSP_Onboard" ],
+    "securityGroup" : "BYOD",
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/ca2f613b-9b01-4bea-9cb0-d3d006da1cef",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "abdff134-e8f3-4280-a102-1dfec1616eac",
+      "name" : "Wi-Fi_Guest_Access",
+      "hitCounts" : 0,
+      "rank" : 8,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionAndBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Guest_Flow",
+          "id" : "4eb7c662-8d4a-4eb8-8b2a-54deb936b351",
+          "description" : "Default condition for guest flow"
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wireless_MAB",
+          "id" : "39d82143-54cf-4b3e-aac4-1aab6a2713cb",
+          "description" : "A condition to match MAC Authentication Bypass service based authentication requests from wireless LAN controllers, according to the corresponding MAB attributes defined in the device profile."
+        } ]
+      }
+    },
+    "profile" : [ "PermitAccess" ],
+    "securityGroup" : "Guests",
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/abdff134-e8f3-4280-a102-1dfec1616eac",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "15e4c859-923f-4a6a-99af-923ed70f8427",
+      "name" : "Wi-Fi_Redirect_to_Guest_Login",
+      "hitCounts" : 0,
+      "rank" : 9,
+      "state" : "disabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionReference",
+        "isNegate" : false,
+        "name" : "Wireless_MAB",
+        "id" : "39d82143-54cf-4b3e-aac4-1aab6a2713cb",
+        "description" : "A condition to match MAC Authentication Bypass service based authentication requests from wireless LAN controllers, according to the corresponding MAB attributes defined in the device profile."
+      }
+    },
+    "profile" : [ "Cisco_WebAuth" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/15e4c859-923f-4a6a-99af-923ed70f8427",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "29a027d9-8064-4462-80a6-a73726236f8e",
+      "name" : "Basic_Authenticated_Access",
+      "hitCounts" : 1,
+      "rank" : 10,
+      "state" : "enabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionReference",
+        "isNegate" : false,
+        "name" : "Network_Access_Authentication_Passed",
+        "id" : "6935acc9-72ef-4b91-b291-621deeaa8234",
+        "description" : "Default condition used for basic Network Access requiring that authentication was successful."
+      }
+    },
+    "profile" : [ "PermitAccess" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/29a027d9-8064-4462-80a6-a73726236f8e",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : true,
+      "id" : "bae48885-1630-4a66-87cb-1f7ce2023e8c",
+      "name" : "Default",
+      "hitCounts" : 0,
+      "rank" : 11,
+      "state" : "enabled",
+      "condition" : null
+    },
+    "profile" : [ "DenyAccess" ],
+    "securityGroup" : null,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authorization/bae48885-1630-4a66-87cb-1f7ce2023e8c",
+      "type" : "application/json"
+    }
+  } ]
+}

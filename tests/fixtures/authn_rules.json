@@ -1,0 +1,99 @@
+{
+  "version" : "1.0.0",
+  "response" : [ {
+    "rule" : {
+      "default" : false,
+      "id" : "c6064102-41f1-46e7-85b5-205c7202cb8c",
+      "name" : "MAB",
+      "hitCounts" : 0,
+      "rank" : 0,
+      "state" : "enabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionOrBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wired_MAB",
+          "id" : "36052685-28cb-436e-a3e8-5b3a9e51d1c2",
+          "description" : "A condition to match MAC Authentication Bypass service based authentication requests from switches, according to the corresponding MAB attributes defined in the device profile."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wireless_MAB",
+          "id" : "39d82143-54cf-4b3e-aac4-1aab6a2713cb",
+          "description" : "A condition to match MAC Authentication Bypass service based authentication requests from wireless LAN controllers, according to the corresponding MAB attributes defined in the device profile."
+        } ]
+      }
+    },
+    "identitySourceName" : "Internal Endpoints",
+    "ifAuthFail" : "REJECT",
+    "ifUserNotFound" : "CONTINUE",
+    "ifProcessFail" : "DROP",
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authentication/c6064102-41f1-46e7-85b5-205c7202cb8c",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : false,
+      "id" : "a93dfb56-1bc8-4838-b4f7-49faff7b08c2",
+      "name" : "Dot1X",
+      "hitCounts" : 3,
+      "rank" : 1,
+      "state" : "enabled",
+      "condition" : {
+        "link" : null,
+        "conditionType" : "ConditionOrBlock",
+        "isNegate" : false,
+        "children" : [ {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wired_802.1X",
+          "id" : "58f909ca-7df3-4abd-bf52-f53769a2471c",
+          "description" : "A condition to match 802.1X based authentication requests from switches, according to the corresponding 802.1x attributes defined in the device profile."
+        }, {
+          "link" : null,
+          "conditionType" : "ConditionReference",
+          "isNegate" : false,
+          "name" : "Wireless_802.1X",
+          "id" : "195babd4-83a8-4334-8c4b-71f11c54cbc3",
+          "description" : "A condition to match 802.1X based authentication requests from wireless LAN controllers, according to the corresponding 802.1x attributes defined in the device profile."
+        } ]
+      }
+    },
+    "identitySourceName" : "All_User_ID_Stores",
+    "ifAuthFail" : "REJECT",
+    "ifUserNotFound" : "REJECT",
+    "ifProcessFail" : "DROP",
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authentication/a93dfb56-1bc8-4838-b4f7-49faff7b08c2",
+      "type" : "application/json"
+    }
+  }, {
+    "rule" : {
+      "default" : true,
+      "id" : "c454d9d8-5356-4163-bc3a-f197f6dec736",
+      "name" : "Default",
+      "hitCounts" : 1,
+      "rank" : 2,
+      "state" : "enabled",
+      "condition" : null
+    },
+    "identitySourceName" : "All_User_ID_Stores",
+    "ifAuthFail" : "REJECT",
+    "ifUserNotFound" : "REJECT",
+    "ifProcessFail" : "DROP",
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2/authentication/c454d9d8-5356-4163-bc3a-f197f6dec736",
+      "type" : "application/json"
+    }
+  } ]
+}

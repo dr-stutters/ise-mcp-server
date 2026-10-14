@@ -1,0 +1,20 @@
+{
+  "version" : "1.0.0",
+  "response" : [ {
+    "default" : true,
+    "id" : "d303293e-f4ba-4578-80eb-a01249fc5ae2",
+    "name" : "Default",
+    "description" : "Default policy set",
+    "hitCounts" : 4,
+    "rank" : 0,
+    "state" : "enabled",
+    "condition" : null,
+    "serviceName" : "Default Network Access",
+    "isProxy" : false,
+    "link" : {
+      "rel" : "self",
+      "href" : "https://192.0.2.10/api/v1/policy/network-access/policy-set/d303293e-f4ba-4578-80eb-a01249fc5ae2",
+      "type" : "application/json"
+    }
+  } ]
+}

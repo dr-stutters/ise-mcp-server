@@ -1,0 +1,150 @@
+"""Hand-curated ISE knowledge used by the troubleshooting tools.
+
+MnT's FailureReasons catalog only covers failure codes. Execution steps (11001, 15041, ...) are
+message codes from the ISE Live Log details; the common ones are listed here (best effort).
+"""
+
+from __future__ import annotations
+
+STEP_CODES: dict[str, str] = {
+    "11001": "Received RADIUS Access-Request",
+    "11002": "Returned RADIUS Access-Accept",
+    "11003": "Returned RADIUS Access-Reject",
+    "11004": "Received RADIUS Accounting-Request",
+    "11005": "Returned RADIUS Accounting-Response",
+    "11006": "Returned RADIUS Access-Challenge",
+    "11017": "RADIUS created a new session",
+    "11018": "RADIUS is re-using an existing session",
+    "11027": "Detected Host Lookup UseCase (Service-Type = Call Check (10))",
+    "11117": "Generated a new session ID",
+    "11507": "Extracted EAP-Response/Identity",
+    "12300": "Prepared EAP-Request proposing PEAP with challenge",
+    "12500": "Prepared EAP-Request proposing EAP-TLS with challenge",
+    "12502": "Extracted EAP-Response with EAP-TLS challenge-response; EAP-TLS negotiated",
+    "12800": "Extracted first TLS record; TLS handshake started",
+    "12816": "TLS handshake succeeded",
+    "15004": "Matched rule",
+    "15006": "Matched Default Rule",
+    "15008": "Evaluating Service Selection Policy",
+    "15012": "Selected Access Service",
+    "15013": "Selected Identity Source",
+    "15016": "Selected Authorization Profile",
+    "15036": "Evaluating Authorization Policy",
+    "15041": "Evaluating Identity Policy",
+    "15048": "Queried PIP (policy information point) for an attribute",
+    "15049": "Evaluating Policy Group",
+    "22016": "Identity sequence completed iterating the identity stores",
+    "22037": "Authentication Passed",
+    "22056": "Subject not found in the applicable identity store(s)",
+    "22057": "The advanced option configured for a failed authentication request is used",
+    "22058": "The advanced option configured for an unknown user is used",
+    "22061": "The 'Reject' advanced option is configured in case of a failed authentication request",
+    "22063": "Wrong password; the 'Reject' advanced option applies",
+    "22072": "Selected identity source sequence",
+    "22080": "New accounting session created in Session cache",
+    "22081": "Max sessions policy passed",
+    "22083": "Accounting session updated in Session cache",
+    "22085": "Session cache entry closed (Accounting Stop)",
+    "24209": "Looking up Endpoint in Internal Endpoints identity store",
+    "24210": "Looking up User in Internal Users identity store",
+    "24211": "Found Endpoint in Internal Endpoints identity store",
+    "24212": "Found User in Internal Users identity store",
+    "24216": "The user is not found in the internal users identity store",
+    "24217": "The host is not found in the internal endpoints identity store",
+    "24344": "RPC Logon request failed (Active Directory)",
+    "24402": "User authentication against Active Directory succeeded",
+    "24430": "Authenticating user against Active Directory",
+    "24715": "ISE has not confirmed locally previous successful machine authentication for user in AD",
+    "5200": "Authentication succeeded",
+    "5400": "Authentication failed",
+    "5405": "RADIUS request dropped",
+    "5434": "Endpoint conducted several failed authentications of the same scenario",
+    "5440": "Endpoint abandoned EAP session and started new",
+}
+
+# Likely cause / next step for the most common failure codes, phrased for an operator. The MnT
+# catalog's own cause/resolution text is added alongside this.
+FAILURE_HINTS: dict[str, dict[str, str]] = {
+    "11007": {
+        "likely": "ISE has no network device (NAD) for the RADIUS source IP.",
+        "check": "ise_get_nad with the NAS IP; add the switch/WLC as a NAD (ise_create_nad).",
+    },
+    "11036": {
+        "likely": "Message-Authenticator invalid: the RADIUS shared secret on the NAD and in ISE differ.",
+        "check": "Re-enter the shared secret on both sides (ise_update_nad).",
+    },
+    "5411": {
+        "likely": "The supplicant stopped responding (often the client rejected the ISE EAP certificate).",
+        "check": "Check the client trusts the CA of the ISE EAP certificate (ise_list_certificates).",
+    },
+    "12321": {
+        "likely": "The client rejected the ISE EAP certificate during PEAP.",
+        "check": "Ensure clients trust the issuer of the EAP system certificate (ise_list_certificates).",
+    },
+    "12514": {
+        "likely": "EAP-TLS handshake failed: the client rejected the ISE certificate or vice versa.",
+        "check": "Check certificate chains on both sides (ise_list_certificates kind=trusted).",
+    },
+    "15039": {
+        "likely": "An authorization rule matched whose profile is DenyAccess (or the default rule denies).",
+        "check": "Inspect the matched policy set's authorization rules (ise_get_policy_set).",
+    },
+    "22040": {
+        "likely": "Wrong password for an internal user.",
+        "check": "Verify the user (ise_get_internal_user), reset the password, check it is enabled.",
+    },
+    "22056": {
+        "likely": "The username/MAC is not in any identity store the authentication rule searched.",
+        "check": "For users: ise_get_internal_user / AD join point. For MAB: the endpoint must exist "
+        "(ise_endpoint_360) or the rule's 'If user not found' should be CONTINUE.",
+    },
+    "24408": {
+        "likely": "Active Directory rejected the password.",
+        "check": "Have the user reset their AD password; check account lockout.",
+    },
+    "24415": {
+        "likely": "User authentication against Active Directory failed: the AD join point is unreachable.",
+        "check": "Check ISE's join to AD (ise_list_identity_sources) and DNS/time sync.",
+    },
+    "15024": {
+        "likely": "PAP is not allowed by the policy set's Allowed Protocols.",
+        "check": "Check the policy set's allowed protocols (ise_list_allowed_protocols).",
+    },
+    "12001": {
+        "likely": "The authentication method is not allowed in the selected Allowed Protocols service.",
+        "check": "Check the allowed protocols of the matched policy set (ise_list_allowed_protocols).",
+    },
+    "22044": {
+        "likely": "The identity policy rule's identity source failed (e.g. certificate profile mismatch).",
+        "check": "Check the authentication rule and identity source sequence (ise_get_policy_set).",
+    },
+    "5440": {
+        "likely": "The endpoint abandoned the EAP session (supplicant timeout or misconfiguration).",
+        "check": "Check the client supplicant and that it trusts the ISE certificate.",
+    },
+    "24206": {
+        "likely": "The internal user is disabled.",
+        "check": "Enable the user (ise_update_internal_user).",
+    },
+    "22041": {
+        "likely": "The internal user account is disabled.",
+        "check": "Enable it (ise_update_internal_user).",
+    },
+    "24419": {
+        "likely": "The user's AD account is locked or disabled.",
+        "check": "Unlock/enable the account in Active Directory.",
+    },
+}
+
+
+def decode_steps(steps: str | None, catalog: dict[str, dict[str, object]] | None = None) -> list[str]:
+    """'11001,11017,...' -> ['11001 Received RADIUS Access-Request', ...]; failure codes are looked up in
+    the MnT failure-reason catalog when given."""
+    out = []
+    for code in (steps or "").split(","):
+        code = code.strip()
+        if not code:
+            continue
+        text = STEP_CODES.get(code) or str((catalog or {}).get(code, {}).get("reason") or "")
+        out.append(f"{code} {text}".strip())
+    return out
