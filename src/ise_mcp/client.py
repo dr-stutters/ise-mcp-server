@@ -115,13 +115,15 @@ class IseApp:
         params: dict[str, Any] | None = None,
         json: Any = None,
         expect: Any = "json",
+        timeout: float | None = None,  # noqa: ASYNC109 - per-request HTTP timeout
     ) -> Any:
         """An ERS call that transparently handles CSRF protection: when ISE answers a write with 403
-        and mentions CSRF, fetch a token (X-CSRF-Token: fetch) and retry once."""
+        and mentions CSRF, fetch a token (X-CSRF-Token: fetch) and retry once. `timeout` overrides the
+        HTTP timeout for slow writes (e.g. SXP objects take 30-60 s on ISE 3.5)."""
         headers = {"X-CSRF-Token": self._csrf} if self._csrf and method.upper() != "GET" else None
         try:
             out = await self.ers.request(
-                method, path, params=params, json=json, headers=headers, expect=expect
+                method, path, params=params, json=json, headers=headers, expect=expect, timeout=timeout
             )
         except AuthError as e:
             if method.upper() == "GET" or "csrf" not in str(e).lower():
@@ -134,6 +136,7 @@ class IseApp:
                 json=json,
                 headers={"X-CSRF-Token": self._csrf or ""},
                 expect=expect,
+                timeout=timeout,
             )
         if method.upper() != "GET":
             # Any ERS write can rename or remove objects that the cached name->id maps hold.
@@ -184,10 +187,16 @@ class IseApp:
         lowered = [r for r in items if isinstance(r, dict) and str(r.get("name", "")).lower() == name.lower()]
         return lowered[0] if len(lowered) == 1 else None
 
-    async def ers_create(self, resource: str, body: dict[str, Any]) -> dict[str, Any]:
+    async def ers_create(
+        self,
+        resource: str,
+        body: dict[str, Any],
+        *,
+        timeout: float | None = None,  # noqa: ASYNC109 - per-request HTTP timeout
+    ) -> dict[str, Any]:
         """POST and return {"id": ..., "location": ...} from the Location header."""
         resp: httpx.Response = await self.ers_request(
-            "POST", f"/ers/config/{self._res(resource)}", json=body, expect="response"
+            "POST", f"/ers/config/{self._res(resource)}", json=body, expect="response", timeout=timeout
         )
         loc = resp.headers.get("Location", "")
         out: dict[str, Any] = {"id": loc.rstrip("/").rsplit("/", 1)[-1] if loc else None}
