@@ -92,6 +92,14 @@ def mock_deployment(mock: respx.MockRouter) -> None:
     mock.get("/ers/config/activedirectory/ad1").respond(
         json={"ERSActiveDirectory": {"id": "ad1", "name": "corp", "domain": "corp.example"}}
     )
+    mock_adminuser(mock, "Super Admin")
+
+
+def mock_adminuser(mock: respx.MockRouter, groups: str, name: str = "admin") -> None:
+    mock.get("/ers/config/adminuser").respond(json=ers_page([{"id": "au1", "name": name}]))
+    mock.get("/ers/config/adminuser/au1").respond(
+        json={"AdminUser": {"id": "au1", "name": name, "adminGroups": groups}}
+    )
 
 
 async def test_health_multi_node(mock: respx.MockRouter) -> None:
@@ -151,6 +159,7 @@ async def test_health_standalone_evaluation_no_backup(mock: respx.MockRouter) ->
         }
     )
     mock.get("/ers/config/activedirectory").respond(json=ers_page([]))
+    mock_adminuser(mock, "Super Admin")
     out = await call_tool(make_server(), "ise_deployment_health")
     out = out if isinstance(out, dict) else json.loads(str(out))
     text = json.dumps(out["findings"])
@@ -177,9 +186,32 @@ async def test_health_survives_area_errors(mock: respx.MockRouter) -> None:
         mock.get(path).respond(500, json={"message": "down"})
     mock.get("/ers/config/activedirectory").respond(json=ers_page([{"id": "ad1", "name": "corp"}]))
     mock.get("/ers/config/activedirectory/ad1").respond(500, json={})
+    mock.get("/ers/config/adminuser").respond(500, json={})
     out = await call_tool(make_server(), "ise_deployment_health")
     out = out if isinstance(out, dict) else json.loads(str(out))
     assert out["summary"]["high"] >= 1
     text = json.dumps(out["findings"])
     assert "Could not read the deployment nodes" in text
     assert "no node list" in text and "1 AD join point(s): corp" in text
+    assert not out.get("server_privilege")  # ERS adminuser unreadable: reported silently
+    assert not [f for f in out["findings"] if f["area"] == "privilege"]
+
+
+async def test_health_flags_over_privileged_account(mock: respx.MockRouter) -> None:
+    mock_deployment(mock)  # account 'admin' is Super Admin
+    out = await call_tool(make_server(), "ise_deployment_health")  # read-only server
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["server_privilege"]["admin_groups"] == ["Super Admin"]
+    assert out["server_privilege"]["tiers_enabled"] == ["read"]
+    priv = [f for f in out["findings"] if f["area"] == "privilege"]
+    assert priv and priv[0]["severity"] == "medium" and "Super Admin" in priv[0]["finding"]
+
+
+async def test_health_privilege_ok_when_dangerous_enabled(mock: respx.MockRouter) -> None:
+    mock_deployment(mock)
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
+    out = await call_tool(server, "ise_deployment_health")
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["server_privilege"]["tiers_enabled"] == ["read", "write", "dangerous"]
+    priv = [f for f in out["findings"] if f["area"] == "privilege"]
+    assert priv and priv[0]["severity"] == "info"

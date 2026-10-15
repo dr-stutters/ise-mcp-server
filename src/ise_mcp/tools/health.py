@@ -261,6 +261,60 @@ async def check_ad(app: IseApp, f: Findings) -> dict[str, Any]:
     return {"join_points": rows}
 
 
+# Smallest built-in admin group set per server tier (see docs/least-privilege.md). The server's own
+# account should hold the groups for the tiers it enables and no more.
+TIER_GROUPS: dict[str, set[str]] = {
+    "read": {"ERS Operator", "Read Only Admin"},
+    "write": {"ERS Admin", "Policy Admin", "Network Device Admin", "Identity Admin", "MnT Admin"},
+    "dangerous": {"Super Admin"},
+}
+
+
+async def check_admin_privilege(app: IseApp, f: Findings) -> dict[str, Any]:
+    """Report the server's own ISE admin account and the RBAC admin groups it holds, and flag when it
+    is more privileged than the enabled tiers need (least-privilege, I16). ERS GET-only, so it works
+    for every tier. Returns {} silently if ERS can't be read (another finding already covers that)."""
+    name = app.settings.username
+    if not name:
+        return {}
+    try:
+        page = await app.ers_pager.fetch_page(app.ers, "/ers/config/adminuser", limit=200)
+        match = next((r for r in page.items if str(r.get("name", "")).lower() == name.lower()), None)
+        if match is None:
+            return {}
+        detail = await app.ers_get("adminuser", str(match["id"]))
+    except (UpstreamError, NotFound, KeyError):
+        return {}
+    raw = detail.get("adminGroups") if isinstance(detail, dict) else None
+    parts = [str(g) for g in raw] if isinstance(raw, list) else str(raw or "").split(",")
+    groups = {g.strip() for g in parts if g.strip()}
+    enabled = ["read"]
+    if app.settings.mcp_enable_writes:
+        enabled.append("write")
+    if app.settings.mcp_enable_dangerous:
+        enabled.append("dangerous")
+    out = {"account": name, "admin_groups": sorted(groups), "tiers_enabled": enabled}
+    if "Super Admin" in groups and "dangerous" not in enabled:
+        f.add(
+            "medium",
+            "privilege",
+            f"The server account '{name}' is a Super Admin, but only {', '.join(enabled)} "
+            "tier(s) are enabled.",
+            "Use a least-privilege account (docs/least-privilege.md): "
+            f"{', '.join(sorted(g for t in enabled for g in TIER_GROUPS[t]))}.",
+        )
+    elif "dangerous" in enabled and "Super Admin" not in groups:
+        f.add(
+            "info",
+            "privilege",
+            f"The server account '{name}' holds {', '.join(sorted(groups)) or 'no admin groups'}; "
+            "the dangerous tier (CoA, ANC, node/persona and certificate changes) needs Super Admin.",
+        )
+    else:
+        f.add("info", "privilege", f"The server account '{name}' holds: {', '.join(sorted(groups))}.")
+    return out
+
+
 async def system_certs(app: IseApp, hosts: list[str], f: Findings) -> list[dict[str, Any]]:
     async def one(host: str) -> list[dict[str, Any]]:
         try:
@@ -297,7 +351,9 @@ def register(reg: ToolRegistrar) -> None:
         present); patch and hot-patch level; last configuration backup (flagged when failed or older
         than 7 days) and repositories; system certificates per node (expired, expiring within
         cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags
-        evaluation licences and days left); AD join points. Use it weekly or before a change.
+        evaluation licences and days left); AD join points; and the server's own ISE admin account
+        and RBAC groups, flagged when more privileged than the enabled tiers need (I16). Use it weekly
+        or before a change.
         Details: ise_list_nodes, ise_list_patches, ise_get_backup_status, ise_list_certificates,
         ise_get_license_status."""
         app: IseApp = get_client(ctx)
@@ -315,7 +371,9 @@ def register(reg: ToolRegistrar) -> None:
         )
         node_rows = check_nodes(nodes, pan_ha, f)
         hosts = [str(n["hostname"]) for n in node_rows if n.get("hostname")]
-        certs, ad = await asyncio.gather(system_certs(app, hosts, f), check_ad(app, f))
+        certs, ad, privilege = await asyncio.gather(
+            system_certs(app, hosts, f), check_ad(app, f), check_admin_privilege(app, f)
+        )
         if not hosts:
             f.add("medium", "certificates", "System certificates were not checked: no node list.")
         sections: dict[str, Any] = {
@@ -325,6 +383,7 @@ def register(reg: ToolRegistrar) -> None:
             "certificates_flagged": check_certs(certs, f, cert_warn_days),
             "licence": check_license(tiers, evaluation, smart, f),
             "active_directory": ad,
+            "server_privilege": privilege,
         }
         sections["certificates_checked"] = len(certs)
         summary = f.summary()
