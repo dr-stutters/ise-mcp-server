@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.0 (2026-10-15)
+
+Production gate (I16, I18, I19) and a robustness fix (I20), on core v0.9.0. I17 (version matrix) is
+skipped: only ISE 3.5 is available in the lab.
+
+### Added
+- **I16 least-privilege roles** (`docs/least-privilege.md`): built-in ISE RBAC admin groups per server
+  tier (read = ERS Operator + Read Only Admin; write = ERS Admin + functional groups; dangerous =
+  Super Admin). `scripts/seed_lab.py --least-privilege` creates `mcp-test-ro`/`-rw`/`-admin`
+  (idempotent; on the known ISE 3.5 admin-user-500 bug it prints the GUI steps).
+  `tests/live/test_least_privilege.py` runs the read tier as the read-only account (core G3 helper).
+- **I16 privilege check:** `ise_deployment_health` reports the server's own account and RBAC groups
+  (`server_privilege`) and flags a Super Admin account when only read/write tiers are enabled.
+- **I18 safety rails** (on core G7): protect-lists `ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` /
+  `ISE_PROTECT_NADS` (a CoA, ANC or NAD-delete on a protected target is blocked); a shared-port guard
+  that blocks `port_bounce`/`port_shutdown` (CoA or ANC) on a switch port with more than one live
+  session unless `ISE_COA_ALLOW_SHARED_PORT=true`; `blast_radius` on CoA, ANC, bulk-endpoint and
+  node-service tools for `MCP_MAX_BLAST_RADIUS`.
+- **I19 multi-node:** `ise_status` reports a `deployment` summary (mode, PAN, primary/secondary MnT
+  with a failover note, PSNs, unreachable nodes, ERS port) and the surface-routing model. CoA/ANC are
+  routed to the PSN that owns each session (`acs_server`). Distributed handling is mock-tested (the
+  lab is standalone); a second deployment is a core instance (`ISE_INSTANCES`, G10).
+
+### Fixed
+- **I20:** retry ISE's transient policy-API HTTP 500 (Hibernate/JDBC: "could not prepare statement",
+  "two open Sessions", deadlocks) on reads and idempotent writes (GET/PUT/DELETE, not POST) with
+  backoff. Core only retries 502/503/504; these intermittent 500s failed the live suite.
+
+### Changed
+- Core pinned to `v0.9.0` (per-user roles G2, safety rails G7, metrics G5, several appliances G10).
+  `ISE_ERS_PORT` is per-instance (a second ISE may serve ERS on 9060).
+
 ## 0.4.0 (2026-10-15)
 
 Roadmap "Next" (I8–I10). I11 (AD join points) moved to Later: the lab ISE can't resolve a lab AD domain
