@@ -89,7 +89,8 @@ async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
     assert ise["deployment"]["config_node_pan"] == "ise" and ise["deployment"]["psns"] == ["ise"]
     assert all(ise["surfaces"][s]["ok"] for s in ("openapi", "ers", "mnt"))
     assert "warning" not in ise
-    assert ise["server_version"] not in ("", None)
+    assert "server_version" not in ise  # core reports it under server
+    assert out["server"]["server_version"] == importlib.metadata.version("ise-mcp-server")
     assert out["server"]["core_version"] == importlib.metadata.version("stutters-mcp-core")
 
 

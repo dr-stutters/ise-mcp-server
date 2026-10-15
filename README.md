@@ -55,6 +55,7 @@ git clone https://github.com/dr-stutters/ise-mcp-server && cd ise-mcp-server
 cp .env.example .env && chmod 600 .env     # set ISE_URL, ISE_USERNAME, ISE_PASSWORD
 uv sync
 uv run ise-mcp-server check                # prints ise_status as JSON; exit 1 if ISE is unreachable
+uv run ise-mcp-server config               # effective settings and where each came from (no ISE contact)
 ```
 
 ## Configuration

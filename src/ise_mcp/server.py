@@ -68,6 +68,8 @@ SPEC = ServerSpec(
     product="Cisco ISE",
     env_prefix="ISE_",
     instructions=INSTRUCTIONS,
+    spec_search_example="network device group",
+    spec_path_example="/ers/config/networkdevice/{id}",
 )
 
 
