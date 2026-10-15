@@ -286,3 +286,72 @@ async def test_status_distributed_no_secondary_mnt(mock: respx.MockRouter) -> No
     dep = out["ise"]["deployment"]
     assert dep["monitoring"]["secondary"] is None
     assert any("no failover" in n for n in dep["notes"])
+
+
+async def test_db_transient_500_retried_on_get(mock: respx.MockRouter) -> None:
+    import httpx as _httpx
+
+    from ise_mcp.client import IseApp
+
+    calls = {"n": 0}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _httpx.Response(
+                500, json={"response": {"message": "could not prepare statement [SQL ...]"}}
+            )
+        return _httpx.Response(200, json={"response": [{"id": "s1", "name": "Wired"}]})
+
+    mock.get("/api/v1/policy/network-access/policy-set").mock(side_effect=handler)
+    app = IseApp(make_settings())
+    try:
+        out = await app.openapi.get("/api/v1/policy/network-access/policy-set")
+    finally:
+        await app.aclose()
+    assert calls["n"] == 2  # first 500 retried, second ok
+    assert out["response"][0]["name"] == "Wired"
+
+
+async def test_db_transient_500_not_retried_on_post(mock: respx.MockRouter) -> None:
+    import httpx as _httpx
+    from stutters_mcp_core import UpstreamError
+
+    from ise_mcp.client import IseApp
+
+    calls = {"n": 0}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        calls["n"] += 1
+        return _httpx.Response(500, json={"message": "could not prepare statement"})
+
+    mock.post("/api/v1/policy/network-access/policy-set").mock(side_effect=handler)
+    app = IseApp(make_settings())
+    try:
+        with pytest.raises(UpstreamError):
+            await app.openapi.post("/api/v1/policy/network-access/policy-set", {"x": 1})
+    finally:
+        await app.aclose()
+    assert calls["n"] == 1  # POST (create) is never replayed
+
+
+async def test_non_db_500_not_retried(mock: respx.MockRouter) -> None:
+    import httpx as _httpx
+    from stutters_mcp_core import UpstreamError
+
+    from ise_mcp.client import IseApp
+
+    calls = {"n": 0}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        calls["n"] += 1
+        return _httpx.Response(500, json={"response": {"message": "Internal validation error"}})
+
+    mock.get("/api/v1/policy/network-access/policy-set").mock(side_effect=handler)
+    app = IseApp(make_settings())
+    try:
+        with pytest.raises(UpstreamError):
+            await app.openapi.get("/api/v1/policy/network-access/policy-set")
+    finally:
+        await app.aclose()
+    assert calls["n"] == 1  # a non-transient 500 is surfaced at once

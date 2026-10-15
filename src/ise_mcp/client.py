@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 import re
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as dist_version
@@ -18,7 +19,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
-from stutters_mcp_core import AuthError, InvalidRequest, NotFound, UpstreamError, ValidationFailed
+from stutters_mcp_core import AuthError, InvalidRequest, NotFound, UpstreamError, ValidationFailed, metrics
 from stutters_mcp_core.http import ApiClient, BasicAuth, PageNumber, RateLimiter, default_error_detail
 
 from ise_mcp.config import Settings
@@ -30,6 +31,48 @@ ERS_JSON = {"Accept": "application/json", "Content-Type": "application/json"}
 SURFACES = ("openapi", "ers", "mnt")
 SAFE_MNT_PATH = re.compile(r"^[A-Za-z0-9_\-/.:@%+]+$")
 SAFE_RESOURCE = re.compile(r"^[a-z]+$")
+
+# ISE's policy API intermittently returns HTTP 500 with a Hibernate/JDBC message under concurrency
+# ("could not prepare statement", "two open Sessions", JDBC/transaction errors). The request never ran,
+# so retrying a read or an idempotent write is safe. Core only retries 502/503/504, so ISE adds this.
+ISE_DB_TRANSIENT = re.compile(
+    r"could not prepare statement|two open Sessions|could not (execute|extract|open)|"
+    r"JDBCException|CannotCreateTransaction|TransactionException|HibernateException|"
+    r"deadlock|Lock wait timeout|database is (locked|not available)|ORA-\d|Connection is not available",
+    re.I,
+)
+# Methods safe to replay on a transient DB 500: reads and ISE's full-object idempotent writes. POST
+# (create) is excluded so a retry can't make a duplicate.
+RETRYABLE_DB_METHODS = frozenset({"GET", "PUT", "DELETE"})
+
+
+def _db_backoff(attempt: int) -> float:
+    base: float = min(4.0, 0.5 * 2**attempt)
+    jitter: float = random.random() * 0.25  # noqa: S311 - jitter, not crypto
+    return base + jitter
+
+
+class IseApiClient(ApiClient):
+    """An ApiClient that also retries ISE's transient policy-API 500 (Hibernate/JDBC) on reads and
+    idempotent writes, with backoff. Everything else is the core client's behaviour."""
+
+    db_retries: int = 3
+
+    async def request(self, method: str, path: str, **kw: Any) -> Any:
+        attempts = self.db_retries if method.upper() in RETRYABLE_DB_METHODS else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                return await super().request(method, path, **kw)
+            except UpstreamError as e:
+                if attempt < attempts and ISE_DB_TRANSIENT.search(str(e)):
+                    log.warning(
+                        "ISE transient DB error on %s %s; retry %d/%d", method, path, attempt, attempts - 1
+                    )
+                    metrics.record_retry(self.product, "ise_db")
+                    await asyncio.sleep(_db_backoff(attempt))
+                    continue
+                raise
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 def server_version() -> str:
@@ -91,9 +134,9 @@ class IseApp:
             "limiter": limiter,
             "transport": transport,
         }
-        self.openapi = ApiClient(settings.url, error_detail=openapi_error_detail, **common)
+        self.openapi = IseApiClient(settings.url, error_detail=openapi_error_detail, **common)
         self.ers_url = with_port(settings.url, settings.ers_port)
-        self.ers = ApiClient(self.ers_url, headers=ERS_JSON, error_detail=ers_error_detail, **common)
+        self.ers = IseApiClient(self.ers_url, headers=ERS_JSON, error_detail=ers_error_detail, **common)
         self.mnt = ApiClient(
             settings.url, headers={"Accept": "application/xml"}, error_detail=mnt_error_detail, **common
         )
