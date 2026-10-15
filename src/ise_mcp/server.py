@@ -14,6 +14,7 @@ from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
     activity,
+    certs,
     dangerous,
     device_admin,
     endpoint_bulk,
@@ -89,6 +90,7 @@ def create_server(
             policy_edit.register,
             device_admin.register,
             sxp.register,
+            certs.register,
             dangerous.register,
             workflows.register,
         ],
