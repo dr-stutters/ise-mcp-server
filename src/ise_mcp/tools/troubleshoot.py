@@ -74,6 +74,37 @@ async def is_rejected(app: IseApp, mac: str) -> bool:
     return any(mac.upper() in str(i).upper() for i in items or [])
 
 
+def compact_steps(steps: list[str]) -> list[str]:
+    """Execution steps with a description only (bare codes say nothing), adjacent repeats collapsed."""
+    out: list[str] = []
+    for step in steps:
+        if " " not in str(step).strip():
+            continue
+        if out and out[-1] == step:
+            continue
+        out.append(step)
+    return out
+
+
+def coa_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Failed CoA records: count, latest, and what they mean (they are not login failures)."""
+    latest = rows[0]
+    reason = latest.get("failure_reason") or latest.get("reply") or ""
+    if latest.get("failure_reason") and not str(latest["failure_reason"]).startswith("11215"):
+        meaning = "ISE reports this CoA failure reason; it concerns the CoA, not the login."
+    elif "CoANAK" in str(latest.get("reply") or ""):
+        meaning = (
+            "The switch answered the CoA with a NAK: usually the session no longer exists on the switch "
+            "(the endpoint left or re-authenticated), or the switch refuses that CoA type."
+        )
+    else:
+        meaning = (
+            "ISE got no answer to the CoA: check 'aaa server radius dynamic-author' (client = this PSN, "
+            "same key) on the switch, the NAD's CoA port in ISE (default 1700), and UDP 1700 in between."
+        )
+    return {"count": len(rows), "latest": latest.get("time"), "reason": reason, "meaning": meaning}
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Why did authentication fail?")
     async def ise_why_auth_failed(
@@ -138,16 +169,36 @@ def register(reg: ToolRegistrar) -> None:
             ]
             return object_result(out)
 
-        rows = [auth_row(r) for r in records]
+        all_rows = [auth_row(r) for r in records]
+        # CoA / dynamic-authorization results live in the same MnT history but aren't logins.
+        login_idx = [i for i, r in enumerate(all_rows) if r.get("kind") != "coa"]
+        coa_rows = [r for r in all_rows if r.get("kind") == "coa"]
+        records = [records[i] for i in login_idx]
+        rows = [all_rows[i] for i in login_idx]
         fails = [i for i, r in enumerate(rows) if r["result"] == "FAIL"]
         passes = [i for i, r in enumerate(rows) if r["result"] == "PASS"]
-        out["attempts_in_window"] = {"total": len(rows), "failed": len(fails), "passed": len(passes)}
+        out["attempts_in_window"] = {"logins": len(rows), "failed": len(fails), "passed": len(passes)}
+        coa_failed = [r for r in coa_rows if r["result"] == "FAIL"]
+        if coa_rows:
+            out["attempts_in_window"]["coa_records"] = len(coa_rows)
+        if coa_failed:
+            out["coa_failures"] = coa_summary(coa_failed)
+        if not rows:
+            out["verdict"] = (
+                f"No login attempt for {mac_n} in the last {minutes} minutes, only "
+                f"{len(coa_rows)} CoA (change-of-authorization) record(s): ISE tried to reauthenticate or "
+                "disconnect an older session. The endpoint has not authenticated since: check that it "
+                "is connected and that the switch port runs MAB/802.1X."
+            )
+            return object_result(out)
         latest = rows[0]
         if not fails:
             out["verdict"] = (
-                f"No failures: the latest attempt PASSED at {latest.get('time')} "
+                f"No login failures: the latest login PASSED at {latest.get('time')} "
                 f"(authorization profile {latest.get('authz_profiles')})."
             )
+            if coa_failed:
+                out["verdict"] += " Only CoA requests failed (see coa_failures); they don't block login."
             out["latest_attempt"] = latest
             session = await _safe(find_session(app, mac=mac_n))
             if isinstance(session, dict) and session.get("matched_policy"):
@@ -156,6 +207,8 @@ def register(reg: ToolRegistrar) -> None:
                 out["rules_using_profile"] = await _safe(
                     rules_using_profile(app, str(latest["authz_profiles"]).split(",")[0].strip())
                 )
+            if session is None:
+                out["session"] = "no active session now (the endpoint disconnected or the session ended)"
             return object_result(out)
 
         idx = fails[0]
@@ -164,17 +217,22 @@ def register(reg: ToolRegistrar) -> None:
         code = (info or {}).get("code", "")
         if idx == 0:
             out["verdict"] = (
-                f"The latest attempt FAILED at {failed.get('time')}: {failed.get('failure_reason')}."
+                f"The latest login FAILED at {failed.get('time')}: {failed.get('failure_reason')}."
             )
         else:
             out["verdict"] = (
-                f"The latest attempt PASSED at {latest.get('time')}; the most recent failure was at "
+                f"The latest login PASSED at {latest.get('time')}; the most recent failure was at "
                 f"{failed.get('time')}: {failed.get('failure_reason')}."
             )
         failed.pop("failure_reason", None)
         out["failure"] = info
         out["failed_attempt"] = failed
-        out["steps"] = decode_steps(records[idx].get("execution_steps"), await app.failure_reasons())
+        if idx == 0:
+            out["steps"] = compact_steps(
+                decode_steps(records[idx].get("execution_steps"), await app.failure_reasons())
+            )
+        else:
+            out["steps"] = "omitted (the latest login passed); ise_get_auth_history include_steps=true"
 
         checks: dict[str, Any] = {}
         nas_ip = failed.get("nas_ip")
@@ -228,7 +286,10 @@ def register(reg: ToolRegistrar) -> None:
         out: dict[str, Any] = {"mac": mac_n}
         if isinstance(endpoint, dict) and "error" not in endpoint:
             row = endpoint_row(endpoint, groups if isinstance(groups, dict) and "error" not in groups else {})
-            row["profile"] = await _safe(profile_name(app, row.pop("profile_id", None)))
+            pid = row.pop("profile_id", None)
+            row["profile"] = (
+                await _safe(profile_name(app, pid)) if pid else "not profiled (no profiler match yet)"
+            )
             out["endpoint"] = row
         else:
             out["endpoint"] = endpoint or "not in the ISE endpoint database"
@@ -245,6 +306,6 @@ def register(reg: ToolRegistrar) -> None:
         if rejected is True:
             out["rejected"] = (
                 "ISE lists this endpoint as rejected (Context Visibility > Rejected Endpoints); release it "
-                "with ise_api_call PUT /api/v1/endpoint/releaseRejectedEndpoints"
+                "with ise_release_rejected_endpoint"
             )
         return object_result(out)
