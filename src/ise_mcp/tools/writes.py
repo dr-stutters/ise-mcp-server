@@ -31,6 +31,7 @@ from stutters_mcp_core.formatting import MASK, is_secret_key
 
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, ers_resolve, is_uuid, normalize_mac
+from ise_mcp.tools.endpoint_bulk import check_custom_values, custom_attribute_defs
 from ise_mcp.tools.network import resolve_nad
 from ise_mcp.tools.policy import rules_using_profile
 
@@ -353,12 +354,17 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             bool, Field(description="Pin the group (profiling won't move the endpoint to another group)")
         ] = True,
         description: Annotated[str | None, Field(description="Free-text description")] = None,
+        custom_attributes: Annotated[
+            dict[str, str] | None,
+            Field(description="Custom attribute values to set, by name (see ise_list_custom_attributes)"),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
-        """Add an endpoint by MAC or change an existing one's identity group and description, e.g. to
-        allow-list a printer for MAB or put a device into a group that policy matches on. Preview-first
-        with a diff for existing endpoints. Takes effect at the endpoint's next authentication (use the
-        CoA tools to force it)."""
+        """Add an endpoint by MAC or change an existing one's identity group, description and custom
+        attribute values, e.g. to allow-list a printer for MAB or tag a device for a policy that matches
+        'EndPoints:<attribute>'. Preview-first with a diff for existing endpoints; unknown or mistyped
+        custom attributes are refused. For many endpoints use ise_bulk_endpoints. Takes effect at the
+        endpoint's next authentication (use the CoA tools to force it)."""
         app: IseApp = get_client(ctx)
         mac_n = normalize_mac(mac)
         gid = None
@@ -376,12 +382,19 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             patch["staticGroupAssignment"] = static_group
         if description is not None:
             patch["description"] = description
+        blockers: list[str] = []
+        if custom_attributes:
+            blockers = check_custom_values(custom_attributes, await custom_attribute_defs(app))
+            patch["customAttributes"] = {"customAttributes": dict(custom_attributes)}
+        if existing and not patch:
+            raise InvalidRequest("Nothing to change: give group, description or custom_attributes")
         if existing:
             desired = deep_merge(existing, patch)
             plan = Plan(
                 f"Update endpoint {mac_n}",
                 details={"changes": field_changes(existing, desired)},
                 fingerprint=fingerprint(existing),
+                blockers=blockers,
             )
 
             async def apply() -> Any:
@@ -394,7 +407,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "staticGroupAssignment": False,
                 **patch,
             }
-            plan = Plan(f"Create endpoint {mac_n}", details=body)
+            plan = Plan(f"Create endpoint {mac_n}", details=body, blockers=blockers)
 
             async def apply() -> Any:
                 return await ers_post(app, "endpoint", "ERSEndPoint", body)
@@ -402,7 +415,13 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         return await preview_or_apply(
             ctx,
             tool="ise_set_endpoint",
-            args={"mac": mac_n, "group": group, "static_group": static_group, "description": description},
+            args={
+                "mac": mac_n,
+                "group": group,
+                "static_group": static_group,
+                "description": description,
+                "custom_attributes": custom_attributes,
+            },
             confirm=confirm,
             plan=plan,
             apply=apply,
