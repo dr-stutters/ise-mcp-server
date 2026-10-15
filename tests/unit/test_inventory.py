@@ -133,19 +133,19 @@ async def test_policy_set_with_rules(mock: respx.MockRouter) -> None:
     assert out["authorization"][-1]["condition"] == "DEFAULT"
 
 
-async def test_authz_profile_lookup_without_filter_support(mock: respx.MockRouter) -> None:
-    mock.get("/ers/config/authorizationprofile", params={"filter": "name.EQ.PermitAccess"}).respond(
-        400, json={"ERSResponse": {"messages": [{"title": "The filter field 'name' is not supported"}]}}
+async def test_authz_profile_lookup_by_name_path(mock: respx.MockRouter) -> None:
+    # ERS has no name filter for authz profiles and listing them is slow: GET .../name/{name}.
+    mock.get("/ers/config/authorizationprofile/name/PermitAccess").respond(
+        json={"AuthorizationProfile": {"id": "p1", "name": "PermitAccess"}}
     )
-    mock.get("/ers/config/authorizationprofile").respond(
-        json=ers_page([{"id": "p1", "name": "PermitAccess"}, {"id": "p2", "name": "DenyAccess"}])
-    )
+    listing = mock.get("/ers/config/authorizationprofile")
     mock.get("/ers/config/authorizationprofile/p1").respond(
         json={"AuthorizationProfile": {"id": "p1", "name": "PermitAccess", "accessType": "ACCESS_ACCEPT"}}
     )
     mock.get("/api/v1/policy/network-access/policy-set").respond(json={"response": []})
     out = await call_tool(make_server(), "ise_get_authz_profile", {"profile": "PermitAccess"})
     assert out["accessType"] == "ACCESS_ACCEPT"
+    assert not listing.called
 
 
 async def test_egress_matrix(mock: respx.MockRouter) -> None:
@@ -285,3 +285,41 @@ async def test_patches(mock: respx.MockRouter) -> None:
     out = as_json(await call_tool(make_server(), "ise_list_patches", {"response_format": "json"}))
     assert out["ise_version"] == "3.5.0.527"
     assert [r["name"] for r in out["results"]] == ["Patch 4", "HP1"]
+
+
+async def test_egress_matrix_effective_default(mock: respx.MockRouter) -> None:
+    await test_egress_matrix(mock)  # same mocks; the reverse pair has no explicit cell
+    out = as_json(
+        await call_tool(
+            make_server(),
+            "ise_get_egress_matrix",
+            {"source": "Dev_Servers", "destination": "Employees", "response_format": "json"},
+        )
+    )
+    assert out["results"] == []
+    assert out["effective"]["applies"] == "ANY-ANY default"
+    assert out["effective"]["sgacls"] == ["Permit IP"] and out["effective"]["default_rule"] == "PERMIT_IP"
+    out = as_json(
+        await call_tool(
+            make_server(),
+            "ise_get_egress_matrix",
+            {"source": "Nope", "destination": "Employees", "response_format": "json"},
+        )
+    )
+    assert "No SGT name contains 'Nope'" in out["effective"]
+
+
+async def test_authz_profile_name_path_404_falls_back_to_scan(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/authorizationprofile/name/permitaccess").respond(404, json={})
+    mock.get("/ers/config/authorizationprofile", params={"filter": "name.EQ.permitaccess"}).respond(
+        400, json={"ERSResponse": {"messages": [{"title": "The filter field 'name' is not supported"}]}}
+    )
+    mock.get("/ers/config/authorizationprofile").respond(
+        json=ers_page([{"id": "p1", "name": "PermitAccess"}])
+    )
+    mock.get("/ers/config/authorizationprofile/p1").respond(
+        json={"AuthorizationProfile": {"id": "p1", "name": "PermitAccess", "accessType": "ACCESS_ACCEPT"}}
+    )
+    mock.get("/api/v1/policy/network-access/policy-set").respond(json={"response": []})
+    out = await call_tool(make_server(), "ise_get_authz_profile", {"profile": "permitaccess"})
+    assert out["accessType"] == "ACCESS_ACCEPT"

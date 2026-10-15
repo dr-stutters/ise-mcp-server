@@ -94,9 +94,12 @@ async def nad_filter(app: IseApp, nad: str | None) -> NadFilter | None:
         # Match the NAS IP only; `found` just confirms the address belongs to a NAD.
         del found
         return NadFilter(ip, [ipaddress.ip_network(ip)], None)
-    found = await resolve_nad(app, key)
+    found = await resolve_nad(app, key, fuzzy=True)
     nets = nad_networks(found)
-    return NadFilter(str(found.get("name")), nets, str(found.get("name")))
+    label = str(found.get("name"))
+    if found.get("resolved_from"):
+        label += f" (partial match for {key!r})"
+    return NadFilter(label, nets, str(found.get("name")))
 
 
 async def auth_list(app: IseApp, start: datetime, end: datetime) -> list[dict[str, Any]]:

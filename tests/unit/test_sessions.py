@@ -65,10 +65,28 @@ async def test_active_sessions(mock: respx.MockRouter) -> None:
     mock.get("/admin/API/mnt/Session/ProfilerCount").respond(
         text=xml("<sessionCount><count>3</count></sessionCount>")
     )
+    mock.get("/ers/config/networkdevice", params={"filter": "ipaddress.EQ.192.0.2.50"}).respond(
+        json=ers_page([{"id": NAD_ID, "name": "mcp-test-radius-client"}])
+    )
+    mock.get(f"/ers/config/networkdevice/{NAD_ID}").respond(json=fixture_json("ers_networkdevice.json"))
     out = text_of(await call_tool(make_server(), "ise_list_active_sessions", {"response_format": "json"}))
     assert out["active_sessions"] == "1"
     assert out["profiler_sessions"] == "3"
-    assert out["results"][0]["calling_station_id"] == MAC_OK
+    assert out["results"][0]["mac"] == MAC_OK
+    assert out["results"][0]["nad"] == "mcp-test-radius-client"
+    # a NAD given by (part of) its name filters by its IPs
+    mock.get("/ers/config/networkdevice", params={"filter": "name.EQ.radius-client"}).respond(
+        json=ers_page([])
+    )
+    mock.get("/ers/config/networkdevice", params={"filter": "name.CONTAINS.radius-client"}).respond(
+        json=ers_page([{"id": NAD_ID, "name": "mcp-test-radius-client"}])
+    )
+    out = text_of(
+        await call_tool(
+            make_server(), "ise_list_active_sessions", {"nad": "radius-client", "response_format": "json"}
+        )
+    )
+    assert out["returned"] == 1 and out["nad_filter"].startswith("mcp-test-radius-client (partial match")
 
 
 async def test_active_sessions_empty(mock: respx.MockRouter) -> None:
@@ -256,3 +274,25 @@ def test_compact_reply_keeps_semicolons_in_values() -> None:
 
     raw = "{Reply-Message=Access denied; call helpdesk; Class=CACS:1; State=abc; x; Filter-Id=f1; }"
     assert compact_reply(raw) == "Reply-Message=Access denied; call helpdesk; Filter-Id=f1"
+
+
+async def test_get_nad_fuzzy_and_candidates(mock: respx.MockRouter) -> None:
+    from fastmcp.exceptions import ToolError
+
+    mock.get("/ers/config/networkdevice", params={"filter": "name.EQ.radius"}).respond(json=ers_page([]))
+    mock.get("/ers/config/networkdevice", params={"filter": "name.CONTAINS.radius"}).respond(
+        json=ers_page([{"id": NAD_ID, "name": "mcp-test-radius-client"}])
+    )
+    mock.get(f"/ers/config/networkdevice/{NAD_ID}").respond(json=fixture_json("ers_networkdevice.json"))
+    out = text_of(await call_tool(make_server(), "ise_get_nad", {"device": "radius"}))
+    assert "using 'mcp-test-radius-client'" in out["resolved_from"]
+    # two candidates: not guessed, both named in the error
+    mock.get("/ers/config/networkdevice", params={"filter": "name.EQ.sw"}).respond(json=ers_page([]))
+    mock.get("/ers/config/networkdevice", params={"filter": "name.CONTAINS.sw"}).respond(
+        json=ers_page([{"id": "a", "name": "sw1"}, {"id": "b", "name": "sw2"}])
+    )
+    try:
+        await call_tool(make_server(), "ise_get_nad", {"device": "sw"})
+        raise AssertionError("expected an error")
+    except ToolError as e:
+        assert "'sw1', 'sw2'" in str(e)

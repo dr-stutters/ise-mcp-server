@@ -22,17 +22,10 @@ from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
 from ise_mcp.knowledge import FAILURE_HINTS, decode_steps
-from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, normalize_mac, parse_ip
+from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, gather_limited, normalize_mac, parse_ip
 from ise_mcp.xmlutil import as_list
 
-SESSION_COLUMNS = [
-    "user_name",
-    "calling_station_id",
-    "framed_ip_address",
-    "nas_ip_address",
-    "server",
-    "audit_session_id",
-]
+SESSION_COLUMNS = ["user", "mac", "ip", "nas_ip", "nad", "psn", "audit_session_id"]
 
 
 COA_MESSAGE_CODES = {"5417", "5205"}
@@ -195,10 +188,16 @@ async def find_session(
     }
     if any(policy.values()):
         session["matched_policy"] = _clean(policy)
+    for dup in _ATTR_NOISE:
+        attrs.pop(dup, None)
     if attrs:
         session["attributes"] = attrs
-    for noisy in ("execution_steps",):
+    for noisy in _SESSION_NOISE:
         session.pop(noisy, None)
+    if "response" in session:
+        reply = compact_reply(session.pop("response"))
+        if reply:
+            session["reply"] = reply
     if not session.get("selected_azn_profiles") and not session.get("authentication_method"):
         # MnT returns the session's latest event, which can be accounting or a CoA without the auth result.
         session["note"] = (
@@ -207,6 +206,37 @@ async def find_session(
         )
     return session
 
+
+# Session fields that repeat another field or are internal ids/counters of no use to an operator.
+_SESSION_NOISE = (
+    "execution_steps",
+    "orig_calling_station_id",
+    "cpmsession_id",
+    "auth_acsview_timestamp",
+    "acct_acsview_timestamp",
+    "auth_id",
+    "acct_id",
+    "acct_delay_time",
+    "acct_authentic",
+    "response_time",
+)
+# other_attr_string keys already shown elsewhere (matched_policy, mac, session id) or internal.
+_ATTR_NOISE = (
+    "ISEPolicySetName",
+    "IdentityPolicyMatchedRule",
+    "AuthorizationPolicyMatchedRule",
+    "IdentitySelectionMatchedRule",
+    "CPMSessionID",
+    "AcsSessionID",
+    "EndPointMACAddress",
+    "OriginalUserName",
+    "RADIUS Username",
+    "CiscoAVPair",
+    "NetworkDeviceProfileId",
+    "DTLSSupport",
+    "IsThirdPartyDeviceFlow",
+    "Framed-MTU",
+)
 
 _NOISY_ATTRS = {"StepLatency", "StepData", "EnableFlag", "TotalAuthenLatency", "ClientLatency"}
 
@@ -228,19 +258,62 @@ def parse_other_attrs(text: Any) -> dict[str, Any]:
     return out
 
 
+async def _nad_names(app: IseApp, ips: set[str], cap: int = 20) -> dict[str, str]:
+    """{NAS IP: NAD name} for the NAS IPs on a page: exact-IP lookups in parallel, then one pass over
+    the (cached) NAD list for subnets; 'no NAD covers it' when nothing does."""
+    import ipaddress
+
+    from ise_mcp.tools.network import all_nads, nad_networks
+
+    async def exact(ip: str) -> tuple[str, str | None]:
+        try:
+            page = await app.ers_pager.fetch_page(
+                app.ers, "/ers/config/networkdevice", {"filter": f"ipaddress.EQ.{ip}"}, limit=2
+            )
+        except UpstreamError:
+            return ip, None
+        names = [str(i.get("name")) for i in page.items if isinstance(i, dict) and i.get("name")]
+        return ip, (names[0] if names else None)
+
+    wanted = sorted(ips)[:cap]
+    out = {ip: name for ip, name in await gather_limited(wanted, exact, limit=4) if name}
+    missing = [ip for ip in wanted if ip not in out]
+    if missing:
+        try:
+            nads, _ = await all_nads(app)
+        except UpstreamError:
+            return out
+        for ip in missing:
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            best: tuple[int, str] | None = None
+            for nad in nads:
+                for net in nad_networks(nad):
+                    if addr.version == net.version and addr in net and (not best or net.prefixlen > best[0]):
+                        best = (net.prefixlen, str(nad.get("name")))
+            out[ip] = best[1] if best else "no NAD covers it"
+    return out
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="List active sessions")
     async def ise_list_active_sessions(
         ctx: Context,
         user: Annotated[str | None, Field(description="Filter: username contains (case-insensitive)")] = None,
-        nas_ip: Annotated[str | None, Field(description="Filter: sessions on this network device IP")] = None,
+        nad: Annotated[
+            str | None,
+            Field(description="Filter: sessions through this NAD: name (or part of it), or a NAS IP"),
+        ] = None,
+        nas_ip: Annotated[str | None, Field(description="Deprecated: use nad")] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
         offset: Annotated[int, Field(ge=0)] = 0,
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
-        """List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAD IP, PSN, audit session id),
-        plus total, posture and profiler session counts. An empty list is normal when no endpoint is
-        connected. Drill into one with ise_find_session or ise_endpoint_360."""
+        """List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN,
+        audit session id), plus total, posture and profiler session counts. An empty list is normal
+        when no endpoint is connected. Drill into one with ise_find_session or ise_endpoint_360."""
         app: IseApp = get_client(ctx)
 
         async def count(path: str) -> dict[str, Any]:
@@ -257,12 +330,36 @@ def register(reg: ToolRegistrar) -> None:
         rows = [s for s in as_list(active.get("activeSession")) if isinstance(s, dict)]
         if user:
             rows = [r for r in rows if user.lower() in str(r.get("user_name") or "").lower()]
-        if nas_ip:
-            rows = [r for r in rows if r.get("nas_ip_address") == nas_ip.strip()]
+        flt = None
+        nad = nad or nas_ip
+        if nad:
+            from ise_mcp.tools.activity import nad_filter  # activity imports this module
+
+            flt = await nad_filter(app, nad)
+            if flt is not None:
+                f = flt
+                rows = [r for r in rows if f.matches(r.get("nas_ip_address"))]
+        page = page_of(rows, limit=limit, offset=offset)
+        names = await _nad_names(
+            app, {str(r.get("nas_ip_address")) for r in page.items if r.get("nas_ip_address")}
+        )
+        rows = [
+            {
+                "user": r.get("user_name"),
+                "mac": r.get("calling_station_id"),
+                "ip": r.get("framed_ip_address"),
+                "nas_ip": r.get("nas_ip_address"),
+                "nad": names.get(str(r.get("nas_ip_address"))),
+                "psn": r.get("server"),
+                "audit_session_id": r.get("audit_session_id"),
+            }
+            for r in rows
+        ]
         extra = {
             "active_sessions": active.get("noOfActiveSession", len(rows)),
             "posture_sessions": posture.get("count"),
             "profiler_sessions": profiler.get("count"),
+            "nad_filter": flt.label if flt else None,
         }
         return list_result(
             page_of([_clean(r) for r in rows], limit=limit, offset=offset),

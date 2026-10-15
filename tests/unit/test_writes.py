@@ -168,8 +168,8 @@ async def test_confirm_refused_when_target_changed(mock: respx.MockRouter) -> No
 
 
 async def test_delete_profile_blocked_when_in_use(mock: respx.MockRouter) -> None:
-    mock.get("/ers/config/authorizationprofile", params={"filter": "name.EQ.P1"}).respond(
-        json=ers_page([{"id": "p1", "name": "P1"}])
+    mock.get("/ers/config/authorizationprofile/name/P1").respond(
+        json={"AuthorizationProfile": {"id": "p1", "name": "P1"}}
     )
     mock.get("/ers/config/authorizationprofile/p1").respond(
         json={"AuthorizationProfile": {"id": "p1", "name": "P1"}}

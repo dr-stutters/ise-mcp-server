@@ -54,6 +54,38 @@ async def sgt_names(app: IseApp) -> dict[str, str]:
 MATRIX_CELL_CAP = 2000
 
 
+async def _default_cell(
+    app: IseApp, sgts: dict[str, str], acls: dict[str, str], source: str, destination: str
+) -> dict[str, Any] | str:
+    """What applies to a source/destination pair with no explicit cell: the ANY-ANY default."""
+    known = {n.lower() for n in sgts.values()}
+    missing = [n for n in (source, destination) if not any(n.lower() in k for k in known)]
+    if missing:
+        return f"No SGT name contains {', '.join(repr(m) for m in missing)} (see ise_list_sgts)"
+    # ERS can't filter cells by name; the default cell's source SGT name is 'ANY'.
+    page = await ers_list(
+        app,
+        "egressmatrixcell",
+        filters=["sgtSrcName.EQ.ANY"],
+        limit=20,
+        offset=0,
+        detail=True,
+        detail_cap=None,
+    )
+    cell = next((c for c in page.items if isinstance(c, dict) and c.get("name") == "ANY-ANY"), None)
+    if cell is None:
+        return "No explicit cell, and the ANY-ANY default cell could not be read"
+    return {
+        "source": source,
+        "destination": destination,
+        "explicit_cell": False,
+        "applies": "ANY-ANY default",
+        "sgacls": [acls.get(str(a), a) for a in cell.get("sgacls") or []],
+        "default_rule": cell.get("defaultRule"),
+        "status": cell.get("matrixCellStatus"),
+    }
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="List security group tags")
     async def ise_list_sgts(
@@ -104,7 +136,8 @@ def register(reg: ToolRegistrar) -> None:
     ) -> ToolResult:
         """The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs
         applied, the final catch-all rule (permit/deny), and cell status. Answers 'can Employees talk to
-        Development_Servers?'. Cells not listed fall back to the ANY-ANY default."""
+        Development_Servers?'. Cells not listed fall back to the ANY-ANY default; given both a source
+        and a destination with no cell, the result's 'effective' field shows that default."""
         app: IseApp = get_client(ctx)
         # Narrow server-side by SGT name first so a large matrix isn't fetched cell by cell.
         filters = []
@@ -149,12 +182,14 @@ def register(reg: ToolRegistrar) -> None:
         if destination:
             rows = [r for r in rows if destination.lower() in str(r["destination"]).lower()]
         rows.sort(key=lambda r: (r["source"] != "ANY", str(r["source"]), str(r["destination"])))
-        extra = None
+        extra: dict[str, Any] | None = None
         if not cells.complete:
             extra = {
                 "partial": f"Only the first {MATRIX_CELL_CAP} cells were read; filter by source or "
                 "destination for the rest."
             }
+        if source and destination and not rows:
+            extra = {**(extra or {}), "effective": await _default_cell(app, sgts, acls, source, destination)}
         return list_result(
             page_of(rows, limit=limit, offset=offset),
             fmt=response_format,

@@ -107,7 +107,7 @@ async def test_session_lookups_tolerate_empty(server: FastMCP[Any]) -> None:
         assert "found" in out
     if sessions["results"]:
         first = sessions["results"][0]
-        out = await call(server, "ise_find_session", {"mac": first["calling_station_id"]})
+        out = await call(server, "ise_find_session", {"mac": first["mac"]})
         assert out["found"] is True
 
 

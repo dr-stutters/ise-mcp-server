@@ -52,7 +52,7 @@ def register(reg: ToolRegistrar) -> None:
     @reg.read(title="List profiler profiles")
     async def ise_list_profiler_profiles(
         ctx: Context,
-        name_contains: Annotated[
+        name: Annotated[
             str | None, Field(description="Filter to profiles whose name contains this (case-insensitive)")
         ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
@@ -61,10 +61,10 @@ def register(reg: ToolRegistrar) -> None:
     ) -> ToolResult:
         """List endpoint profiler profiles (ISE ships ~900, e.g. 'Apple-Device', 'Cisco-IP-Phone').
         ERS returns name, description and id only; the profiling rules themselves aren't in ERS. Use
-        name_contains to find whether a profile exists and its id (for an EndPoints:EndPointPolicy
+        name to find whether a profile exists and its id (for an EndPoints:EndPointPolicy
         authorization condition). Read-only; create/edit profiler policy via ise_api_call."""
         app: IseApp = get_client(ctx)
-        filters = [f"name.CONTAINS.{name_contains}"] if name_contains else None
+        filters = [f"name.CONTAINS.{name}"] if name else None
         page = await ers_list(app, "profilerprofile", filters=filters, limit=limit, offset=offset)
         return list_result(page, fmt=response_format, columns=["name", "description", "id"])
 

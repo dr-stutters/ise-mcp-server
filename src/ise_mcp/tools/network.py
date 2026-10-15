@@ -98,7 +98,7 @@ async def find_nads_for_ip(app: IseApp, ip: str) -> list[dict[str, Any]]:
     return [h[1] for h in hits]
 
 
-async def resolve_nad(app: IseApp, key: str) -> dict[str, Any]:
+async def resolve_nad(app: IseApp, key: str, *, fuzzy: bool = False) -> dict[str, Any]:
     key = key.strip()
     if ip := parse_ip(key):
         nads = await find_nads_for_ip(app, ip)
@@ -109,7 +109,9 @@ async def resolve_nad(app: IseApp, key: str) -> dict[str, Any]:
                 404,
             )
         return nads[0]
-    return await ers_resolve(app, "networkdevice", key, what="network device", list_tool="ise_list_nads")
+    return await ers_resolve(
+        app, "networkdevice", key, what="network device", list_tool="ise_list_nads", fuzzy=fuzzy
+    )
 
 
 def unmask_flags(nad: dict[str, Any]) -> dict[str, Any]:
@@ -188,7 +190,7 @@ def register(reg: ToolRegistrar) -> None:
         settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. Shared secrets and SNMP
         communities are always masked. Give an IP to answer 'which NAD does this switch match?'."""
         app: IseApp = get_client(ctx)
-        return object_result(unmask_flags(await resolve_nad(app, device)))
+        return object_result(unmask_flags(await resolve_nad(app, device, fuzzy=True)))
 
     @reg.read(title="List network device groups")
     async def ise_list_ndgs(
