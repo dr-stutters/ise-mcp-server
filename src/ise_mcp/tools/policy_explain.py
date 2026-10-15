@@ -42,6 +42,20 @@ async def _authz_entries(app: IseApp, kind: str, ps_id: str, section: str) -> li
     )
 
 
+async def _global_exceptions(app: IseApp, kind: str) -> list[dict[str, Any]]:
+    """Global authorization exceptions (ISE evaluates them before every policy set's rules), ranked."""
+    try:
+        data = await app.openapi.get(f"/api/v1/policy/{kind}/policy-set/global-exception")
+    except (UpstreamError, NotFound):
+        return []
+    entries = data.get("response", data) if isinstance(data, dict) else data
+    rows = [e for e in entries or [] if isinstance(e, dict)]
+    return sorted(
+        rows,
+        key=lambda e: ((e.get("rule") or {}).get("rank") is None, (e.get("rule") or {}).get("rank") or 0),
+    )
+
+
 # Operators this evaluator understands. Everything is compared as a string unless the operator is
 # numeric. ISE operator keys are camelCase in the OpenAPI condition model.
 Result = bool | None  # True = matches, False = doesn't, None = unknown (can't tell)
@@ -317,16 +331,25 @@ def register(reg: ToolRegistrar) -> None:
                 }
             )
 
-        # ISE evaluates local exceptions before the standard authorization rules, so walk them first.
+        # ISE evaluates global exceptions first, then this set's local exceptions, then its rules.
+        global_exc = await _global_exceptions(app, kind)
         exceptions = await _authz_entries(app, kind, str(chosen["id"]), "exception")
         rules = await _authz_entries(app, kind, str(chosen["id"]), "authorization")
         await resolve_references(
-            app, kind, [(e.get("rule") or {}).get("condition") for e in exceptions + rules], library
+            app,
+            kind,
+            [(e.get("rule") or {}).get("condition") for e in global_exc + exceptions + rules],
+            library,
         )
         rule_trace: list[dict[str, Any]] = []
         matched: dict[str, Any] | None = None
         uncertain = uncertain_before
-        for section, entry in [("exception", e) for e in exceptions] + [("authz", e) for e in rules]:
+        ordered = (
+            [("global-exception", e) for e in global_exc]
+            + [("exception", e) for e in exceptions]
+            + [("authz", e) for e in rules]
+        )
+        for section, entry in ordered:
             rule = entry.get("rule") or {}
             if not include_disabled and str(rule.get("state")) == "disabled":
                 continue
@@ -375,9 +398,8 @@ def register(reg: ToolRegistrar) -> None:
                 "set_selection": set_trace or "evaluated only the given policy_set",
                 "authorization": rule_trace,
                 "limits": "Conditions using posture, profiler logical profiles, time/date, identity-store "
-                "group lookups or attributes you didn't supply evaluate to 'unknown'. Local authorization "
-                "exceptions are evaluated (shown with section='exception'); GLOBAL exceptions are not "
-                "fetched, so a global exception could still override this at runtime. This is a "
-                "client-side prediction, not ISE's own evaluation.",
+                "group lookups or attributes you didn't supply evaluate to 'unknown'. Global and local "
+                "authorization exceptions are evaluated first (section='global-exception'/'exception'). "
+                "This is a client-side prediction, not ISE's own evaluation.",
             }
         )
