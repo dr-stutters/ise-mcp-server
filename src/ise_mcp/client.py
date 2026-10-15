@@ -13,8 +13,6 @@ import contextlib
 import logging
 import random
 import re
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as dist_version
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -75,14 +73,6 @@ class IseApiClient(ApiClient):
                     continue
                 raise
         raise AssertionError("unreachable")  # pragma: no cover
-
-
-def server_version() -> str:
-    """This package's installed version ("unknown" when running from an uninstalled tree)."""
-    try:
-        return dist_version("ise-mcp-server")
-    except PackageNotFoundError:
-        return "unknown"
 
 
 def ers_error_detail(body: Any) -> str | None:
@@ -422,7 +412,6 @@ class IseApp:
         out: dict[str, Any] = {
             "version": version,
             "api_user": self.username,
-            "server_version": server_version(),
         }
         if surfaces["ers"].get("patches"):
             out["patches"] = surfaces["ers"]["patches"]

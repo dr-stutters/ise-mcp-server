@@ -560,7 +560,7 @@ wheels = [
 
 [[package]]
 name = "ise-mcp-server"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },
@@ -580,7 +580,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "defusedxml", specifier = ">=0.7.1" },
-    { name = "stutters-mcp-core", git = "https://github.com/dr-stutters/stutters-mcp-core?tag=v0.9.0" },
+    { name = "stutters-mcp-core", git = "https://github.com/dr-stutters/stutters-mcp-core?tag=v0.12.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -1463,8 +1463,8 @@ wheels = [
 
 [[package]]
 name = "stutters-mcp-core"
-version = "0.9.0"
-source = { git = "https://github.com/dr-stutters/stutters-mcp-core?tag=v0.9.0#b8da06e092177ead31cf877fc0463fc2c0049dde" }
+version = "0.12.2"
+source = { git = "https://github.com/dr-stutters/stutters-mcp-core?tag=v0.12.2#ec854c0250e7124ddbfc5188e5972721d5c676f8" }
 dependencies = [
     { name = "fastmcp" },
     { name = "httpx" },

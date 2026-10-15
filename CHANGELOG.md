@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1 (2026-10-15)
+
+### Changed
+- Core bumped to stutters-mcp-core 0.12.2 (0.10-0.12: optional MCP background tasks, per-instance write
+  rules, audit log rotation, per-caller rate limit, `ise-mcp-server config`).
+- `ise_search_spec` / `ise_get_definition` descriptions use ISE examples ('network device group',
+  '/ers/config/networkdevice/{id}') via the new `ServerSpec` options.
+- `ise_status`: the server version is now reported by core as `server.server_version`; the duplicate
+  `ise.server_version` field was removed.
+
 ## 0.7.0 (2026-10-15)
 
 Operator-eyes quality pass: 12 realistic operator tasks were run end to end through the MCP tools
