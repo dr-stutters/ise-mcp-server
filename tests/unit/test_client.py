@@ -85,6 +85,8 @@ async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
     assert ise["nodes"][0]["hostname"] == "ise"
     assert all(ise["surfaces"][s]["ok"] for s in ("openapi", "ers", "mnt"))
     assert "warning" not in ise
+    assert ise["server_version"] not in ("", None)
+    assert out["server"]["core_version"] == "0.3.0"
 
 
 async def test_status_ers_down(mock: respx.MockRouter) -> None:

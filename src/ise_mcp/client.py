@@ -12,6 +12,8 @@ import asyncio
 import contextlib
 import logging
 import re
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as dist_version
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -28,6 +30,14 @@ ERS_JSON = {"Accept": "application/json", "Content-Type": "application/json"}
 SURFACES = ("openapi", "ers", "mnt")
 SAFE_MNT_PATH = re.compile(r"^[A-Za-z0-9_\-/.:@%+]+$")
 SAFE_RESOURCE = re.compile(r"^[a-z]+$")
+
+
+def server_version() -> str:
+    """This package's installed version ("unknown" when running from an uninstalled tree)."""
+    try:
+        return dist_version("ise-mcp-server")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def ers_error_detail(body: Any) -> str | None:
@@ -296,7 +306,11 @@ class IseApp:
         version = surfaces["ers"].get("version") or surfaces["mnt"].get("version")
         if version:
             self._version = str(version)
-        out: dict[str, Any] = {"version": version, "api_user": self.username}
+        out: dict[str, Any] = {
+            "version": version,
+            "api_user": self.username,
+            "server_version": server_version(),
+        }
         if surfaces["ers"].get("patches"):
             out["patches"] = surfaces["ers"]["patches"]
         if surfaces["openapi"].get("nodes"):
