@@ -241,3 +241,17 @@ async def test_anc_port_action_blocked_on_shared_port(mock: respx.MockRouter) ->
     assert preview["status"] == "blocked"
     assert preview["blast_radius"] == 2
     assert any("share port" in b for b in preview["blockers"])
+
+
+async def test_coa_blocked_for_ended_session(mock: respx.MockRouter) -> None:
+    ended = fixture_text("mnt_session.xml").replace(
+        "<acct_status_type>Start</acct_status_type>", "<acct_status_type>Stop</acct_status_type>"
+    )
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=ended)
+    preview, _ = await two_step("ise_coa_reauth", {"mac": MAC})
+    assert preview["status"] == "blocked"
+    assert "ended" in json.dumps(preview["blockers"])
+    async with Client(make_server()) as c:
+        out = (await c.call_tool("ise_find_session", {"mac": MAC})).structured_content
+    assert out["found"] is True and out["active"] is False
+    assert "ENDED" in out["session"]["note"]

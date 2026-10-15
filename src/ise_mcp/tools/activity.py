@@ -130,7 +130,7 @@ async def _session_detail(app: IseApp, row: dict[str, Any]) -> dict[str, Any]:
         s = await find_session(app, mac=str(mac))
     except (UpstreamError, InvalidRequest):
         return row
-    if not s:
+    if not s or s.get("active") is False:
         return {**row, "note": "session no longer active"}
     extra = {
         "nad": s.get("network_device_name"),
