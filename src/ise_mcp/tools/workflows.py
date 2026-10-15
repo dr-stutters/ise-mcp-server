@@ -71,6 +71,7 @@ def register(reg: ToolRegistrar) -> None:
     # Registered after every tool module, so reg.tiers holds the tools this server exposes.
     fix_text = fix_instructions(set(reg.tiers))
     register_quarantine(reg)
+    register_incident_timeline(reg)
 
     @reg.prompt(
         title="Troubleshoot endpoint network access",
@@ -344,3 +345,89 @@ user's approval, and never pass confirm yourself.
    - Verify after undo: the session is re-authorized with the normal profile/SGT (step 4 and 5 checks).
      The CoA can end the session; an 802.1X client normally re-authenticates within a minute, but a
      held supplicant may need a restart (or a port bounce) before a new session shows up."""
+
+
+def register_incident_timeline(reg: ToolRegistrar) -> None:
+    @reg.prompt(
+        title="Incident timeline across ISE, FMC and Catalyst Center",
+        uses=["ise", "fmc", "catc"],
+        example={"mac": "AA:BB:CC:DD:EE:FF"},
+        tools=[
+            "ise_find_session",
+            "ise_endpoint_360",
+            "ise_get_auth_history",
+            "ise_recent_auth_failures",
+            "ise_list_anc_endpoints",
+            "fmc_list_audit_records",
+            "fmc_list_deployments",
+            "fmc_device_health",
+            "catc_device_360",
+            "catc_client_360",
+            "catc_list_events",
+            "catc_list_issues",
+            "catc_list_audit_logs",
+        ],
+    )
+    def ise_incident_timeline(
+        mac: Annotated[str, Field(description="Host MAC address, any notation (best)")] = "",
+        ip: Annotated[str, Field(description="Host IP address, if the MAC is not known")] = "",
+        username: Annotated[str, Field(description="Username, if neither MAC nor IP is known")] = "",
+        minutes: Annotated[
+            int, Field(ge=1, le=10080, description="How far back to look, in minutes")
+        ] = DEFAULT_LOOKBACK_MINUTES,
+    ) -> str:
+        """Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst
+        Center, each queried on demand and merged by timestamp. ISE gives authentications, failures,
+        the live session and ANC (quarantine) state; FMC gives recent config/audit and deployment
+        activity and device health; Catalyst Center gives the client/device 360, events, issues and
+        audit log. Read-only. The FMC and Catalyst Center steps are skipped (noted) if those servers
+        are not connected to this client."""
+        mac, username, ip, _ = _validated(mac, username, ip, "")
+        if not (mac or username or ip):
+            raise InvalidRequest("Give the host's mac, ip or username")
+        who = _who(mac, username, ip)
+        by_mac = f'mac="{mac}"' if mac else "mac=<the MAC from step 1>"
+        finder = f"{tool_ref('ise_find_session')} with " + (
+            f'mac="{mac}"' if mac else f'username="{username}"' if username else f'ip="{ip}"'
+        )
+        return f"""Build an incident timeline for {who} over the last {minutes} minutes. Query each
+source on demand, collect (time, source, event) rows, then present them merged in time order. Every
+tool here is read-only; change nothing. Use UTC and note each source's own clock in the output.
+
+Only this server's tools (ise_*) are certain to exist. The fmc_* tools need the fmc-mcp server and
+the catc_* tools the catc-mcp server to be connected to this client: if a call isn't available, write
+"FMC not connected / Catalyst Center not connected - skipped" for that section and carry on.
+
+1. Identify the host (ISE).
+   - MAC known: use it. Otherwise {finder}; take calling_station_id as the MAC and
+     framed_ip_address as the IP. If there is no session, keep the identifier you were given.
+
+2. ISE events.
+   - {tool_ref("ise_get_auth_history")} with {by_mac} and minutes={minutes}: each authentication
+     (PASS/FAIL, policy set, authz rule, SGT, NAD) is a timeline row at its acs_timestamp.
+   - {tool_ref("ise_recent_auth_failures")} with since_minutes={minutes} (and nad=/user= if known): failures
+     in the window with decoded reasons, for this host and the NAD it uses.
+   - {tool_ref("ise_endpoint_360")} with {by_mac}: profile, identity group, current ANC policy.
+   - {tool_ref("ise_list_anc_endpoints")}: is the host quarantined now (and since when, if shown)?
+
+3. FMC (Firepower) activity - skip with a note if fmc is not connected.
+   - {tool_ref("fmc_list_audit_records")}: config/audit entries in the window (filter by the user or
+     the host IP {ip or "<the IP from step 1>"} where the tool allows); each is a timeline row.
+   - {tool_ref("fmc_list_deployments")}: policy deployments in the window (a deploy can change what
+     the host is allowed to do - line it up against the ISE/CatC events).
+   - {tool_ref("fmc_device_health")}: note any device health change in the window.
+
+4. Catalyst Center activity - skip with a note if catc is not connected.
+   - {tool_ref("catc_client_360")} with the MAC (or {tool_ref("catc_device_360")} for the NAD): client
+     onboarding/health events and the connected device/port.
+   - {tool_ref("catc_list_issues")} and {tool_ref("catc_list_events")}: assurance issues and events
+     for the host or its NAD in the window.
+   - {tool_ref("catc_list_audit_logs")}: operator changes in Catalyst Center in the window.
+
+5. Merge and report.
+   - Order every collected row by time (oldest first). Show: time (UTC), source (ISE/FMC/CatC), event,
+     and the key detail (result, rule, deploy name, issue, who did it).
+   - Call out correlations: e.g. an FMC deploy or a CatC change just before ISE auth failures, or an
+     ANC quarantine lining up with a CatC issue.
+   - End with a short "what happened" summary and the gaps (sources not connected, windows with no
+     data). Suggest next steps as read-only lookups; propose no change without the user asking."""

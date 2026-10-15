@@ -1,6 +1,10 @@
 import pytest
 from fastmcp import Client
-from stutters_mcp_core.testing import assert_prompt_contract, assert_tool_contract
+from stutters_mcp_core.testing import (
+    assert_prompt_contract,
+    assert_tool_contract,
+    load_tool_manifests,
+)
 
 from tests.unit.conftest import make_server
 
@@ -20,20 +24,31 @@ PROMPT_SAMPLES = {
         "fmc_block": "true",
         "switch": "lab/sw1",
     },
+    "ise_incident_timeline": {
+        "mac": "aa:bb:cc:dd:ee:ff",
+        "ip": "10.0.0.5",
+        "username": "alice",
+    },
 }
 KNOWN = {"cml", "ise", "fmc", "catc"}
+# Every fmc_*/catc_* tool a prompt references must exist in that server's manifest (tests/manifests/).
+EXTERNAL = load_tool_manifests("tests/manifests")
 
 
 async def test_contract_all_tiers() -> None:
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
     await assert_tool_contract(server, "ise")
-    await assert_prompt_contract(server, "ise", samples=PROMPT_SAMPLES, known_prefixes=KNOWN)
+    await assert_prompt_contract(
+        server, "ise", samples=PROMPT_SAMPLES, known_prefixes=KNOWN, external_tools=EXTERNAL
+    )
 
 
 async def test_contract_read_only() -> None:
     server = make_server()
     await assert_tool_contract(server, "ise")
-    await assert_prompt_contract(server, "ise", samples=PROMPT_SAMPLES, known_prefixes=KNOWN)
+    await assert_prompt_contract(
+        server, "ise", samples=PROMPT_SAMPLES, known_prefixes=KNOWN, external_tools=EXTERNAL
+    )
 
 
 @pytest.mark.parametrize(
@@ -129,3 +144,27 @@ async def test_quarantine_prompt_rejects_bad_args(args: dict[str, str]) -> None:
     async with Client(make_server()) as c:
         with pytest.raises(Exception):  # noqa: B017 - FastMCP wraps the InvalidRequest
             await c.get_prompt("ise_quarantine_host", args)
+
+
+async def test_incident_timeline_renders() -> None:
+    async with Client(make_server()) as c:
+        r = await c.get_prompt("ise_incident_timeline", {"mac": "aa:bb:cc:dd:ee:ff", "minutes": "120"})
+    text = r.messages[0].content.text  # type: ignore[union-attr]
+    assert "120 minutes" in text
+    assert "since_minutes=120" in text
+    assert "`ise_get_auth_history`" in text and "`fmc_list_deployments`" in text
+    assert "`catc_list_issues`" in text
+    assert "not connected" in text  # FMC/CatC optional, skipped with a note
+    assert 'mac="52:54:00:61:3D:9E"'.lower() not in text.lower()  # uses the given MAC, normalised
+
+
+async def test_incident_timeline_needs_identifier() -> None:
+    async with Client(make_server()) as c:
+        with pytest.raises(Exception, match="mac, ip or username"):
+            await c.get_prompt("ise_incident_timeline", {})
+
+
+async def test_incident_timeline_listed_read_tier() -> None:
+    async with Client(make_server()) as c:  # read-only server
+        names = {p.name for p in await c.list_prompts()}
+    assert "ise_incident_timeline" in names

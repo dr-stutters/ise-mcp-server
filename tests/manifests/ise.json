@@ -3,6 +3,36 @@
   "manifest": 1,
   "prefix": "ise",
   "prompts": {
+    "ise_incident_timeline": {
+      "arguments": [
+        "mac",
+        "ip",
+        "username",
+        "minutes"
+      ],
+      "references": [
+        "ise_find_session",
+        "ise_endpoint_360",
+        "ise_get_auth_history",
+        "ise_recent_auth_failures",
+        "ise_list_anc_endpoints",
+        "fmc_list_audit_records",
+        "fmc_list_deployments",
+        "fmc_device_health",
+        "catc_device_360",
+        "catc_client_360",
+        "catc_list_events",
+        "catc_list_issues",
+        "catc_list_audit_logs"
+      ],
+      "rendered": false,
+      "tier": "read",
+      "uses": [
+        "ise",
+        "fmc",
+        "catc"
+      ]
+    },
     "ise_quarantine_host": {
       "arguments": [
         "reason",
@@ -439,5 +469,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.4.0"
+  "version": "0.5.0"
 }
