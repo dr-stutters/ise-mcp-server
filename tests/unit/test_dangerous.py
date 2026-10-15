@@ -156,3 +156,88 @@ async def test_delete_nad(mock: respx.MockRouter) -> None:
     assert "zzz-secret" not in json.dumps(preview)
     assert "11007" in preview["side_effects"][0]
     assert applied["status"] == "applied" and delete.called
+
+
+ACTIVE_TWO = xml(
+    "<activeList>"
+    "<activeSession><nas_ip_address>192.0.2.50</nas_ip_address>"
+    "<nas_port_id>GigabitEthernet1/0/1</nas_port_id>"
+    "<calling_station_id>02:00:5E:00:00:01</calling_station_id></activeSession>"
+    "<activeSession><nas_ip_address>192.0.2.50</nas_ip_address>"
+    "<nas_port_id>GigabitEthernet1/0/1</nas_port_id>"
+    "<calling_station_id>02:00:5E:00:00:99</calling_station_id></activeSession>"
+    "</activeList>"
+)
+
+
+async def test_coa_reauth_sets_blast_radius_one(mock: respx.MockRouter) -> None:
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=fixture_text("mnt_session.xml"))
+    preview, _ = await two_step("ise_coa_reauth", {"mac": MAC}, apply=False)
+    assert preview["blast_radius"] == 1
+
+
+async def test_coa_blocked_for_protected_mac(mock: respx.MockRouter) -> None:
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=fixture_text("mnt_session.xml"))
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True, protect_macs=MAC)
+    async with Client(server) as c:
+        preview = (await c.call_tool("ise_coa_reauth", {"mac": MAC})).structured_content
+    assert preview["status"] == "blocked"
+    assert any("protected-MAC" in b for b in preview["blockers"])
+
+
+async def test_port_bounce_blocked_on_shared_port(mock: respx.MockRouter) -> None:
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=fixture_text("mnt_session.xml"))
+    mock.get("/admin/API/mnt/Session/ActiveList").respond(text=ACTIVE_TWO)
+    preview, _ = await two_step(
+        "ise_coa_disconnect", {"mac": MAC, "disconnect_type": "port_bounce"}, apply=False
+    )
+    assert preview["status"] == "blocked"
+    assert preview["blast_radius"] == 2
+    assert any("share port" in b for b in preview["blockers"])
+
+
+async def test_port_bounce_allowed_when_opted_in(mock: respx.MockRouter) -> None:
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=fixture_text("mnt_session.xml"))
+    mock.get("/admin/API/mnt/Session/ActiveList").respond(text=ACTIVE_TWO)
+    coa = mock.get(f"/admin/API/mnt/CoA/Disconnect/ise/{MAC}/1/192.0.2.50/10.250.0.11").respond(
+        text=xml('<remoteCoA requestType="disconnect"><results>true</results></remoteCoA>')
+    )
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True, coa_allow_shared_port=True)
+    async with Client(server) as c:
+        preview = (
+            await c.call_tool("ise_coa_disconnect", {"mac": MAC, "disconnect_type": "port_bounce"})
+        ).structured_content
+        assert preview["status"] == "preview" and preview["blast_radius"] == 2
+        applied = (
+            await c.call_tool(
+                "ise_coa_disconnect",
+                {"mac": MAC, "disconnect_type": "port_bounce", "confirm": preview["confirm"]},
+            )
+        ).structured_content
+    assert applied["result"]["coa_acknowledged"] is True and coa.called
+
+
+async def test_coa_blocked_for_protected_nad(mock: respx.MockRouter) -> None:
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=fixture_text("mnt_session.xml"))
+    server = make_server(
+        mcp_enable_writes=True, mcp_enable_dangerous=True, protect_nads="mcp-test-radius-client"
+    )
+    async with Client(server) as c:
+        preview = (await c.call_tool("ise_coa_reauth", {"mac": MAC})).structured_content
+    assert preview["status"] == "blocked"
+    assert any("protected-NAD" in b for b in preview["blockers"])
+
+
+async def test_anc_port_action_blocked_on_shared_port(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/ancpolicy", params={"filter": "name.EQ.PortShut"}).respond(
+        json=ers_page([{"id": "a2", "name": "PortShut"}])
+    )
+    mock.get("/ers/config/ancpolicy/a2").respond(
+        json={"ErsAncPolicy": {"id": "a2", "name": "PortShut", "actions": ["SHUT_DOWN"]}}
+    )
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC}").respond(text=fixture_text("mnt_session.xml"))
+    mock.get("/admin/API/mnt/Session/ActiveList").respond(text=ACTIVE_TWO)
+    preview, _ = await two_step("ise_apply_anc", {"mac": MAC, "policy": "PortShut"}, apply=False)
+    assert preview["status"] == "blocked"
+    assert preview["blast_radius"] == 2
+    assert any("share port" in b for b in preview["blockers"])

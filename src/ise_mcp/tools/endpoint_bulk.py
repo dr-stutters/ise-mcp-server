@@ -327,6 +327,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             blockers=blockers,
             side_effects=side,
             fingerprint=fp,
+            blast_radius=len(todo),  # endpoints changed; bound with MCP_MAX_BLAST_RADIUS (I18)
         )
         method = {"create": "POST", "update": "PUT", "delete": "DELETE"}[action]
 

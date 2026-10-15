@@ -371,6 +371,7 @@ def register(reg: ToolRegistrar) -> None:
             blockers=blockers,
             fingerprint=fingerprint({"roles": current.get("roles"), "services": services}),
             side_effects=side,
+            blast_radius=1,  # one node; operators put this behind MCP_CHANGE_WINDOW (I18)
         )
         body = {"roles": current.get("roles") or [], "services": new}
         return await preview_or_apply(

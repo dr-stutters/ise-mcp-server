@@ -22,6 +22,7 @@ from stutters_mcp_core import (
 
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import anc_assignments, normalize_mac, openapi_all
+from ise_mcp.tools._safety import PORT_ACTIONS, port_coa_guard, protect_blockers
 from ise_mcp.tools.network import nad_summary, resolve_nad
 from ise_mcp.tools.policy import PolicyKind, list_policy_sets, policy_set_rules, resolve_policy_set
 from ise_mcp.tools.sessions import find_session
@@ -112,12 +113,21 @@ def register(reg: ToolRegistrar) -> None:
                 "framed_ip_address",
             )
         }
+        s0 = session or {}
+        blockers += protect_blockers(
+            app.settings,
+            mac=mac_n,
+            user=str(s0.get("user_name") or "") or None,
+            nad=str(s0.get("network_device_name") or "") or None,
+            nad_ips=[str(s0.get("nas_ip_address") or s0.get("device_ip_address") or "")],
+        )
         plan = Plan(
             f"CoA reauth ({reauth_type}) for {mac_n}",
             details=compact(details),
             blockers=blockers,
             fingerprint=session_fingerprint(session),
             side_effects=["The endpoint re-authenticates; brief interruption possible"],
+            blast_radius=1,
         )
 
         async def apply() -> Any:
@@ -170,12 +180,30 @@ def register(reg: ToolRegistrar) -> None:
             "port_bounce": "The switch port goes down and up; everything on it reconnects",
             "port_shutdown": "The switch port is shut down and STAYS down until re-enabled on the switch",
         }
+        side_effects = [side[disconnect_type]]
+        blockers += protect_blockers(
+            app.settings,
+            mac=mac_n,
+            user=str(s.get("user_name") or "") or None,
+            nad=str(s.get("network_device_name") or "") or None,
+            nad_ips=[nas_ip],
+        )
+        if not nas_ip and session:
+            blockers.append("MnT has no NAS IP for this session")
+        # port_bounce / port_shutdown take down every endpoint on the switch port (I18): count them,
+        # report the true blast radius, and block a shared port (uplink/trunk) unless opted in.
+        blast = 1
+        if disconnect_type in ("port_bounce", "port_shutdown"):
+            blast, port_blockers, port_side = await port_coa_guard(app, session, f"A {disconnect_type}")
+            blockers += port_blockers
+            side_effects += port_side
         plan = Plan(
             f"CoA disconnect ({disconnect_type}) for {mac_n}",
             details=compact(details),
-            blockers=blockers + ([] if nas_ip or not session else ["MnT has no NAS IP for this session"]),
+            blockers=blockers,
             fingerprint=session_fingerprint(session),
-            side_effects=[side[disconnect_type]],
+            side_effects=side_effects,
+            blast_radius=blast,
         )
 
         async def apply() -> Any:
@@ -221,21 +249,40 @@ def register(reg: ToolRegistrar) -> None:
                     "QUARANTINE changes nothing: add one first (ise_create_authz_rule with condition "
                     f"'Session:ANCPolicy equals {anc.get('name') or hit['name']}')"
                 )
+        sa = session or {}
+        blockers = protect_blockers(
+            app.settings,
+            mac=mac_n,
+            user=str(sa.get("user_name") or "") or None,
+            nad=str(sa.get("network_device_name") or "") or None,
+            nad_ips=[str(sa.get("nas_ip_address") or sa.get("device_ip_address") or "")],
+        )
+        # An ANC policy whose action bounces/shuts the port takes down the whole port, like a CoA
+        # port_bounce: apply the same shared-port rail (I18).
+        blast = 1
+        extra_side: list[str] = []
+        actions = [str(a) for a in anc.get("actions") or []]
+        if any(p in a.upper() for a in actions for p in PORT_ACTIONS) and session:
+            blast, port_blockers, extra_side = await port_coa_guard(app, session, f"ANC policy {policy}")
+            blockers += port_blockers
         plan = Plan(
             f"Apply ANC policy {policy} to {mac_n}",
             details={
                 "actions": anc.get("actions"),
                 "authz_rules_matching_it": rules or None,
                 "live_session": bool(session),
-                "nad": (session or {}).get("network_device_name"),
+                "nad": sa.get("network_device_name"),
             },
             side_effects=[
-                f"Actions: {', '.join(anc.get('actions') or [])}",
+                f"Actions: {', '.join(actions)}",
                 "ISE sends a CoA to the live session itself, so the new authorization applies at once",
+                *extra_side,
                 *warnings,
             ],
+            blockers=blockers,
             # Only the policy: the session may legitimately churn (reauth) between preview and confirm.
             fingerprint=fingerprint(anc),
+            blast_radius=blast,
         )
         body = {
             "OperationAdditionalData": {
@@ -266,6 +313,7 @@ def register(reg: ToolRegistrar) -> None:
         mac_n = normalize_mac(mac)
         current = await anc_assignments(app, mac_n)
         blockers = [] if current else [f"{mac_n} has no ANC policy applied"]
+        blockers += protect_blockers(app.settings, mac=mac_n)
         plan = Plan(
             f"Clear ANC from {mac_n}",
             details={"applied": [c.get("policyName") for c in current]},
@@ -275,6 +323,7 @@ def register(reg: ToolRegistrar) -> None:
                 "ISE ends the live session (CoA); the endpoint re-authenticates with normal policy. An idle "
                 "MAB endpoint only re-authenticates when it next sends traffic"
             ],
+            blast_radius=1,
         )
         body = {"OperationAdditionalData": {"additionalData": [{"name": "macAddress", "value": mac_n}]}}
         return await preview_or_apply(
@@ -296,10 +345,16 @@ def register(reg: ToolRegistrar) -> None:
         user and endpoint behind it loses access at the next authentication. Preview-first."""
         app: IseApp = get_client(ctx)
         current = await resolve_nad(app, device)
+        nad_ips = [
+            str(i.get("ipaddress"))
+            for i in current.get("NetworkDeviceIPList") or []
+            if isinstance(i, dict) and i.get("ipaddress")
+        ]
         plan = Plan(
             f"Delete network device {current.get('name')}",
             details=nad_summary(current),
             fingerprint=fingerprint(current),
+            blockers=protect_blockers(app.settings, nad=str(current.get("name") or ""), nad_ips=nad_ips),
             side_effects=["All RADIUS/TACACS+ from this device's IPs is rejected (11007) from now on"],
         )
 
