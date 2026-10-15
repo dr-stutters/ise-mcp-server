@@ -1,5 +1,5 @@
 # ise-mcp-server roadmap
-_Last updated 2026-10-15: **Next delivered in v0.4.0** (I8–I10; I11 moved to Later, AD DNS blocker). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.4.0. Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
+_Last updated 2026-10-15: **Next delivered in v0.4.0** (I8–I10; I11 moved to Later, AD DNS blocker). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.6.0. Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
 
 ## Summary
 - v0.2.0 covers the day-to-day ISE work across OpenAPI, ERS and MnT: 72 tools for troubleshooting, policy and device-admin editing, TrustSec reads, ANC and CoA. They are live-tested against ISE 3.5 with a real cat9000v switch and client (CML `ise-access`).

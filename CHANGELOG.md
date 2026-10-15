@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 (2026-10-15)
+
+Roadmap "Later" items: policy explain (I13), the incident-timeline prompt (I15), and a read-only slice
+of guest/profiler/posture (I14).
+
+### Added
+- **I13 `ise_policy_explain`:** predict which policy set and authorization rule a request would hit,
+  client-side (ISE has no evaluate API). Walks sets then local exceptions then authorization rules in
+  rank order, evaluating the conditions it understands (And/Or/negate, equals/contains/startsWith/in/
+  matches/numeric) against supplied `Dictionary:Attribute` values; resolves library references
+  (including built-ins such as Wired_MAB) by id. Conditions it can't evaluate (missing attribute,
+  unresolved reference, posture/profiler/time, attribute-vs-attribute) are reported as `unknown`, never
+  guessed, and the verdict is marked UNCERTAIN when an unknown rule outranks the first match. Global
+  exceptions are not fetched (disclosed in `limits`). Live-verified against the lab's MAB path.
+- **I15 prompt `ise_incident_timeline`:** one time-ordered incident timeline for a host across ISE, FMC
+  and Catalyst Center, each queried on demand and merged by timestamp; the FMC/CatC steps are skipped
+  with a note when those servers aren't connected. Read-only.
+- **I14 (read slice):** `ise_list_profiler_profiles` (name filter), `ise_list_posture_policies`
+  (`enabled_only`), `ise_list_posture_requirements` — read-only summaries. Guest/sponsor and posture
+  assessment stay in Later (need a sponsor REST account / agent endpoints).
+
+### Changed
+- 99 tools + 3 prompts (was 96 + 2). The prompt contract test now validates every fmc_*/catc_*
+  reference against the copied `tests/manifests/{fmc,catc}.json`.
+
 ## 0.5.0 (2026-10-15)
 
 Production gate (I16, I18, I19) and a robustness fix (I20), on core v0.9.0. I17 (version matrix) is
