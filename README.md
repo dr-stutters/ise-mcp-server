@@ -178,7 +178,7 @@ the spec cache.
 
 ## Tools
 
-95 tools and 2 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+95 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 50 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -292,12 +292,13 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (2)
+### Prompts (3)
 
 | Prompt | What it does |
 |---|---|
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
+| `ise_incident_timeline` | One time-ordered incident timeline for a host across ISE, FMC and Catalyst Center, each queried on demand and merged by timestamp (read-only; FMC/CatC steps skipped if those servers are not connected). |
 
 The prompts walk a model through ISE and the access switch (via the cml or catc MCP server, when
 connected). `ise_troubleshoot_endpoint_access` ends with a preview-only fix, and its fix step offers write
