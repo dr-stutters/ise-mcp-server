@@ -8,17 +8,17 @@ from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
 from stutters_mcp_core import (
+    NotFound,
     ResponseFormat,
     ToolRegistrar,
     UpstreamError,
     get_client,
-    list_result,
     object_result,
 )
 from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list, ers_name_map, ers_resolve, gather_limited
+from ise_mcp.tools._common import ers_list, ers_name_map, ers_resolve, gather_limited, list_result
 
 USER_COLUMNS = ["name", "enabled", "groups", "email", "description", "id"]
 
@@ -52,7 +52,7 @@ def register(reg: ToolRegistrar) -> None:
             str | None, Field(description="Filter: member of this identity group (name)")
         ] = None,
         detail: Annotated[
-            bool, Field(description="Fetch each user for enabled state, groups and email")
+            bool, Field(description="Fetch each user for enabled state, groups and email (pages up to 100)")
         ] = True,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
         offset: Annotated[int, Field(ge=0)] = 0,
@@ -61,24 +61,24 @@ def register(reg: ToolRegistrar) -> None:
         """List users in the ISE internal user store: username, enabled/disabled, identity groups and
         email. Passwords are never returned. For one user use ise_get_internal_user."""
         app: IseApp = get_client(ctx)
-        filters = [f"name.CONTAINS.{name}"] if name else None
+        filters = [f"name.CONTAINS.{name}"] if name else []
+        groups = await ers_name_map(app, "identitygroup")
         if group:
-            detail = True
-        groups = await ers_name_map(app, "identitygroup") if detail else {}
+            # ERS filters users by group name server-side (exact, case-sensitive), so resolve the
+            # canonical name first; no full scan is needed.
+            canonical = {v.lower(): v for v in groups.values()}.get(group.strip().lower())
+            if canonical is None:
+                raise NotFound(f"No identity group named {group!r}; see ise_list_identity_groups.", 404)
+            filters.append(f"identityGroup.EQ.{canonical}")
         page = await ers_list(
             app,
             "internaluser",
-            filters=filters,
-            limit=limit if not group else 1000,
-            offset=offset if not group else 0,
+            filters=filters or None,
+            limit=limit,
+            offset=offset,
             detail=detail,
             shape=lambda u: user_row(u, groups),
         )
-        if group:
-            rows = [
-                r for r in page.items if any(group.lower() == str(g).lower() for g in r.get("groups", []))
-            ]
-            page = page_of(rows, limit=limit, offset=offset)
         return list_result(page, fmt=response_format, columns=USER_COLUMNS if detail else None)
 
     @reg.read(title="Get an internal user")
@@ -123,7 +123,7 @@ def register(reg: ToolRegistrar) -> None:
         'subject not found' to see which stores a sequence searches."""
         app: IseApp = get_client(ctx)
         rows: list[dict[str, Any]] = []
-        seqs = await ers_list(app, "idstoresequence", limit=200, offset=0, detail=True)
+        seqs = await ers_list(app, "idstoresequence", limit=200, offset=0, detail=True, detail_cap=None)
         for s in seqs.items:
             stores = sorted(s.get("idSeqItem") or [], key=lambda i: i.get("order", 0))
             rows.append(

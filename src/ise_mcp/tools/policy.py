@@ -14,13 +14,12 @@ from stutters_mcp_core import (
     ToolRegistrar,
     UpstreamError,
     get_client,
-    list_result,
     object_result,
 )
 from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list, ers_resolve, render_condition, summarize_rule
+from ise_mcp.tools._common import ers_list, ers_resolve, list_result, render_condition, summarize_rule
 
 PolicyKind = Annotated[
     Literal["network-access", "device-admin"],

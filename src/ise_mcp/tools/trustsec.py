@@ -7,11 +7,18 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import ResponseFormat, ToolRegistrar, get_client, list_result
+from stutters_mcp_core import ResponseFormat, ToolRegistrar, get_client
 from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import anc_assignments, ers_list, ers_name_map, normalize_mac, openapi_all
+from ise_mcp.tools._common import (
+    anc_assignments,
+    ers_list,
+    ers_name_map,
+    list_result,
+    normalize_mac,
+    openapi_all,
+)
 
 
 def sgt_row(s: dict[str, Any]) -> dict[str, Any]:
@@ -40,8 +47,11 @@ def sgacl_row(a: dict[str, Any]) -> dict[str, Any]:
 
 async def sgt_names(app: IseApp) -> dict[str, str]:
     """{sgt id: 'Name (value)'}."""
-    page = await ers_list(app, "sgt", limit=5000, offset=0, detail=True)
+    page = await ers_list(app, "sgt", limit=5000, offset=0, detail=True, detail_cap=None)
     return {str(s["id"]): f"{s.get('name')} ({s.get('value')})" for s in page.items if "id" in s}
+
+
+MATRIX_CELL_CAP = 2000
 
 
 def register(reg: ToolRegistrar) -> None:
@@ -96,7 +106,21 @@ def register(reg: ToolRegistrar) -> None:
         applied, the final catch-all rule (permit/deny), and cell status. Answers 'can Employees talk to
         Development_Servers?'. Cells not listed fall back to the ANY-ANY default."""
         app: IseApp = get_client(ctx)
-        cells = await ers_list(app, "egressmatrixcell", limit=10_000, offset=0, detail=True)
+        # Narrow server-side by SGT name first so a large matrix isn't fetched cell by cell.
+        filters = []
+        if source:
+            filters.append(f"sgtSrcName.CONTAINS.{source}")
+        if destination:
+            filters.append(f"sgtDstName.CONTAINS.{destination}")
+        cells = await ers_list(
+            app,
+            "egressmatrixcell",
+            filters=filters or None,
+            limit=MATRIX_CELL_CAP,
+            offset=0,
+            detail=True,
+            detail_cap=None,
+        )
         sgts = await sgt_names(app)
         acls = await ers_name_map(app, "sgacl")
         rows = []
@@ -125,10 +149,17 @@ def register(reg: ToolRegistrar) -> None:
         if destination:
             rows = [r for r in rows if destination.lower() in str(r["destination"]).lower()]
         rows.sort(key=lambda r: (r["source"] != "ANY", str(r["source"]), str(r["destination"])))
+        extra = None
+        if not cells.complete:
+            extra = {
+                "partial": f"Only the first {MATRIX_CELL_CAP} cells were read; filter by source or "
+                "destination for the rest."
+            }
         return list_result(
             page_of(rows, limit=limit, offset=offset),
             fmt=response_format,
             columns=["source", "destination", "sgacls", "default_rule", "status"],
+            extra=extra,
         )
 
     @reg.read(title="List IP-SGT mappings")

@@ -20,12 +20,11 @@ from stutters_mcp_core import (
     ToolRegistrar,
     field_changes,
     get_client,
-    list_result,
     preview_or_apply,
 )
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list
+from ise_mcp.tools._common import ers_list, list_result
 from ise_mcp.tools.writes import deep_merge, ers_post, ers_put, fingerprint
 
 _COMMAND = re.compile(r"^\s*(?P<grant>PERMIT|DENY_ALWAYS|DENY)\s+(?P<cmd>\S+)(?:\s+(?P<args>.*?))?\s*$", re.I)

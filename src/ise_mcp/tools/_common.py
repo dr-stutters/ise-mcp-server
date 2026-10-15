@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import re
+import time
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
-from stutters_mcp_core import InvalidRequest, NotFound, ValidationFailed
+from fastmcp.tools import ToolResult
+from stutters_mcp_core import InvalidRequest, NotFound, ResponseFormat, ValidationFailed
+from stutters_mcp_core import list_result as core_list_result
 from stutters_mcp_core.http import Page, page_of
 
 from ise_mcp.client import IseApp
@@ -18,6 +22,30 @@ _HEX = re.compile(r"[^0-9A-Fa-f]")
 
 # How long ago to look for auth records by default (MnT AuthStatus takes seconds).
 DEFAULT_LOOKBACK_MINUTES = 24 * 60
+# How long name->id maps (identity/endpoint groups, SGACLs, SGTs) are reused within a burst of calls.
+NAME_MAP_TTL_SECONDS = 60.0
+
+
+@dataclass
+class ErsPage(Page):
+    """A Page that can carry a note for the caller (e.g. that per-item details were skipped)."""
+
+    note: str | None = None
+
+
+def list_result(
+    page: Page,
+    *,
+    fmt: ResponseFormat = "json",
+    columns: list[str] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> ToolResult:
+    """core list_result, plus the page's note (ErsPage) in the metadata."""
+    note = getattr(page, "note", None)
+    if note:
+        extra = {**(extra or {}), "detail_note": note}
+        columns = None  # rows are id/name only, so the detail columns would be empty
+    return core_list_result(page, fmt=fmt, columns=columns, extra=extra)
 
 
 def is_uuid(s: str) -> bool:
@@ -70,9 +98,12 @@ async def ers_list(
     offset: int,
     detail: bool = False,
     shape: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    detail_cap: int | None = -1,
 ) -> Page:
     """A page of an ERS collection. ERS lists only return id/name/description; with `detail` each item
-    is fetched (bounded concurrency) and optionally passed through `shape`."""
+    is fetched (bounded concurrency) and optionally passed through `shape`. Above `detail_cap` items
+    (default: the ISE_DETAIL_THRESHOLD setting; None = no cap, for internal full scans) the per-item
+    GETs are skipped and the page carries a note, so a 10k-device list doesn't fire 10k requests."""
     params: dict[str, Any] = {}
     if filters:
         params["filter"] = filters
@@ -94,11 +125,20 @@ async def ers_list(
         ]
         page = page_of(matches, limit=limit, offset=offset)
     items = [_strip_link(i) for i in page.items if isinstance(i, dict)]
+    cap = app.settings.detail_threshold if detail_cap == -1 else detail_cap
+    note = None
+    if detail and items and cap is not None and len(items) > cap:
+        note = (
+            f"{len(items)} items exceed the per-item detail threshold ({cap}, ISE_DETAIL_THRESHOLD): "
+            "showing names and ids only. Narrow with filters or a smaller limit for full details."
+        )
+        detail = False
     if detail and items:
-        full = await gather_limited(items, lambda i: app.ers_get(resource, str(i["id"])))
+        full = await gather_limited(
+            items, lambda i: app.ers_get(resource, str(i["id"])), app.settings.detail_concurrency
+        )
         items = [shape(f) if shape else f for f in full]
-    page.items = items
-    return page
+    return ErsPage(items, page.offset, page.total, more=page.more, note=note)
 
 
 def _strip_link(d: dict[str, Any]) -> dict[str, Any]:
@@ -121,9 +161,20 @@ async def ers_resolve(
 
 
 async def ers_name_map(app: IseApp, resource: str, cap: int = 2000) -> dict[str, str]:
-    """{id: name} for a whole (small) ERS collection, e.g. identity groups or SGTs."""
+    """{id: name} for a whole (small) ERS collection, e.g. identity groups or SGTs. Reused for
+    NAME_MAP_TTL_SECONDS so a burst of calls doesn't refetch it; writes clear it (clear_name_maps)."""
+    cache: dict[str, tuple[float, dict[str, str]]] = app.__dict__.setdefault("_name_maps", {})
+    hit = cache.get(resource)
+    if hit and time.monotonic() - hit[0] < NAME_MAP_TTL_SECONDS:
+        return dict(hit[1])
     page = await app.ers_pager.fetch_page(app.ers, f"/ers/config/{resource}", limit=cap)
-    return {str(i["id"]): str(i.get("name")) for i in page.items if isinstance(i, dict) and "id" in i}
+    out = {str(i["id"]): str(i.get("name")) for i in page.items if isinstance(i, dict) and "id" in i}
+    cache[resource] = (time.monotonic(), out)
+    return dict(out)
+
+
+def clear_name_maps(app: IseApp) -> None:
+    app.__dict__.pop("_name_maps", None)
 
 
 # --- policy conditions --------------------------------------------------------------------------
