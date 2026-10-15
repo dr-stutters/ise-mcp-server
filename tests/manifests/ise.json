@@ -356,6 +356,18 @@
       "tier": "read",
       "title": "List policy sets"
     },
+    "ise_list_posture_policies": {
+      "tier": "read",
+      "title": "List posture policies"
+    },
+    "ise_list_posture_requirements": {
+      "tier": "read",
+      "title": "List posture requirements"
+    },
+    "ise_list_profiler_profiles": {
+      "tier": "read",
+      "title": "List profiler profiles"
+    },
     "ise_list_sgacls": {
       "tier": "read",
       "title": "List SGACLs"
