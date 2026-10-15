@@ -102,6 +102,7 @@ def _mock_policy(mock: respx.MockRouter) -> None:
     }
     mock.get("/api/v1/policy/network-access/policy-set").respond(json=sets)
     mock.get("/api/v1/policy/network-access/condition").respond(json={"response": []})
+    mock.get("/api/v1/policy/network-access/policy-set/global-exception").respond(json={"response": []})
     authz = {
         "response": [
             {
@@ -235,3 +236,35 @@ async def test_policy_explain_no_set_matched_is_uncertain(mock: respx.MockRouter
     out = out if isinstance(out, dict) else json.loads(str(out))
     assert "confirmed to match" in out["verdict"]
     assert out["note"] and "UNCERTAIN" in out["note"]
+
+
+async def test_policy_explain_global_exception_wins(mock: respx.MockRouter) -> None:
+    _mock_policy(mock)
+    # a global exception that matches the request should win over the set's own rules
+    mock.get("/api/v1/policy/network-access/policy-set/global-exception").respond(
+        json={
+            "response": [
+                {
+                    "rule": {
+                        "id": "g1",
+                        "name": "block-byod",
+                        "rank": 0,
+                        "state": "enabled",
+                        "default": False,
+                        "condition": attr("IdentityGroup", "Name", "equals", "BYOD"),
+                    },
+                    "profile": ["DenyAccess"],
+                    "securityGroup": None,
+                }
+            ]
+        }
+    )
+    out = await call_tool(
+        make_server(),
+        "ise_policy_explain",
+        {"attributes": {"Radius:NAS-Port-Type": "Ethernet", "IdentityGroup:Name": "BYOD"}},
+    )
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert "block-byod" in out["verdict"] and "DenyAccess" in out["verdict"]
+    first = out["authorization"][0]
+    assert first["section"] == "global-exception" and first["result"] == "match"
