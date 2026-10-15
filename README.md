@@ -28,6 +28,11 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   decoded reason and NAD) and `ise_get_auth_list` (what authenticated in a window, by NAD or user).
 - **Prompt `ise_troubleshoot_endpoint_access`**: a guided pass from MAC/user/IP through ISE and the switch
   CLI (cml or catc server) to a diagnosis and a preview-only fix.
+- **Prompt `ise_quarantine_host`**: contain a host with ANC + CoA, verify the quarantine dACL/SGT on the switch,
+  optionally block its IP on the FTDs (`fmc_contain_host`), and record the undo.
+- **Certificate lifecycle with any CA**: CSR -> export -> sign -> trust -> bind, plus certificate profiles and
+  identity sequences for EAP-TLS.
+- **TrustSec writes**: static IP-SGT mappings, SXP connections/bindings, the TrustSec CoA push and SSH deploy.
 - **`ise_deployment_health`**: severity-ranked findings for node sync, redundancy, patches, backups,
   certificates (expired/expiring/self-signed), evaluation licences and AD join points.
 - **Endpoint bulk work**: `ise_bulk_endpoints` (create/update/delete up to 500 per call as one ISE task) and
@@ -142,17 +147,18 @@ the spec cache.
 
 ## Tools
 
-80 tools and 1 prompt with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 46 read tools plus `ise_api_call` (GET-only) are registered. Everything
+95 tools and 2 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 50 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (46)
+### Read (50)
 
 | Tool | What it does |
 |---|---|
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points. |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
+| `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
@@ -174,6 +180,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_certificates` | List system (per-node identity) or trusted certificates with what they are used for, issuer, expiry and days left. |
 | `ise_list_command_sets` | List TACACS+ command sets (device administration): each command as 'GRANT command args' (PERMIT, DENY, DENY_ALWAYS; args are regexes) and whether unmatched commands are permitted. |
 | `ise_list_conditions` | List reusable library conditions (e.g. |
+| `ise_list_csrs` | List pending certificate signing requests (CSRs) ISE holds a private key for: friendly name, node, usage, key size, creation time and id. |
 | `ise_list_custom_attributes` | List the endpoint custom attribute definitions (name and type: String, Int, Long, Float, Boolean, Date, IP). |
 | `ise_list_dacls` | List downloadable ACLs (dACLs) with IP version, number of ACEs and the first ACE. |
 | `ise_list_dictionary_attributes` | List the dictionary attributes policy conditions can use, with data type and allowed values (e.g. |
@@ -192,12 +199,14 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
+| `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
+| `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (24)
+### Write (32)
 
 | Tool | What it does |
 |---|---|
@@ -211,27 +220,36 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_nad` | Add a network access device (switch, WLC, VPN) so ISE accepts its RADIUS and/or TACACS+ requests. |
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
+| `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, or TACACS+ command set / shell profile. |
+| `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
+| `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
+| `ise_import_trusted_cert` | Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth). |
 | `ise_release_rejected_endpoint` | Release endpoints from ISE's rejected list (Context Visibility > Rejected Endpoints), e.g. |
+| `ise_set_cert_auth_profile` | A certificate authentication profile tells ISE how to read an EAP-TLS client certificate: which field is the username, and optionally which identity store to look it up in. |
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
 | `ise_set_custom_attribute` | Create an endpoint custom attribute definition (so endpoints can carry a value that policy matches as 'EndPoints:<name>'), or delete one. |
 | `ise_set_dacl` | Create a downloadable ACL, or replace an existing one's ACEs. |
 | `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply and the final catch-all. |
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
+| `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
+| `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
+| `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or description. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port or name. |
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (10)
+### Dangerous (13)
 
 | Tool | What it does |
 |---|---|
 | `ise_api_call` | Call any Cisco ISE REST endpoint (escape hatch for things no other tool covers). |
 | `ise_apply_anc` | Put an Adaptive Network Control policy on an endpoint (quarantine, port bounce, shutdown or reauthenticate, depending on the policy's actions). |
+| `ise_bind_certificate` | Install a CA-signed certificate on the node that generated its CSR and put it into service for the given roles (EAP, Admin, RADIUS DTLS, portal, pxGrid, SAML, messaging, TACACS). |
 | `ise_clear_anc` | Remove the ANC policy from an endpoint (release it from quarantine). |
 | `ise_coa_disconnect` | Send a RADIUS CoA disconnect for an endpoint's live session: terminate it, bounce the switch port, or shut the port down (stays down until an admin re-enables it). |
 | `ise_coa_reauth` | Send a RADIUS Change of Authorization (reauthenticate) for an endpoint's live session, so new policy (group, profile, ANC) applies now instead of at the next reauth. |
@@ -239,16 +257,36 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_nad` | Delete a network device. |
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
 | `ise_delete_policy_set` | Delete a whole policy set with all its rules. |
+| `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
+| `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (1)
+### Prompts (2)
 
 | Prompt | What it does |
 |---|---|
+| `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 
-The prompt walks a model through ISE and the access switch (via the cml or catc MCP server, when
-connected) and ends with a preview-only fix. Its fix step offers write tools only when they are enabled.
+The prompts walk a model through ISE and the access switch (via the cml or catc MCP server, when
+connected). `ise_troubleshoot_endpoint_access` ends with a preview-only fix, and its fix step offers write
+tools only when they are enabled. `ise_quarantine_host` applies ANC (dangerous tier) and, with
+`fmc_block=true`, contains the IP on the FTDs through fmc-mcp-server (`fmc_contain_host`). It ends with
+the exact undo steps. Without the dangerous tier it gives GUI steps.
+
+### Certificates and EAP-TLS
+The certificate tools exchange PEM text, so any CA can sign: Windows AD CS (`win_sign_csr`), OpenSSL,
+step-ca or a public CA. Flow: `ise_generate_csr` -> `ise_export_csr` -> sign at the CA ->
+`ise_import_trusted_cert` (the CA, `client_auth` for EAP-TLS clients) -> `ise_bind_certificate`
+(dangerous; the Admin role restarts the node's application server). For EAP-TLS, add
+`ise_set_cert_auth_profile` and `ise_set_identity_sequence`, then use the sequence as an authentication
+rule's identity source.
+
+### TrustSec / SXP
+`ise_set_sxp_connection` takes the device's role (`peer_role`, ISE's "Peer Role"). LISTENER means the
+device learns bindings from ISE. The node needs the SXP service (`ise_update_node_services`). Static
+mappings (`ise_set_ip_sgt`) sent to an SXP domain reach listeners at once. `ise_deploy_ip_sgt` pushes them
+over SSH instead, and `ise_push_trustsec_matrix` makes TrustSec devices refresh the egress policy.
 
 ## Testing
 
