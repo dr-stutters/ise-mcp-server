@@ -28,6 +28,7 @@ from stutters_mcp_core import (
 
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import render_condition
+from ise_mcp.tools.endpoint_bulk import custom_attribute_defs
 from ise_mcp.tools.policy import PolicyKind, list_policy_sets, resolve_policy_set
 from ise_mcp.tools.writes import fingerprint
 
@@ -193,9 +194,20 @@ async def build_condition(
     blockers: list[str] = []
     if any(n["conditionType"] == "ConditionAttributes" for n in nodes):
         attrs = await dictionary_attributes(app, kind, scope)
+        custom: dict[str, str] | None = None
         for n in nodes:
-            if n["conditionType"] == "ConditionAttributes":
-                blockers += check_attribute(n, attrs)
+            if n["conditionType"] != "ConditionAttributes":
+                continue
+            if str(n["dictionaryName"]).lower() == "endpoints" and kind == "network-access":
+                # ISE's policy dictionary doesn't always list endpoint custom attributes (seen on 3.5:
+                # one appears and later drops out), so accept any attribute defined in ISE.
+                if custom is None:
+                    custom = await custom_attribute_defs(app)
+                hit = next((c for c in custom if c.lower() == str(n["attributeName"]).lower()), None)
+                if hit:
+                    n["dictionaryName"], n["attributeName"] = "EndPoints", hit
+                    continue
+            blockers += check_attribute(n, attrs)
     if len(nodes) == 1:
         return nodes[0], blockers
     block = "ConditionAndBlock" if match == "all" else "ConditionOrBlock"

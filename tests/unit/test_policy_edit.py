@@ -350,3 +350,38 @@ async def test_list_dictionary_attributes(mock: respx.MockRouter) -> None:
         ]
         r = await c.call_tool("ise_list_dictionary_attributes", {"dictionary": "nope"})
         assert "dictionaries are" in r.structured_content["note"]
+
+
+async def test_authz_rule_accepts_custom_attribute_missing_from_dictionary(mock: respx.MockRouter) -> None:
+    policy_mocks(mock)
+    mock.get("/api/v1/endpoint-custom-attribute").respond(
+        json=[{"attributeName": "assetTier", "attributeType": "String"}]
+    )
+    mock.get(f"{NA}/authorization-profiles").respond(json=[{"name": "PermitAccess"}])
+    mock.get(f"{NA}/policy-set/s1/authorization").respond(
+        json={"response": [{"rule": {"name": "Default", "rank": 0, "default": True}}]}
+    )
+    post = mock.post(f"{NA}/policy-set/s1/authorization").respond(201, json={"response": {"rule": {}}})
+    preview, _ = await two_step(
+        "ise_create_authz_rule",
+        {
+            "policy_set": "wired",
+            "name": "Tier",
+            "conditions": ["EndPoints:assettier equals gold"],
+            "profiles": ["PermitAccess"],
+        },
+    )
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["condition"] == "EndPoints:assetTier equals gold"
+    sent = json.loads(post.calls.last.request.content)["rule"]["condition"]
+    assert sent["dictionaryName"] == "EndPoints" and sent["attributeName"] == "assetTier"
+    bad, _ = await two_step(
+        "ise_create_authz_rule",
+        {
+            "policy_set": "wired",
+            "name": "Tier",
+            "conditions": ["EndPoints:nope equals x"],
+            "profiles": ["PermitAccess"],
+        },
+    )
+    assert bad["status"] == "blocked"
