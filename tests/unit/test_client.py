@@ -85,6 +85,8 @@ async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
     assert ise["version"] == "3.5.0.527"
     assert ise["patches"] == "3,4"
     assert ise["nodes"][0]["hostname"] == "ise"
+    assert ise["deployment"]["mode"] == "standalone"
+    assert ise["deployment"]["config_node_pan"] == "ise" and ise["deployment"]["psns"] == ["ise"]
     assert all(ise["surfaces"][s]["ok"] for s in ("openapi", "ers", "mnt"))
     assert "warning" not in ise
     assert ise["server_version"] not in ("", None)
@@ -228,3 +230,59 @@ async def test_second_instance_routes_to_its_own_ise(
         out = await call_tool(server, "ise_status", {"instance": "prod"})
     text = str(out)
     assert "3.4.0.608" in text
+
+
+DISTRIBUTED = {
+    "response": [
+        {
+            "hostname": "pan",
+            "roles": ["PrimaryAdmin", "SecondaryMonitoring"],
+            "services": [],
+            "nodeStatus": "Connected",
+        },
+        {
+            "hostname": "sec",
+            "roles": ["SecondaryAdmin", "PrimaryMonitoring"],
+            "services": [],
+            "nodeStatus": "Connected",
+        },
+        {"hostname": "psn1", "roles": [], "services": ["Session", "Profiler"], "nodeStatus": "Connected"},
+        {"hostname": "psn2", "roles": [], "services": ["Session"], "nodeStatus": "Disconnected"},
+    ]
+}
+
+
+async def test_status_distributed_deployment(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=DISTRIBUTED)
+    mock.get("/ers/config/op/systemconfig/iseversion", name="iseversion").respond(json=ISEVERSION)
+    mock.get("/admin/API/mnt/Version", name="mntversion").respond(text=MNT_VERSION)
+    out = await call_tool(make_server(), "ise_status")
+    dep = out["ise"]["deployment"]
+    assert dep["mode"] == "distributed" and dep["node_count"] == 4
+    assert dep["config_node_pan"] == "pan"
+    assert dep["monitoring"] == {"primary": "sec", "secondary": "pan"}
+    assert dep["psns"] == ["psn1", "psn2"]
+    assert dep["unreachable_nodes"] == ["psn2"]
+    assert any("ISE_INSTANCES" in n for n in dep["notes"])  # ERS-per-node / second deployment guidance
+    assert any("acs_server" in n for n in dep["notes"])  # CoA routed to the owning PSN
+
+
+async def test_status_distributed_no_secondary_mnt(mock: respx.MockRouter) -> None:
+    nodes = {
+        "response": [
+            {
+                "hostname": "pan",
+                "roles": ["PrimaryAdmin", "PrimaryMonitoring"],
+                "services": ["Session"],
+                "nodeStatus": "Connected",
+            },
+            {"hostname": "psn1", "roles": [], "services": ["Session"], "nodeStatus": "Connected"},
+        ]
+    }
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=nodes)
+    mock.get("/ers/config/op/systemconfig/iseversion", name="iseversion").respond(json=ISEVERSION)
+    mock.get("/admin/API/mnt/Version", name="mntversion").respond(text=MNT_VERSION)
+    out = await call_tool(make_server(), "ise_status")
+    dep = out["ise"]["deployment"]
+    assert dep["monitoring"]["secondary"] is None
+    assert any("no failover" in n for n in dep["notes"])

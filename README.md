@@ -116,6 +116,15 @@ On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_T
   (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
   certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
+## Multi-node deployments
+
+`ise_status` reports a `deployment` summary: the mode (standalone or distributed), the Primary Admin
+node (PAN, which serves OpenAPI/ERS), the primary/secondary Monitoring nodes (MnT, with a failover
+note when there is no secondary), the PSNs, and any unreachable node. Point `ISE_URL` at the PAN;
+OpenAPI and ERS go there. CoA and ANC are routed to the PSN that owns each session (its `acs_server`)
+through MnT, so no per-PSN configuration is needed. A node that serves ERS only on 9060, or a second
+deployment, is reached as a separate core instance (`ISE_INSTANCES`; see core `docs/PRODUCTION.md`).
+
 ## Claude Code
 
 stdio (runs locally):
