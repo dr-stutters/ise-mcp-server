@@ -14,16 +14,84 @@ appliance. A live regression test compares its prediction with MnT's actual matc
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import NotFound, ToolRegistrar, UpstreamError, get_client, object_result
+from stutters_mcp_core import (
+    InvalidRequest,
+    NotFound,
+    ToolRegistrar,
+    UpstreamError,
+    get_client,
+    object_result,
+)
 
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import render_condition
+from ise_mcp.tools.network import resolve_nad
 from ise_mcp.tools.policy import PolicyKind, list_policy_sets, resolve_policy_set
+
+Flow = Literal["wired-mab", "wired-dot1x", "wireless-mab", "wireless-dot1x"]
+
+# What each access flow looks like to the policy engine (3.x dictionaries).
+FLOW_ATTRIBUTES: dict[str, dict[str, str]] = {
+    "wired-mab": {
+        "Normalised Radius:RadiusFlowType": "WiredMAB",
+        "Radius:NAS-Port-Type": "Ethernet",
+        "Radius:Service-Type": "Call Check",
+    },
+    "wired-dot1x": {
+        "Normalised Radius:RadiusFlowType": "Wired802_1x",
+        "Radius:NAS-Port-Type": "Ethernet",
+        "Radius:Service-Type": "Framed",
+    },
+    "wireless-mab": {
+        "Normalised Radius:RadiusFlowType": "WirelessMAB",
+        "Radius:NAS-Port-Type": "Wireless - IEEE 802.11",
+        "Radius:Service-Type": "Call Check",
+    },
+    "wireless-dot1x": {
+        "Normalised Radius:RadiusFlowType": "Wireless802_1x",
+        "Radius:NAS-Port-Type": "Wireless - IEEE 802.11",
+        "Radius:Service-Type": "Framed",
+    },
+}
+# With a flow, assume a normal successful login: authentication passed and no ANC policy applied.
+FLOW_DEFAULTS = {"Network Access:AuthenticationStatus": "AuthenticationPassed", "Session:ANCPolicy": ""}
+
+
+def normalize_device_attrs(attrs: dict[str, str]) -> dict[str, str]:
+    """DEVICE:<group type> values without the root, as ISE stores them in conditions: the NAD tools
+    show 'Location#All Locations#Sydney', a condition compares 'All Locations#Sydney'."""
+    out: dict[str, str] = {}
+    for key, value in attrs.items():
+        dictionary, sep, attr = key.partition(":")
+        if not sep and key.strip().casefold() in ("location", "device type"):
+            dictionary, sep, attr = "DEVICE", ":", key  # a bare NDG attribute name
+        if sep and dictionary.strip().casefold() == "device" and isinstance(value, str):
+            root = attr.strip() + "#"
+            if value.casefold().startswith(root.casefold()):
+                value = value[len(root) :]
+        out[key] = value
+    return out
+
+
+def nad_attributes(nad: dict[str, Any]) -> dict[str, str]:
+    """Policy attributes a request through this NAD carries: its device groups and NAS IP."""
+    out: dict[str, str] = {}
+    for group in nad.get("NetworkDeviceGroupList") or []:
+        root, sep, rest = str(group).partition("#")
+        if sep:
+            out[f"DEVICE:{root}"] = rest
+    if nad.get("name"):
+        out["Network Access:NetworkDeviceName"] = str(nad["name"])
+    entries = [e for e in nad.get("NetworkDeviceIPList") or [] if isinstance(e, dict) and e.get("ipaddress")]
+    # Only a device with exactly one host address has a known NAS-IP-Address.
+    if len(entries) == 1 and str(entries[0].get("mask", "32")) in ("32", "128"):
+        out["Radius:NAS-IP-Address"] = str(entries[0]["ipaddress"])
+    return out
 
 
 async def _authz_entries(app: IseApp, kind: str, ps_id: str, section: str) -> list[dict[str, Any]]:
@@ -257,13 +325,14 @@ def register(reg: ToolRegistrar) -> None:
     async def ise_policy_explain(
         ctx: Context,
         attributes: Annotated[
-            dict[str, str],
+            dict[str, str] | None,
             Field(
                 description="Request attributes as 'Dictionary:Attribute' -> value, e.g. "
                 '{"Radius:NAS-Port-Type": "Ethernet", "DEVICE:Location": "All Locations#mcp-test-lab", '
-                '"Network Access:EapAuthentication": "EAP-TLS"}. A bare attribute name also matches.'
+                '"Network Access:EapAuthentication": "EAP-TLS"}. A bare attribute name also matches. '
+                "NDG values may include the root ('Location#All Locations#X'). Optional with nad/flow."
             ),
-        ],
+        ] = None,
         kind: PolicyKind = "network-access",
         policy_set: Annotated[
             str | None,
@@ -272,6 +341,21 @@ def register(reg: ToolRegistrar) -> None:
         include_disabled: Annotated[
             bool, Field(description="Include disabled sets/rules (ISE skips them at runtime)")
         ] = False,
+        nad: Annotated[
+            str | None,
+            Field(
+                description="Network device the request comes through (name or IP): fills its device "
+                "groups (DEVICE:Location, DEVICE:Device Type, ...), name and NAS IP"
+            ),
+        ] = None,
+        flow: Annotated[
+            Flow | None,
+            Field(
+                description="Access flow: fills RadiusFlowType, NAS-Port-Type and Service-Type (what "
+                "Wired_MAB / Wired_802.1X / Wireless_* test) and assumes authentication passed and no "
+                "ANC policy. Your `attributes` override anything filled in"
+            ),
+        ] = None,
     ) -> ToolResult:
         """Predict which policy set and authorization rule a request would match, client-side (ISE has
         no evaluate API). Walks sets then authorization rules in rank order, evaluating the conditions
@@ -279,8 +363,29 @@ def register(reg: ToolRegistrar) -> None:
         reference, a missing attribute, posture/profiler/time) is reported as 'unknown', never guessed,
         and the verdict is marked uncertain when an unknown rule outranks the first match. Use it to
         sanity-check a change before you make it; confirm against ise_get_auth_history for a real
-        session. Not a substitute for ISE's own evaluation."""
+        session. Not a substitute for ISE's own evaluation. Quickest form: nad='<switch>' and
+        flow='wired-mab' (or wired-dot1x, wireless-*) plus any attributes you know (identity group,
+        EAP type, endpoint profile)."""
         app: IseApp = get_client(ctx)
+        given = dict(attributes or {})
+        filled: dict[str, str] = {}
+        if flow:
+            filled.update(FLOW_ATTRIBUTES[flow])
+            filled.update(FLOW_DEFAULTS)
+        if nad:
+            filled.update(nad_attributes(await resolve_nad(app, nad)))
+        if flow and kind == "device-admin":
+            raise InvalidRequest("flow is for network-access (RADIUS) requests; omit it for device-admin")
+        full = {g.strip().casefold() for g in given}
+        bare = {g.strip().casefold() for g in given if ":" not in g}
+        assumed = {
+            k: v
+            for k, v in filled.items()
+            if k.casefold() not in full and k.partition(":")[2].casefold() not in bare
+        }
+        attributes = normalize_device_attrs({**assumed, **given})
+        if not attributes:
+            raise InvalidRequest("Give attributes, or nad and/or flow to fill them in")
         library = await build_library(app, kind)
         sets = await list_policy_sets(app, kind)
         sets = sorted(sets, key=lambda p: (p.get("rank") is None, p.get("rank") or 0))
@@ -390,10 +495,18 @@ def register(reg: ToolRegistrar) -> None:
             )
         elif not matched and uncertain:
             note = "Some rules were unknown; the real result may differ. See 'unknown_because'."
+        defaults = [k for k in FLOW_DEFAULTS if k in assumed]
+        if defaults:
+            note = (note + " " if note else "") + (
+                "Assumes a normal login: authentication passed and no ANC policy on the endpoint; pass "
+                "'Session:ANCPolicy' (see ise_list_anc_endpoints) or 'Network Access:AuthenticationStatus' "
+                "to test otherwise."
+            )
         return object_result(
             {
                 "verdict": verdict,
                 "note": note,
+                "assumed_attributes": {k: v or "(none)" for k, v in assumed.items()} or None,
                 "policy_set": chosen.get("name"),
                 "set_selection": set_trace or "evaluated only the given policy_set",
                 "authorization": rule_trace,
