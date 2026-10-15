@@ -315,6 +315,48 @@ class IseApp:
                 )
             return out
 
+    def deployment_summary(self, nodes: list[dict[str, Any]]) -> dict[str, Any]:
+        """Classify a deployment's personas and the surface each node serves (I19): which node is the
+        PAN (OpenAPI/ERS target), the primary/secondary Monitoring nodes (MnT, with failover), and the
+        PSNs (Session) that CoA is routed to. Works for a standalone node too (it holds every persona)."""
+
+        def roles_of(n: dict[str, Any]) -> list[str]:
+            return [str(r) for r in n.get("roles") or []]
+
+        def by_role(substr: str) -> str | None:
+            return next(
+                (str(n.get("hostname")) for n in nodes if any(substr in r for r in roles_of(n))), None
+            )
+
+        standalone = any("Standalone" in r for n in nodes for r in roles_of(n))
+        pan = by_role("PrimaryAdmin") or (str(nodes[0].get("hostname")) if standalone and nodes else None)
+        mnt_primary = by_role("PrimaryMonitoring")
+        mnt_secondary = by_role("SecondaryMonitoring")
+        psns = [str(n.get("hostname")) for n in nodes if "Session" in (n.get("services") or [])]
+        notes = [
+            "OpenAPI and ERS target the node at ISE_URL; point it at the Primary Admin node (PAN). A "
+            "node that serves ERS only on 9060, or a second deployment, is reached as a separate core "
+            "instance (ISE_INSTANCES; see core docs/PRODUCTION.md).",
+            "CoA/ANC are routed to the PSN that owns each session (its acs_server) through MnT.",
+        ]
+        if not standalone and len(nodes) > 1 and not mnt_secondary:
+            notes.append("No secondary Monitoring node: MnT queries and CoA have no failover.")
+        unreachable = [
+            str(n.get("hostname"))
+            for n in nodes
+            if str(n.get("status") or "").lower() not in ("connected", "")
+        ]
+        return {
+            "mode": "standalone" if standalone else "distributed",
+            "node_count": len(nodes),
+            "config_node_pan": pan,
+            "monitoring": {"primary": mnt_primary, "secondary": mnt_secondary},
+            "psns": psns,
+            "ers_port": self.settings.ers_port,
+            "unreachable_nodes": unreachable or None,
+            "notes": notes,
+        }
+
     async def status(self) -> dict[str, Any]:
         results = await asyncio.gather(*(self._probe(s) for s in SURFACES))
         surfaces = dict(zip(SURFACES, results, strict=True))
@@ -332,7 +374,9 @@ class IseApp:
         if surfaces["ers"].get("patches"):
             out["patches"] = surfaces["ers"]["patches"]
         if surfaces["openapi"].get("nodes"):
-            out["nodes"] = surfaces["openapi"].pop("nodes")
+            nodes = surfaces["openapi"].pop("nodes")
+            out["nodes"] = nodes
+            out["deployment"] = self.deployment_summary(nodes)
         out["surfaces"] = surfaces
         down = [s for s, r in surfaces.items() if not r["ok"]]
         if down:
