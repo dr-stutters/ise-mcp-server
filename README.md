@@ -178,11 +178,11 @@ the spec cache.
 
 ## Tools
 
-95 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+96 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 50 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (50)
+### Read (51)
 
 | Tool | What it does |
 |---|---|
@@ -227,6 +227,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_nodes` | List the ISE nodes in the deployment: hostname, FQDN, IP, roles (PAN/MnT/PSN/Standalone), enabled services (Session = PSN, Profiler, pxGrid, ...) and sync status. |
 | `ise_list_patches` | List installed ISE patches and hot patches with install dates, plus the base ISE version. |
 | `ise_list_policy_sets` | List policy sets in evaluation order: rank, name, state, the condition that selects the set, its allowed-protocols service, hit count and id. |
+| `ise_policy_explain` | Predict which policy set and authorization rule a request would hit, client-side (ISE has no evaluate API): walks sets and rules in rank order, evaluating the conditions it understands against supplied attributes; unresolved/posture/profiler/time conditions are reported as unknown, never guessed. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
