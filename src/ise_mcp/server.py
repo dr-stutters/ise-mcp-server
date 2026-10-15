@@ -17,6 +17,7 @@ from ise_mcp.tools import (
     dangerous,
     device_admin,
     endpoints,
+    health,
     identity,
     network,
     policy,
@@ -37,7 +38,8 @@ internal users, identity/endpoint groups, SGTs, SGACLs, authorization profiles, 
 fails: it reports which surfaces answer (ERS is often disabled or firewalled).
 Start here: "why can't X connect?" -> ise_why_auth_failed (MAC preferred); "what is this device?" ->
 ise_endpoint_360; "who failed / what connected in the last hour?" -> ise_recent_auth_failures and
-ise_get_auth_list (by NAD or user, no MAC needed); "which NAD is 10.1.2.3?" -> ise_get_nad; "what does
+ise_get_auth_list (by NAD or user, no MAC needed); "is the deployment healthy?" ->
+ise_deployment_health; "which NAD is 10.1.2.3?" -> ise_get_nad; "what does
 policy do?" -> ise_list_policy_sets then ise_get_policy_set. Everything is queried from ISE when called:
 MnT keeps per-MAC auth history and has nothing when no RADIUS reached ISE. Policy changes (writes):
 ise_create_policy_set -> ise_create_authn_rule -> ise_create_authz_rule, then ise_update_policy_rule;
@@ -79,6 +81,7 @@ def create_server(
             policy.register,
             trustsec.register,
             system.register,
+            health.register,
             writes.register,
             policy_edit.register,
             device_admin.register,
