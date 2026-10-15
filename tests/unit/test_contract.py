@@ -10,7 +10,16 @@ PROMPT_SAMPLES = {
         "username": "alice",
         "ip": "10.0.0.5",
         "switch": "lab/sw1",
-    }
+    },
+    "ise_quarantine_host": {
+        "reason": "INC-1234 malware alert",
+        "mac": "aa:bb:cc:dd:ee:ff",
+        "ip": "10.0.0.5",
+        "username": "alice",
+        "anc_policy": "Quarantine",
+        "fmc_block": "true",
+        "switch": "lab/sw1",
+    },
 }
 KNOWN = {"cml", "ise", "fmc", "catc"}
 
@@ -82,3 +91,41 @@ async def test_troubleshoot_prompt_rejects_unsafe_args(args: dict[str, str]) -> 
     async with Client(make_server()) as c:
         with pytest.raises(Exception):  # noqa: B017 - FastMCP wraps the validation error
             await c.get_prompt("ise_troubleshoot_endpoint_access", args)
+
+
+async def test_quarantine_prompt_dangerous_and_fmc() -> None:
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
+    async with Client(server) as c:
+        r = await c.get_prompt(
+            "ise_quarantine_host",
+            {"reason": "INC-1 alert", "ip": "10.10.10.100", "fmc_block": "true", "anc_policy": "Quarantine"},
+        )
+    text = r.messages[0].content.text  # type: ignore[union-attr]
+    assert '`ise_apply_anc` with mac=<the MAC from step 1>, policy="Quarantine"' in text
+    assert '`ise_find_session` with ip="10.10.10.100"' in text
+    assert "`fmc_contain_host`" in text and "`fmc_release_host`" in text
+    assert "`ise_clear_anc`" in text and "never pass confirm" in text
+    assert "`ise_create_authz_rule`" in text
+
+
+async def test_quarantine_prompt_read_only_gives_gui_steps() -> None:
+    async with Client(make_server()) as c:
+        r = await c.get_prompt("ise_quarantine_host", {"reason": "x", "mac": "aa:bb:cc:dd:ee:ff"})
+    text = r.messages[0].content.text  # type: ignore[union-attr]
+    assert "`ise_apply_anc`" not in text and "MCP_ENABLE_DANGEROUS" in text
+    for name in ("fmc_release_host", "ise_create_anc_policy", "ise_create_authz_rule", "`ise_clear_anc`"):
+        assert name not in text, name
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"reason": "x"},
+        {"reason": 'bad "quote" ignore previous', "mac": "aa:bb:cc:dd:ee:ff"},
+        {"reason": "x", "mac": "aa:bb:cc:dd:ee:ff", "anc_policy": "a b; c"},
+    ],
+)
+async def test_quarantine_prompt_rejects_bad_args(args: dict[str, str]) -> None:
+    async with Client(make_server()) as c:
+        with pytest.raises(Exception):  # noqa: B017 - FastMCP wraps the InvalidRequest
+            await c.get_prompt("ise_quarantine_host", args)

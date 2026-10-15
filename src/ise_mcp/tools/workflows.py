@@ -70,6 +70,7 @@ def fix_instructions(enabled: set[str]) -> str:
 def register(reg: ToolRegistrar) -> None:
     # Registered after every tool module, so reg.tiers holds the tools this server exposes.
     fix_text = fix_instructions(set(reg.tiers))
+    register_quarantine(reg)
 
     @reg.prompt(
         title="Troubleshoot endpoint network access",
@@ -174,3 +175,170 @@ before step 8.
    - PASS but no access: dACL/VLAN/SGT on the switch differs from ISE, or ANC quarantine.
 {fix_text}
    Finish with how to verify: re-run {tool_ref("ise_why_auth_failed")} after the client retries."""
+
+
+SAFE_REASON = re.compile(r"^[\w .,:;#/@()+-]{1,120}$", re.ASCII)
+SAFE_NAME = re.compile(r"^[\w.-]{1,64}$")
+
+
+def quarantine_apply_text(enabled: set[str], policy: str, mac_arg: str) -> tuple[str, str]:
+    """(apply step, undo step) for ise_quarantine_host: tool calls when the dangerous tier is on,
+    GUI steps otherwise."""
+    if "ise_apply_anc" not in enabled:
+        return (
+            "   The dangerous tools (ise_apply_anc / ise_clear_anc) are not enabled on this server. Tell\n"
+            "   the user how to apply it in the GUI: Context Visibility > Endpoints > select the MAC >\n"
+            f'   ANC > "{policy}", or enable MCP_ENABLE_DANGEROUS. Stop here unless they do it.',
+            "   GUI: Context Visibility > Endpoints > select the MAC > ANC > Clear.",
+        )
+    return (
+        f'   Call {tool_ref("ise_apply_anc")} with {mac_arg}, policy="{policy}" WITHOUT confirm. Show\n'
+        "   the preview (policy actions, the live session it will CoA, rule warnings) and wait for the\n"
+        "   user's approval; never pass confirm yourself. ISE sends the CoA itself.",
+        f"   {tool_ref('ise_clear_anc')} with {mac_arg} (preview first; the user's approval is needed\n"
+        "   before the confirmed call): ISE re-authorizes the session and the normal rule applies again.",
+    )
+
+
+def register_quarantine(reg: ToolRegistrar) -> None:
+    enabled = set(reg.tiers)
+
+    @reg.prompt(
+        title="Quarantine a host",
+        uses=["ise", "fmc", "cml", "catc"],
+        tools=[
+            "ise_find_session",
+            "ise_endpoint_360",
+            "ise_list_anc_policies",
+            "ise_list_anc_endpoints",
+            "ise_get_policy_set",
+        ],
+    )
+    def ise_quarantine_host(
+        reason: Annotated[
+            str, Field(description="Why (ticket, alert); recorded in the steps and the FMC object")
+        ],
+        mac: Annotated[str, Field(description="Host MAC address, any notation (best)")] = "",
+        ip: Annotated[str, Field(description="Host IP address, if the MAC is not known")] = "",
+        username: Annotated[str, Field(description="Username, if neither MAC nor IP is known")] = "",
+        anc_policy: Annotated[
+            str, Field(description="ANC policy with the QUARANTINE action; empty: find one")
+        ] = "",
+        fmc_block: Annotated[
+            bool, Field(description="Also block the host's IP on the firewalls with fmc_contain_host")
+        ] = False,
+        switch: Annotated[
+            str,
+            Field(
+                description="Where to verify on the switch: a Catalyst Center device name/IP, or "
+                "'lab/node' for a CML node (e.g. mcp-cml-ise/sw1). Empty: the NAD from the session"
+            ),
+        ] = "",
+    ) -> str:
+        """Contain a host in minutes, each step previewed and verified: find its session, check that an
+        ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify
+        the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and
+        finish with the exact undo steps. Nothing changes without the user's approval of a preview."""
+        mac, username, ip, switch = _validated(mac, username, ip, switch)
+        if not (mac or username or ip):
+            raise InvalidRequest("Give the host's mac, ip or username")
+        reason = reason.strip()
+        if not SAFE_REASON.match(reason):
+            raise InvalidRequest(
+                "reason: up to 120 ASCII letters, digits, spaces and . , : ; # / @ ( ) + - _"
+            )
+        anc_policy = anc_policy.strip()
+        if anc_policy and not SAFE_NAME.match(anc_policy):
+            raise InvalidRequest("anc_policy may only contain letters, digits, . - _")
+        who = _who(mac, username, ip)
+        mac_arg = f'mac="{mac}"' if mac else "mac=<the MAC from step 1>"
+        policy = anc_policy or "<the policy chosen in step 2>"
+        if switch and "/" in switch:
+            lab, node = switch.split("/", 1)
+            cli = f'{tool_ref("cml_run_commands")} with lab="{lab}", nodes=["{node}"]'
+        elif switch:
+            cli = f'{tool_ref("catc_run_show_commands")} with devices=["{switch}"]'
+        else:
+            cli = (
+                f"{tool_ref('catc_run_show_commands')} with devices=[<the NAD IP>], or "
+                f"{tool_ref('cml_run_commands')} if the switch is a CML node"
+            )
+        apply_text, undo_text = quarantine_apply_text(enabled, policy, mac_arg)
+        if {"ise_create_anc_policy", "ise_create_authz_rule"} <= enabled:
+            setup_text = (
+                f"Propose them as previews: {tool_ref('ise_create_anc_policy')} with\n"
+                f'     actions=["QUARANTINE"]; {tool_ref("ise_create_authz_rule")} with that condition\n'
+                "     at rank 0."
+            )
+        else:
+            setup_text = (
+                "Write tools are off: tell the user to create them in the GUI (Operations >\n"
+                "     Adaptive Network Control > Policy List; Policy > Policy Sets > Authorization)."
+            )
+        fmc_text = (
+            f"""6. Firewall containment (fmc server). Call {tool_ref("fmc_contain_host")} with
+   ip=<the host IP>, reason="{reason}" WITHOUT confirm. It maps the IP into the quarantine
+   dynamic object that BLOCK rules reference, within seconds and without a deployment. Show the
+   preview (object, rules, devices; a first-time setup that needs a deploy is called out) and wait
+   for approval. If the fmc
+   server isn't connected, say so and skip this step.
+   Verify: the applied result lists the IP in the object; traffic from the host through the FTD is
+   dropped (e.g. {tool_ref("fmc_packet_tracer")} from the host IP, if available)."""
+            if fmc_block
+            else "6. Firewall containment: not requested (fmc_block=false). Mention that "
+            f"{tool_ref('fmc_contain_host')} can add it."
+        )
+        fmc_undo = (
+            f"\n   - Firewall: {tool_ref('fmc_release_host')} with ip=<the host IP> (preview first; the\n"
+            "     user's approval is needed before the confirmed call)."
+            if fmc_block
+            else ""
+        )
+        return f"""Quarantine {who}. Reason: {reason}.
+Keep an evidence list (tool -> finding). Every change is a preview first: show it, wait for the
+user's approval, and never pass confirm yourself.
+
+1. Find the host. Call {tool_ref("ise_find_session")} with {
+            f'mac="{mac}"' if mac else (f'ip="{ip}"' if ip else f'username="{username}"')
+        }.
+   Note the MAC (calling_station_id), IP, NAD IP, port, authorization profile, SGT and policy set.
+   No live session: ANC still marks the endpoint, but nothing changes on the network until it
+   reconnects; tell the user and ask whether to continue.
+
+2. Check the quarantine plumbing (read only).
+   - {tool_ref("ise_list_anc_policies")}: {
+            f'confirm "{anc_policy}" exists and has the QUARANTINE action.'
+            if anc_policy
+            else "pick the policy with the QUARANTINE action (ask if there are several)."
+        }
+   - {tool_ref("ise_get_policy_set")} for the session's policy set: an authorization rule on
+     'Session:ANCPolicy equals {policy}' must exist, be enabled and rank ABOVE the rule that
+     matches the host today, with a quarantine profile (restrictive dACL and/or SGT such as
+     Quarantined_Systems).
+   - Missing policy or rule: stop. {setup_text} Without the rule, ANC changes nothing on the network.
+   - {tool_ref("ise_list_anc_endpoints")} with {mac_arg}: already quarantined? Then report it and stop.
+
+3. Apply the quarantine.
+{apply_text}
+
+4. Verify in ISE: {tool_ref("ise_list_anc_endpoints")} shows the MAC with the policy; {
+            tool_ref("ise_endpoint_360")
+        } with
+   {mac_arg} shows anc_policy and, after the CoA, a session with the quarantine profile/SGT (allow
+   10-30 s for the re-authentication).
+
+5. Verify on the switch, using {cli}:
+   - show access-session mac <MAC in xxxx.xxxx.xxxx form> details   (ACS ACL = the quarantine dACL,
+     SGT = the quarantine SGT, status Authorized)
+   - show ip access-lists   (the downloaded quarantine dACL entries)
+   If the old dACL/SGT is still there, the CoA didn't reach the switch: check 'show aaa servers' and
+   the switch's 'aaa server radius dynamic-author' client for ISE.
+
+{fmc_text}
+
+7. Report and record the undo. Summarise: host, session, policy, rule hit, what the switch shows,
+   firewall state, and the time. Then list the exact undo steps:
+{undo_text}{fmc_undo}
+   - Verify after undo: the session is re-authorized with the normal profile/SGT (step 4 and 5 checks).
+     The CoA can end the session; an 802.1X client normally re-authenticates within a minute, but a
+     held supplicant may need a restart (or a port bounce) before a new session shows up."""
