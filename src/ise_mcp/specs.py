@@ -108,6 +108,58 @@ def _object_schema(fields: list[dict[str, Any]], schemas: dict[str, Any], prefix
     return out
 
 
+# ERS request/response bodies are wrapped in a type name that the data model doesn't include. These were
+# read from GET responses on ISE 3.5 (plus the documented names for resources the lab had no objects of).
+ERS_WRAPPERS = {
+    "activedirectory": "ERSActiveDirectory",
+    "adminuser": "AdminUser",
+    "allowedprotocols": "AllowedProtocols",
+    "ancendpoint": "ErsAncEndpoint",
+    "ancpolicy": "ErsAncPolicy",
+    "authorizationprofile": "AuthorizationProfile",
+    "byodportal": "BYODPortal",
+    "certificateprofile": "CertificateProfile",
+    "certificatetemplate": "ERSCertificateTemplate",
+    "downloadableacl": "DownloadableAcl",
+    "egressmatrixcell": "EgressMatrixCell",
+    "endpoint": "ERSEndPoint",
+    "endpointgroup": "EndPointGroup",
+    "externalradiusserver": "ExternalRadiusServer",
+    "guestsmtpnotificationsettings": "ERSGuestSmtpNotificationSettings",
+    "guesttype": "GuestType",
+    "guestuser": "GuestUser",
+    "hotspotportal": "HotspotPortal",
+    "identitygroup": "IdentityGroup",
+    "idstoresequence": "IdStoreSequence",
+    "internaluser": "InternalUser",
+    "mydeviceportal": "MyDevicePortal",
+    "networkdevice": "NetworkDevice",
+    "networkdevicegroup": "NetworkDeviceGroup",
+    "node": "Node",
+    "portal": "ERSPortal",
+    "portalglobalsetting": "PortalCustomizationGlobalSetting",
+    "portaltheme": "PortalTheme",
+    "profilerprofile": "ProfilerProfile",
+    "radiusserversequence": "RadiusServerSequence",
+    "selfregportal": "SelfRegPortal",
+    "sgacl": "Sgacl",
+    "sgmapping": "SGMapping",
+    "sgmappinggroup": "SGMappingGroup",
+    "sgt": "Sgt",
+    "sgtvnvlan": "SgtVNVlanContainer",
+    "sponsoredguestportal": "SponsoredGuestPortal",
+    "sponsorgroup": "SponsorGroup",
+    "sponsorportal": "SponsorPortal",
+    "sxpconnections": "ERSSxpConnection",
+    "sxplocalbindings": "ERSSxpLocalBindings",
+    "sxpvpns": "ERSSxpVpn",
+    "tacacscommandsets": "TacacsCommandSets",
+    "tacacsexternalservers": "TacacsExternalServer",
+    "tacacsprofile": "TacacsProfile",
+    "tacacsserversequence": "TacacsServerSequence",
+}
+
+
 def ers_doc_from_data_model(model: dict[str, Any], version: str = "ERS") -> dict[str, Any]:
     """Synthetic OpenAPI 3 doc: for each resource, list/create and get/update/delete by id."""
     paths: dict[str, Any] = {}
@@ -130,7 +182,18 @@ def ers_doc_from_data_model(model: dict[str, Any], version: str = "ERS") -> dict
         all_fields = common + fields
         schemas[schema_name] = _object_schema(all_fields, schemas, schema_name)
         schemas[schema_name]["description"] = f"ERS {title}. {note}"
-        ref = {"content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{schema_name}"}}}}
+        inner = {"$ref": f"#/components/schemas/{schema_name}"}
+        wrapper = ERS_WRAPPERS.get(res)
+        if wrapper:
+            schemas[schema_name]["description"] += f' Request/response body: {{"{wrapper}": {{...}}}}.'
+            body_schema: dict[str, Any] = {
+                "type": "object",
+                "required": [wrapper],
+                "properties": {wrapper: inner},
+            }
+        else:
+            body_schema = inner
+        ref = {"content": {"application/json": {"schema": body_schema}}}
         base = f"/ers/config/{res}"
         tag = [f"ERS {title}"]
         paging = [

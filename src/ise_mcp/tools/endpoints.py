@@ -7,11 +7,11 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import NotFound, ResponseFormat, ToolRegistrar, get_client, list_result
+from stutters_mcp_core import NotFound, ResponseFormat, ToolRegistrar, get_client
 from stutters_mcp_core.http import PageNumber
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list, ers_name_map, is_uuid
+from ise_mcp.tools._common import ers_list, ers_name_map, is_uuid, list_result
 
 ENDPOINT_PAGER = PageNumber(items=None, total=None, max_size=100)
 ENDPOINT_COLUMNS = ["mac", "group", "static_group", "profile", "ip", "description", "id"]

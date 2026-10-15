@@ -120,16 +120,25 @@ class IseApp:
         and mentions CSRF, fetch a token (X-CSRF-Token: fetch) and retry once."""
         headers = {"X-CSRF-Token": self._csrf} if self._csrf and method.upper() != "GET" else None
         try:
-            return await self.ers.request(
+            out = await self.ers.request(
                 method, path, params=params, json=json, headers=headers, expect=expect
             )
         except AuthError as e:
             if method.upper() == "GET" or "csrf" not in str(e).lower():
                 raise
-        await self._fetch_csrf()
-        return await self.ers.request(
-            method, path, params=params, json=json, headers={"X-CSRF-Token": self._csrf or ""}, expect=expect
-        )
+            await self._fetch_csrf()
+            out = await self.ers.request(
+                method,
+                path,
+                params=params,
+                json=json,
+                headers={"X-CSRF-Token": self._csrf or ""},
+                expect=expect,
+            )
+        if method.upper() != "GET":
+            # Any ERS write can rename or remove objects that the cached name->id maps hold.
+            self.__dict__.pop("_name_maps", None)
+        return out
 
     async def _fetch_csrf(self) -> None:
         resp = await self.ers.request(

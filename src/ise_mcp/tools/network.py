@@ -16,13 +16,12 @@ from stutters_mcp_core import (
     ResponseFormat,
     ToolRegistrar,
     get_client,
-    list_result,
     object_result,
 )
 from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list, ers_resolve, parse_ip
+from ise_mcp.tools._common import ers_list, ers_resolve, list_result, parse_ip
 
 NAD_CACHE_SECONDS = 60
 DEFAULT_NDGS = {"Location#All Locations", "Device Type#All Device Types"}
@@ -75,7 +74,7 @@ async def all_nads(app: IseApp, cap: int = 1000) -> tuple[list[dict[str, Any]], 
     cached = app.__dict__.get("_nad_cache")
     if cached and time.monotonic() - cached[0] < NAD_CACHE_SECONDS:
         return cached[1], cached[2]
-    page = await ers_list(app, "networkdevice", limit=cap, offset=0, detail=True)
+    page = await ers_list(app, "networkdevice", limit=cap, offset=0, detail=True, detail_cap=None)
     nads = [n for n in page.items if isinstance(n, dict)]
     app.__dict__["_nad_cache"] = (time.monotonic(), nads, page.complete)
     return nads, page.complete
@@ -135,7 +134,7 @@ def register(reg: ToolRegistrar) -> None:
             Field(description="Filter: device group (location or device type) contains, e.g. 'Sydney'"),
         ] = None,
         detail: Annotated[
-            bool, Field(description="Fetch each device for IPs, groups and which secrets are set (slower)")
+            bool, Field(description="Fetch each device for IPs, groups and secrets set (pages up to 100)")
         ] = True,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
         offset: Annotated[int, Field(ge=0)] = 0,
