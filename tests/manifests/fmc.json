@@ -1,5 +1,5 @@
 {
-  "core_version": "0.9.0",
+  "core_version": "0.12.4",
   "manifest": 1,
   "prefix": "fmc",
   "prompts": {
@@ -62,9 +62,8 @@
       ],
       "references": [
         "fmc_rule_lookup",
-        "fmc_list_device_interfaces",
-        "fmc_list_routes",
         "fmc_packet_tracer",
+        "fmc_list_routes",
         "fmc_get_hit_counts",
         "fmc_pending_changes",
         "fmc_list_deployments",
@@ -92,6 +91,14 @@
       "tier": "write",
       "title": "Assign policy to devices"
     },
+    "fmc_backup_devices": {
+      "tier": "dangerous",
+      "title": "Back up devices"
+    },
+    "fmc_change_tickets": {
+      "tier": "read",
+      "title": "Change-management tickets"
+    },
     "fmc_configure_bgp": {
       "tier": "write",
       "title": "Configure BGP"
@@ -100,9 +107,21 @@
       "tier": "write",
       "title": "Configure HA monitored interface"
     },
+    "fmc_configure_ntp": {
+      "tier": "write",
+      "title": "Configure NTP"
+    },
     "fmc_configure_ospf": {
       "tier": "write",
       "title": "Configure OSPF"
+    },
+    "fmc_configure_snmp": {
+      "tier": "write",
+      "title": "Configure SNMP"
+    },
+    "fmc_configure_ssh_access": {
+      "tier": "write",
+      "title": "Configure SSH management access"
     },
     "fmc_configure_syslog": {
       "tier": "write",
@@ -120,6 +139,18 @@
       "tier": "write",
       "title": "Create access rule"
     },
+    "fmc_create_decryption_policy": {
+      "tier": "write",
+      "title": "Create decryption policy"
+    },
+    "fmc_create_decryption_rule": {
+      "tier": "write",
+      "title": "Create decryption rule"
+    },
+    "fmc_create_dns_policy": {
+      "tier": "write",
+      "title": "Create DNS policy"
+    },
     "fmc_create_dynamic_object": {
       "tier": "write",
       "title": "Create dynamic object"
@@ -131,6 +162,14 @@
     "fmc_create_ha_pair": {
       "tier": "dangerous",
       "title": "Form HA pair"
+    },
+    "fmc_create_intrusion_policy": {
+      "tier": "write",
+      "title": "Create intrusion policy"
+    },
+    "fmc_create_intrusion_rule": {
+      "tier": "write",
+      "title": "Create custom intrusion rule"
     },
     "fmc_create_nat_policy": {
       "tier": "write",
@@ -147,6 +186,14 @@
     "fmc_create_platform_settings_policy": {
       "tier": "write",
       "title": "Create platform settings policy"
+    },
+    "fmc_create_prefilter_policy": {
+      "tier": "write",
+      "title": "Create prefilter policy"
+    },
+    "fmc_create_prefilter_rule": {
+      "tier": "write",
+      "title": "Create prefilter rule"
     },
     "fmc_create_s2s_vpn": {
       "tier": "write",
@@ -172,6 +219,10 @@
       "tier": "write",
       "title": "Delete access rule"
     },
+    "fmc_delete_decryption_rule": {
+      "tier": "write",
+      "title": "Delete decryption rule"
+    },
     "fmc_delete_device": {
       "tier": "dangerous",
       "title": "Delete (unregister) device"
@@ -184,6 +235,10 @@
       "tier": "write",
       "title": "Delete interface"
     },
+    "fmc_delete_intrusion_rule": {
+      "tier": "write",
+      "title": "Delete custom intrusion rule"
+    },
     "fmc_delete_nat_rule": {
       "tier": "write",
       "title": "Delete NAT rule"
@@ -195,6 +250,10 @@
     "fmc_delete_policy": {
       "tier": "dangerous",
       "title": "Delete policy"
+    },
+    "fmc_delete_prefilter_rule": {
+      "tier": "write",
+      "title": "Delete prefilter rule"
     },
     "fmc_delete_s2s_vpn": {
       "tier": "write",
@@ -216,6 +275,18 @@
       "tier": "read",
       "title": "Device health"
     },
+    "fmc_dns_block": {
+      "tier": "write",
+      "title": "Block or unblock domains (DNS)"
+    },
+    "fmc_export_access_rules": {
+      "tier": "read",
+      "title": "Export access rules"
+    },
+    "fmc_find_intrusion_rules": {
+      "tier": "read",
+      "title": "Find intrusion rules"
+    },
     "fmc_find_object": {
       "tier": "read",
       "title": "Find objects by value"
@@ -228,6 +299,10 @@
       "tier": "read",
       "title": "Get access rule"
     },
+    "fmc_get_decryption_policy": {
+      "tier": "read",
+      "title": "Decryption policies"
+    },
     "fmc_get_definition": {
       "tier": "read",
       "title": "Describe a Cisco Secure Firewall Management Center API path or schema"
@@ -236,13 +311,25 @@
       "tier": "read",
       "title": "Get device"
     },
+    "fmc_get_dns_policy": {
+      "tier": "read",
+      "title": "DNS policies"
+    },
     "fmc_get_ha_status": {
       "tier": "read",
       "title": "Get HA pair status"
     },
+    "fmc_get_health_policy": {
+      "tier": "read",
+      "title": "Health policies"
+    },
     "fmc_get_hit_counts": {
       "tier": "read",
       "title": "Rule hit counts"
+    },
+    "fmc_get_intrusion_policy": {
+      "tier": "read",
+      "title": "Intrusion policy summary"
     },
     "fmc_get_object": {
       "tier": "read",
@@ -260,6 +347,10 @@
       "tier": "read",
       "title": "Get device routing"
     },
+    "fmc_get_security_intelligence": {
+      "tier": "read",
+      "title": "Security Intelligence settings"
+    },
     "fmc_get_task": {
       "tier": "read",
       "title": "Get FMC task status"
@@ -272,6 +363,14 @@
       "tier": "dangerous",
       "title": "Break, switch or delete HA pair"
     },
+    "fmc_import_access_rules": {
+      "tier": "write",
+      "title": "Import access rules"
+    },
+    "fmc_import_objects": {
+      "tier": "write",
+      "title": "Import objects"
+    },
     "fmc_license_status": {
       "tier": "read",
       "title": "FMC licensing status"
@@ -283,6 +382,10 @@
     "fmc_list_audit_records": {
       "tier": "read",
       "title": "FMC audit records"
+    },
+    "fmc_list_backups": {
+      "tier": "read",
+      "title": "List backups"
     },
     "fmc_list_clusters": {
       "tier": "read",
@@ -324,6 +427,10 @@
       "tier": "read",
       "title": "List NAT rules"
     },
+    "fmc_list_object_overrides": {
+      "tier": "read",
+      "title": "Object overrides"
+    },
     "fmc_list_objects": {
       "tier": "read",
       "title": "List objects"
@@ -343,6 +450,10 @@
     "fmc_list_routes": {
       "tier": "read",
       "title": "List device routes"
+    },
+    "fmc_list_users": {
+      "tier": "read",
+      "title": "FMC users"
     },
     "fmc_list_vpn_topologies": {
       "tier": "read",
@@ -396,13 +507,45 @@
       "tier": "write",
       "title": "Set access policy logging (syslog)"
     },
+    "fmc_set_decryption_policy": {
+      "tier": "write",
+      "title": "Link decryption policy to access policy"
+    },
+    "fmc_set_device_licenses": {
+      "tier": "write",
+      "title": "Set device licences"
+    },
+    "fmc_set_dns_policy": {
+      "tier": "write",
+      "title": "Link DNS policy to access policy"
+    },
+    "fmc_set_intrusion_rule_state": {
+      "tier": "write",
+      "title": "Set intrusion rule state"
+    },
+    "fmc_set_object_override": {
+      "tier": "write",
+      "title": "Set object override"
+    },
+    "fmc_set_prefilter_policy": {
+      "tier": "write",
+      "title": "Link prefilter policy to access policy"
+    },
     "fmc_shadowed_rules": {
       "tier": "read",
       "title": "Find shadowed access rules"
     },
+    "fmc_si_block": {
+      "tier": "write",
+      "title": "Security Intelligence block/unblock"
+    },
     "fmc_status": {
       "tier": "read",
       "title": "Cisco Secure Firewall Management Center status"
+    },
+    "fmc_ticket": {
+      "tier": "write",
+      "title": "Open, submit or discard a ticket"
     },
     "fmc_unused_objects": {
       "tier": "read",
@@ -416,6 +559,10 @@
       "tier": "write",
       "title": "Update object group"
     },
+    "fmc_update_health_policy": {
+      "tier": "write",
+      "title": "Update health policy module"
+    },
     "fmc_update_interface": {
       "tier": "write",
       "title": "Configure interface"
@@ -428,10 +575,18 @@
       "tier": "write",
       "title": "Update object"
     },
+    "fmc_update_prefilter_rule": {
+      "tier": "write",
+      "title": "Update prefilter rule"
+    },
+    "fmc_upgrade_status": {
+      "tier": "read",
+      "title": "Version and upgrade status"
+    },
     "fmc_where_used": {
       "tier": "read",
       "title": "Where is an object used"
     }
   },
-  "version": "0.4.0"
+  "version": "0.9.1"
 }

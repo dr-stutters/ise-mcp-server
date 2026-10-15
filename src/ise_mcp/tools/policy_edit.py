@@ -451,7 +451,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             raise InvalidRequest("Nothing to change: give at least one field that differs")
         if current.get("default") and any(x is not None for x in (conditions, rank, new_name)):
             blockers.append("The Default policy set's name, rank and condition can't be changed")
-        changes = field_changes(current, desired)
+        changes = field_changes(current, desired, replace=True)
         if any(k == "condition" or k.startswith("condition.") for k in changes):
             changes = {k: v for k, v in changes.items() if not k.startswith("condition")}
             changes["condition"] = {
@@ -756,7 +756,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             blockers += await _results(app, kind, desired, profiles, sgt, command_sets, shell_profile)
         if desired == current:
             raise InvalidRequest("Nothing to change: give at least one field that differs")
-        changes = field_changes(current, desired)
+        changes = field_changes(current, desired, replace=True)
         if any(k.startswith("rule.condition") for k in changes):
             changes = {k: v for k, v in changes.items() if not k.startswith("rule.condition")}
             changes["rule.condition"] = {

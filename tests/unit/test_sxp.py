@@ -192,3 +192,31 @@ async def test_push_trustsec_matrix(mock: respx.MockRouter) -> None:
     assert preview["status"] == "preview"
     assert json.loads(push.calls.last.request.content) == {"coaType": "SGACL"}
     assert applied["status"] == "applied"
+
+
+async def test_set_ip_sgt_deploy_all_preview_shows_removed_target(mock: respx.MockRouter) -> None:
+    """deploy_to='all' drops deployTo from the whole-object PUT; the preview lists it as removed."""
+    sgt_routes(mock)
+    mock.get("/ers/config/sgmapping", params={"filter": "name.EQ.10.9.9.0/24"}).respond(
+        json=ers_page([{"id": "m1", "name": "10.9.9.0/24"}])
+    )
+    mock.get("/ers/config/sgmapping/m1").respond(
+        json={
+            "SGMapping": {
+                "id": "m1",
+                "name": "10.9.9.0/24",
+                "hostIp": "10.9.9.0/24",
+                "sgt": "sgt-dev",
+                "deployType": "ND",
+                "deployTo": "nad-1",
+            }
+        }
+    )
+    put = mock.put("/ers/config/sgmapping/m1").respond(json={})
+    preview, _ = await two_step(
+        "ise_set_ip_sgt", {"ip": "10.9.9.0/24", "sgt": "Developers", "deploy_to": "all"}
+    )
+    changes = preview["preview"]["changes"]
+    assert changes["deployTo"] == {"from": "nad-1", "to": None, "removed": True}
+    assert changes["deployType"] == {"from": "ND", "to": "ALL"}
+    assert "deployTo" not in json.loads(put.calls.last.request.content)["SGMapping"]

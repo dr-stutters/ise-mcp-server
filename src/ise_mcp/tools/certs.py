@@ -443,7 +443,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "description": description,
         }
         if current:
-            changes = field_changes(current, desired)
+            changes = field_changes(current, desired, replace=True)
             plan = Plan(
                 f"Update certificate profile {name}",
                 details={"changes": changes},
@@ -533,7 +533,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "description": description,
         }
         if current:
-            changes = field_changes(current, desired)
+            changes = field_changes(current, desired, replace=True)
             if not changes:
                 blockers.append(f"Nothing changes in {name}")
             plan = Plan(

@@ -1,5 +1,5 @@
 {
-  "core_version": "0.4.0",
+  "core_version": "0.12.3",
   "manifest": 1,
   "prefix": "catc",
   "prompts": {
@@ -16,6 +16,34 @@
       "tier": "write",
       "uses": [
         "catc"
+      ]
+    },
+    "catc_decommission_device": {
+      "arguments": [
+        "device",
+        "clean_config",
+        "remove_ise_nad"
+      ],
+      "references": [
+        "catc_device_360",
+        "catc_get_device_config",
+        "catc_list_config_archive",
+        "catc_delete_device",
+        "catc_list_tags",
+        "catc_list_tag_members",
+        "catc_update_tag_members",
+        "catc_get_device",
+        "catc_get_task",
+        "ise_get_nad",
+        "ise_delete_nad",
+        "ise_list_nads",
+        "catc_onboard_device"
+      ],
+      "rendered": true,
+      "tier": "dangerous",
+      "uses": [
+        "catc",
+        "ise"
       ]
     },
     "catc_onboard_device": {
@@ -45,7 +73,7 @@
         "catc_deploy_template",
         "catc_device_360",
         "catc_run_compliance",
-        "catc_get_compliance_summary",
+        "catc_get_compliance_detail",
         "catc_run_show_commands",
         "catc_recent_activity"
       ],
@@ -84,6 +112,14 @@
       "tier": "dangerous",
       "title": "Activate software image"
     },
+    "catc_add_anycast_gateway": {
+      "tier": "dangerous",
+      "title": "Add anycast gateway"
+    },
+    "catc_add_fabric_device": {
+      "tier": "dangerous",
+      "title": "Add fabric device"
+    },
     "catc_add_ise_server": {
       "tier": "dangerous",
       "title": "Add Cisco ISE to Catalyst Center"
@@ -99,6 +135,10 @@
     "catc_assign_devices_to_site": {
       "tier": "write",
       "title": "Assign devices to site"
+    },
+    "catc_assign_fabric_port": {
+      "tier": "dangerous",
+      "title": "Assign fabric edge port"
     },
     "catc_assign_profile_to_sites": {
       "tier": "write",
@@ -136,6 +176,10 @@
       "tier": "write",
       "title": "Create discovery"
     },
+    "catc_create_fabric_site": {
+      "tier": "write",
+      "title": "Create fabric site"
+    },
     "catc_create_global_credential": {
       "tier": "write",
       "title": "Create global credential"
@@ -144,9 +188,17 @@
       "tier": "write",
       "title": "Create IP pool"
     },
+    "catc_create_report": {
+      "tier": "write",
+      "title": "Create report"
+    },
     "catc_create_site": {
       "tier": "write",
       "title": "Create site"
+    },
+    "catc_create_ssid": {
+      "tier": "write",
+      "title": "Create SSID"
     },
     "catc_create_switching_profile": {
       "tier": "write",
@@ -164,13 +216,21 @@
       "tier": "write",
       "title": "Create template project"
     },
+    "catc_create_virtual_network": {
+      "tier": "write",
+      "title": "Create virtual network"
+    },
+    "catc_create_wireless_profile": {
+      "tier": "write",
+      "title": "Create wireless profile"
+    },
     "catc_delete_compliance_policy": {
       "tier": "dangerous",
       "title": "Delete compliance policy"
     },
     "catc_delete_device": {
       "tier": "dangerous",
-      "title": "Delete device"
+      "title": "Delete device (un-provision)"
     },
     "catc_delete_discovery": {
       "tier": "dangerous",
@@ -192,9 +252,21 @@
       "tier": "dangerous",
       "title": "Remove an authentication and policy server"
     },
+    "catc_delete_report": {
+      "tier": "write",
+      "title": "Delete report"
+    },
+    "catc_delete_sda_object": {
+      "tier": "dangerous",
+      "title": "Delete SDA object"
+    },
     "catc_delete_site": {
       "tier": "dangerous",
       "title": "Delete site"
+    },
+    "catc_delete_ssid": {
+      "tier": "write",
+      "title": "Delete SSID"
     },
     "catc_delete_tag": {
       "tier": "write",
@@ -207,6 +279,10 @@
     "catc_delete_template_project": {
       "tier": "write",
       "title": "Delete template project"
+    },
+    "catc_delete_wireless_profile": {
+      "tier": "write",
+      "title": "Delete wireless profile"
     },
     "catc_deploy_template": {
       "tier": "dangerous",
@@ -284,6 +360,14 @@
       "tier": "read",
       "title": "List authentication and policy servers"
     },
+    "catc_get_report_content": {
+      "tier": "read",
+      "title": "Get report content"
+    },
+    "catc_get_report_view": {
+      "tier": "read",
+      "title": "Get report view"
+    },
     "catc_get_sda_fabric": {
       "tier": "read",
       "title": "SDA fabric"
@@ -320,9 +404,17 @@
       "tier": "read",
       "title": "VLAN topology"
     },
+    "catc_get_wireless_controller": {
+      "tier": "read",
+      "title": "Wireless controller"
+    },
     "catc_list_audit_logs": {
       "tier": "read",
       "title": "List audit logs"
+    },
+    "catc_list_clients": {
+      "tier": "read",
+      "title": "List clients"
     },
     "catc_list_compliance_policies": {
       "tier": "read",
@@ -392,6 +484,10 @@
       "tier": "read",
       "title": "List assurance issues"
     },
+    "catc_list_itsm_instances": {
+      "tier": "read",
+      "title": "List ITSM integrations"
+    },
     "catc_list_network_profiles": {
       "tier": "read",
       "title": "List network profiles"
@@ -399,6 +495,14 @@
     "catc_list_pnp_devices": {
       "tier": "read",
       "title": "List PnP devices"
+    },
+    "catc_list_report_views": {
+      "tier": "read",
+      "title": "List report views"
+    },
+    "catc_list_reports": {
+      "tier": "read",
+      "title": "List reports"
     },
     "catc_list_ssids": {
       "tier": "read",
@@ -435,6 +539,10 @@
     "catc_provision_devices": {
       "tier": "dangerous",
       "title": "Provision devices"
+    },
+    "catc_provision_wireless_controller": {
+      "tier": "dangerous",
+      "title": "Provision wireless controller"
     },
     "catc_recent_activity": {
       "tier": "read",
@@ -501,5 +609,5 @@
       "title": "Update template"
     }
   },
-  "version": "0.3.0"
+  "version": "0.8.2"
 }
