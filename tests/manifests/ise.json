@@ -376,6 +376,10 @@
       "tier": "read",
       "title": "List SXP connections"
     },
+    "ise_policy_explain": {
+      "tier": "read",
+      "title": "Explain which policy rule a request would hit"
+    },
     "ise_push_trustsec_matrix": {
       "tier": "dangerous",
       "title": "Push TrustSec policy to devices (CoA)"
