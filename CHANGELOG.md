@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 (2026-10-15)
+
+Roadmap "Next" (I8–I10). I11 (AD join points) moved to Later: the lab ISE can't resolve a lab AD domain
+(name servers are CLI-only). Pull-only, as before.
+
+### Added
+- **I9 TrustSec writes:** `ise_list_sxp_connections`, `ise_list_sxp_bindings` (read); `ise_set_ip_sgt`
+  (create/update by IP/CIDR; SGT by name, value or id; SXP domains; deploy target all/NAD/NDG),
+  `ise_set_sxp_connection` (by peer + domain; `peer_role` = ISE's "Peer Role"), `ise_delete_trustsec_object`
+  (write); `ise_push_trustsec_matrix` (TrustSec CoA push), `ise_deploy_ip_sgt` (SSH deploy) (dangerous).
+- **I8 certificates:** `ise_list_csrs`, `ise_export_csr` (read); `ise_generate_csr`, `ise_import_trusted_cert`,
+  `ise_set_cert_auth_profile`, `ise_set_identity_sequence`, `ise_delete_csr` (write); `ise_bind_certificate`
+  (dangerous; the Admin role warns about the app-server restart). CA-agnostic (PEM in/out).
+- **I10 prompt `ise_quarantine_host`:** session -> ANC policy/rule check -> `ise_apply_anc` -> ISE and switch
+  verification -> optional `fmc_contain_host` -> undo (`ise_clear_anc`, `fmc_release_host`). Tier-aware.
+- `tests/manifests/ise.json` (core prompt test kit manifest) for the other servers' cross-reference checks.
+
+### Changed
+- Core pinned to `v0.4.0` (prompt test kit; `get_definition(examples=True)` from 0.3.1).
+- `ers_request`/`ers_create` take a per-request `timeout` (SXP writes take 30–60 s on ISE 3.5).
+- Failure knowledge for 12514 (client cert from an untrusted CA) and 12520.
+
 ## 0.3.0 (2026-10-15)
 
 Roadmap "Now" (I1–I6). Pull-only: every tool queries ISE when called (stutters-mcp-core ADR-003).
