@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.metadata
+
 import httpx
 import pytest
 import respx
@@ -86,7 +88,7 @@ async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
     assert all(ise["surfaces"][s]["ok"] for s in ("openapi", "ers", "mnt"))
     assert "warning" not in ise
     assert ise["server_version"] not in ("", None)
-    assert out["server"]["core_version"] == "0.4.0"
+    assert out["server"]["core_version"] == importlib.metadata.version("stutters-mcp-core")
 
 
 async def test_status_ers_down(mock: respx.MockRouter) -> None:
@@ -205,3 +207,24 @@ async def test_mnt_path_validation() -> None:
     with pytest.raises(InvalidRequest):
         await app.mnt_get("Session?x=1")
     await app.aclose()
+
+
+async def test_second_instance_routes_to_its_own_ise(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Core G10: ISE_INSTANCES adds an `instance` argument; calls go to that ISE's URL."""
+    monkeypatch.setenv("ISE_PROD_URL", "https://ise-prod.test")
+    monkeypatch.setenv("ISE_PROD_USERNAME", "ro")
+    monkeypatch.setenv("ISE_PROD_PASSWORD", "pw2")
+    with respx.mock(base_url="https://ise-prod.test", assert_all_called=False) as prod:
+        prod.get("/api/v1/deployment/node").respond(json={"response": []})
+        prod.get("/ers/config/op/systemconfig/iseversion").respond(
+            json={"OperationResult": {"resultValue": [{"name": "version", "value": "3.4.0.608"}]}}
+        )
+        prod.get("/admin/API/mnt/Version").respond(
+            text=xml("<product><version>3.4.0.608</version></product>")
+        )
+        server = make_server(instances="prod")
+        out = await call_tool(server, "ise_status", {"instance": "prod"})
+    text = str(out)
+    assert "3.4.0.608" in text
