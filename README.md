@@ -72,6 +72,8 @@ uv run ise-mcp-server check                # prints ise_status as JSON; exit 1 i
 | `ISE_PROBE_TIMEOUT` | `10` | Per-surface timeout used by `ise_status` |
 | `ISE_DETAIL_THRESHOLD` | `100` | ERS list pages above this size skip the per-item detail GETs |
 | `ISE_DETAIL_CONCURRENCY` | `5` | Concurrent per-item ERS GETs |
+| `ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS` | | Comma lists; a CoA/ANC/NAD-delete on any of these is blocked (safety rails, I18) |
+| `ISE_COA_ALLOW_SHARED_PORT` | `false` | Allow `port_bounce`/`port_shutdown` on a switch port with more than one live session (an uplink/trunk) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
 | `MCP_AUTH_TOKENS` | | `name:sha256:<hex>` entries; required for HTTP (`ise-mcp-server token <name>`) |
@@ -93,6 +95,26 @@ uv run ise-mcp-server check                # prints ise_status as JSON; exit 1 i
    - Writes: **ERS Admin** plus a group that can change policy/network resources, e.g. **Network Device
      Admin** and **Policy Admin**. MnT CoA needs **MnT Admin** (or Super Admin).
 3. For read-only use, keep `MCP_ENABLE_WRITES=false`. The write tools aren't registered at all then.
+
+See [docs/least-privilege.md](docs/least-privilege.md) for the full tier → admin-group mapping, the
+seed step (`scripts/seed_lab.py --least-privilege`) and the read-tier verification test.
+`ise_deployment_health` reports the server's own account and flags it when it holds more than the
+enabled tiers need.
+
+## Safety rails
+
+On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_TOOLS`,
+`MCP_MAX_BLAST_RADIUS`, `MCP_TWO_PERSON_TOOLS`; see core `docs/PRODUCTION.md`), this server adds:
+
+- **Protect-lists** (`ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS`): a CoA, ANC apply/clear
+  or NAD delete targeting a protected endpoint, user or device is blocked in the preview.
+- **Shared-port CoA guard**: `ise_coa_disconnect` with `port_bounce`/`port_shutdown` counts the live
+  sessions on the target switch port; if more than one shares it (an uplink or trunk) the action is
+  blocked unless `ISE_COA_ALLOW_SHARED_PORT=true`.
+- **Blast radius** (bound with `MCP_MAX_BLAST_RADIUS` / `MCP_BLAST_RADIUS_OVERRIDES`): reported by
+  `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_apply_anc` / `ise_clear_anc`
+  (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
+  certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
 ## Claude Code
 

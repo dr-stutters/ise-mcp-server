@@ -23,3 +23,17 @@ class Settings(BaseServerSettings):
     detail_concurrency: int = Field(
         default=5, ge=1, le=20, description="Concurrent per-item ERS GETs (ISE_DETAIL_CONCURRENCY)"
     )
+
+    # --- product safety rails (I18, on top of core G7) ------------------------------------------
+    # Protected endpoints/users/devices a disruptive action (CoA, ANC, NAD delete) is blocked on.
+    # Comma-separated, matched case-insensitively (MACs are normalised).
+    protect_macs: str = Field(default="", description="MACs never CoA'd/quarantined (ISE_PROTECT_MACS)")
+    protect_users: str = Field(default="", description="Usernames never CoA'd (ISE_PROTECT_USERS)")
+    protect_nads: str = Field(
+        default="", description="NAD names/IPs never deleted or CoA'd via (ISE_PROTECT_NADS)"
+    )
+    # A port_bounce / port_shutdown CoA on a switch port with more than one live session takes every
+    # endpoint on that port down (an uplink or trunk). Blocked unless this is set.
+    coa_allow_shared_port: bool = Field(
+        default=False, description="Allow port_bounce/shutdown on a shared port (ISE_COA_ALLOW_SHARED_PORT)"
+    )
