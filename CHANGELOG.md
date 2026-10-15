@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.7.0 (2026-10-15)
+
+Operator-eyes quality pass: 12 realistic operator tasks were run end to end through the MCP tools
+against the live lab, the way a model would; every real problem became a roadmap item (I22-I29).
+
+### Fixed
+- **I22:** CoA / dynamic-authorization records (MnT msg 5417/5205, 112xx, CoA packet types) are no
+  longer read as login failures. `ise_why_auth_failed` said "latest attempt FAILED: None" (a CoA NAK)
+  and "FAILED: 11215" for endpoints whose last login passed. Rows are labelled `kind: coa`; the verdict
+  uses logins only and failed CoAs are summarised in `coa_failures` with what they mean.
+- **I23:** `ise_policy_explain` predicted Default/DenyAccess for a MAB login from sw1 when given the
+  NAD's group as shown by the NAD tools ('Location#All Locations#X'); ISE stores conditions without the
+  NDG root. DEVICE:* values are normalised. New `nad` (groups, name, NAS IP) and `flow`
+  (wired-mab, wired-dot1x, wireless-mab, wireless-dot1x) inputs fill the request attributes; filled
+  values are listed in `assumed_attributes` and caller attributes (also bare names) win.
+- **I29:** a session whose latest accounting is Stop is reported as ended (`active: false`); the CoA
+  tools block on it and the ANC preview no longer claims a live session.
+
+### Changed
+- **I24:** NAD lookups list the names that contain the key; read tools use a single containing match
+  and say so (`resolved_from` / "partial match"). `ise_list_active_sessions` takes `nad` (name or NAS IP;
+  `nas_ip` kept as a deprecated alias) and returns normalised columns (user, mac, ip, nas_ip, nad, psn)
+  with the NAD name ("no NAD covers it" for stale sessions). `ise_list_profiler_profiles`: `name`
+  filter (was `name_contains`).
+- **I25:** `ise_get_egress_matrix(source, destination)` with no explicit cell returns the effective
+  ANY-ANY default in `effective`.
+- **I26:** instructions name `ise_policy_explain` and the egress pair lookup, and say what has no REST
+  API (configuration change audit, TACACS+ live logs). `ise_endpoint_360` points at
+  `ise_release_rejected_endpoint` and says "not profiled". ANC previews say how to verify.
+- **I27:** auth rows carry a compact `reply` (dACL, SGT, VLAN, redirect, CoA command) instead of the raw
+  `response` with Class / EAP-Key-Name / MS-MPPE keys; `ise_find_session` drops duplicate and internal
+  fields (~40% smaller); `ise_why_auth_failed` shows execution steps only when the latest login failed.
+- **I28:** authorization profiles are looked up by `GET .../name/{name}` (the list scan took ~3.5 s);
+  `ise_update_authz_profile` preview 9.6 s -> 2.1 s live.
+
 ## 0.6.1 (2026-10-15)
 
 ### Fixed
