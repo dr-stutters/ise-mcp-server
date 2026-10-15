@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 (2026-10-15)
+
+### Fixed
+- **I13/I21:** `ise_policy_explain` now fetches and evaluates **global** authorization exceptions
+  (ISE evaluates them before every policy set's rules), shown with `section='global-exception'`. v0.6.0
+  only disclosed this gap in `limits`.
+
 ## 0.6.0 (2026-10-15)
 
 Roadmap "Later" items: policy explain (I13), the incident-timeline prompt (I15), and a read-only slice
