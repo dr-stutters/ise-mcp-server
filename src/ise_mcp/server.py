@@ -25,6 +25,7 @@ from ise_mcp.tools import (
     system,
     troubleshoot,
     trustsec,
+    workflows,
     writes,
 )
 
@@ -82,6 +83,7 @@ def create_server(
             policy_edit.register,
             device_admin.register,
             dangerous.register,
+            workflows.register,
         ],
         status=IseApp.status,
         spec_sources=spec_sources,
