@@ -96,8 +96,14 @@ FAILURE_HINTS: dict[str, dict[str, str]] = {
         "check": "Ensure clients trust the issuer of the EAP system certificate (ise_list_certificates).",
     },
     "12514": {
-        "likely": "EAP-TLS handshake failed: the client rejected the ISE certificate or vice versa.",
-        "check": "Check certificate chains on both sides (ise_list_certificates kind=trusted).",
+        "likely": "The client certificate was issued by a CA that ISE doesn't trust for client "
+        "authentication (unknown CA in the chain).",
+        "check": "Check the issuer is in ise_list_certificates kind=trusted with client auth; add it with "
+        "ise_import_trusted_cert trust_for=['client_auth'].",
+    },
+    "12520": {
+        "likely": "EAP-TLS failed: the client rejected the ISE EAP certificate (untrusted issuer or name).",
+        "check": "Make the client trust the issuer of the EAP system certificate (ise_list_certificates).",
     },
     "15039": {
         "likely": "An authorization rule matched whose profile is DenyAccess (or the default rule denies).",
