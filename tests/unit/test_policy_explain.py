@@ -268,3 +268,122 @@ async def test_policy_explain_global_exception_wins(mock: respx.MockRouter) -> N
     assert "block-byod" in out["verdict"] and "DenyAccess" in out["verdict"]
     first = out["authorization"][0]
     assert first["section"] == "global-exception" and first["result"] == "match"
+
+
+def test_normalize_device_attrs_and_nad_attributes() -> None:
+    from ise_mcp.tools.policy_explain import nad_attributes, normalize_device_attrs
+
+    attrs = normalize_device_attrs(
+        {
+            "DEVICE:Location": "Location#All Locations#lab",
+            "device:Device Type": "Device Type#All Device Types",
+        }
+    )
+    assert attrs == {"DEVICE:Location": "All Locations#lab", "device:Device Type": "All Device Types"}
+    assert normalize_device_attrs({"Location": "Location#All Locations#lab"}) == {
+        "Location": "All Locations#lab"
+    }
+    nad = {
+        "name": "sw1",
+        "NetworkDeviceGroupList": ["Location#All Locations#lab", "IPSEC#Is IPSEC Device#No"],
+        "NetworkDeviceIPList": [{"ipaddress": "192.0.2.9", "mask": 32}],
+    }
+    assert nad_attributes(nad) == {
+        "DEVICE:Location": "All Locations#lab",
+        "DEVICE:IPSEC": "Is IPSEC Device#No",
+        "Network Access:NetworkDeviceName": "sw1",
+        "Radius:NAS-IP-Address": "192.0.2.9",
+    }
+    # several addresses: the NAS IP is not known, so it is not assumed
+    nad["NetworkDeviceIPList"].append({"ipaddress": "10.0.0.0", "mask": 24})
+    assert "Radius:NAS-IP-Address" not in nad_attributes(nad)
+
+
+async def test_policy_explain_nad_and_flow(mock: respx.MockRouter) -> None:
+    sets = {
+        "response": [
+            {
+                "id": "s-lab",
+                "name": "lab",
+                "rank": 0,
+                "state": "enabled",
+                "default": False,
+                "condition": block(
+                    "And",
+                    attr("DEVICE", "Location", "equals", "All Locations#lab"),
+                    attr("Normalised Radius", "RadiusFlowType", "equals", "WiredMAB"),
+                ),
+            },
+            {"id": "s-def", "name": "Default", "rank": 1, "state": "enabled", "default": True},
+        ]
+    }
+    mock.get("/api/v1/policy/network-access/policy-set").respond(json=sets)
+    mock.get("/api/v1/policy/network-access/condition").respond(json={"response": []})
+    mock.get("/api/v1/policy/network-access/policy-set/global-exception").respond(json={"response": []})
+    mock.get("/api/v1/policy/network-access/policy-set/s-lab/exception").respond(json={"response": []})
+    rules = {
+        "response": [
+            {
+                "rule": {
+                    "name": "anc",
+                    "rank": 0,
+                    "state": "enabled",
+                    "default": False,
+                    "condition": attr("Session", "ANCPolicy", "equals", "quarantine"),
+                },
+                "profile": ["Quarantine"],
+            },
+            {
+                "rule": {
+                    "name": "mab",
+                    "rank": 1,
+                    "state": "enabled",
+                    "default": False,
+                    "condition": attr("Radius", "Service-Type", "equals", "Call Check"),
+                },
+                "profile": ["PermitAccess"],
+            },
+        ]
+    }
+    mock.get("/api/v1/policy/network-access/policy-set/s-lab/authorization").respond(json=rules)
+    mock.get("/ers/config/networkdevice", params={"filter": "ipaddress.EQ.192.0.2.9"}).respond(
+        json={"SearchResult": {"total": 1, "resources": [{"id": "n1", "name": "sw1"}]}}
+    )
+    mock.get("/ers/config/networkdevice/n1").respond(
+        json={
+            "NetworkDevice": {
+                "id": "n1",
+                "name": "sw1",
+                "NetworkDeviceGroupList": ["Location#All Locations#lab"],
+                "NetworkDeviceIPList": [{"ipaddress": "192.0.2.9", "mask": 32}],
+            }
+        }
+    )
+    out = await call_tool(make_server(), "ise_policy_explain", {"nad": "192.0.2.9", "flow": "wired-mab"})
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["policy_set"] == "lab"
+    assert "'mab'" in out["verdict"] and "no ANC policy" in out["note"]
+    assert out["assumed_attributes"]["DEVICE:Location"] == "All Locations#lab"
+    # a caller-supplied attribute overrides the assumption
+    out = await call_tool(
+        make_server(),
+        "ise_policy_explain",
+        {"nad": "192.0.2.9", "flow": "wired-mab", "attributes": {"Session:ANCPolicy": "quarantine"}},
+    )
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert "'anc'" in out["verdict"]
+    # a bare attribute name overrides too
+    out = await call_tool(
+        make_server(),
+        "ise_policy_explain",
+        {"nad": "192.0.2.9", "flow": "wired-mab", "attributes": {"ANCPolicy": "quarantine"}},
+    )
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert "'anc'" in out["verdict"] and "Session:ANCPolicy" not in out["assumed_attributes"]
+
+
+async def test_policy_explain_needs_input(mock: respx.MockRouter) -> None:
+    from fastmcp.exceptions import ToolError
+
+    with __import__("pytest").raises(ToolError):
+        await call_tool(make_server(), "ise_policy_explain", {})
