@@ -139,7 +139,7 @@ async def test_why_auth_failed_wrong_password(mock: respx.MockRouter) -> None:
 async def test_why_auth_failed_passed(mock: respx.MockRouter) -> None:
     mock_common(mock)
     out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": MAC_OK})
-    assert out["verdict"].startswith("No failures")
+    assert out["verdict"].startswith("No login failures")
     assert out["matched_policy"]["authorization_rule"] == "Basic_Authenticated_Access"
 
 
@@ -185,3 +185,74 @@ async def test_endpoint_360(mock: respx.MockRouter) -> None:
     assert out["session"]["matched_policy"]["policy_set"] == "Default"
     assert out["recent_auths"][0]["result"] == "PASS"
     assert out["anc_policy"] == "none"
+
+
+COA_NAK = (
+    "<authStatusElements><passed>false</passed><failed>true</failed><user_name></user_name>"
+    "<nas_ip_address>192.0.2.50</nas_ip_address><failure_reason></failure_reason>"
+    f"<calling_station_id>{MAC_OK}</calling_station_id>"
+    "<network_device_name>mcp-test-radius-client</network_device_name><acs_server>ise</acs_server>"
+    "<acs_timestamp>2026-10-14T13:00:00.000Z</acs_timestamp><execution_steps>11204,11220</execution_steps>"
+    "<response>{RadiusPacketType=CoANAK; cisco-av-pair=reauthenticate-type=rerun; "
+    "cisco-av-pair=command=reauthenticate; cisco-av-pair=audit-session-id=X; cisco-command-code=2; }"
+    "</response><message_code>5417</message_code></authStatusElements>"
+)
+
+
+def _with_coa(only_coa: bool = False) -> str:
+    text = fixture_text("mnt_authstatus_pass.xml")
+    head, sep, rest = text.partition("<authStatusElements>")
+    if only_coa:
+        return head + COA_NAK + "</authStatusList></authStatusOutputList>"
+    return head + COA_NAK + sep + rest
+
+
+async def test_why_auth_failed_ignores_coa_records(mock: respx.MockRouter) -> None:
+    mock_common(mock)
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{MAC_OK}/86400/50/All").respond(text=_with_coa())
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": MAC_OK})
+    assert out["verdict"].startswith("No login failures"), out["verdict"]
+    assert "CoA" in out["verdict"]
+    assert out["coa_failures"]["count"] == 1
+    assert "NAK" in out["coa_failures"]["meaning"]
+    assert out["attempts_in_window"]["coa_records"] == 1
+
+
+async def test_why_auth_failed_only_coa(mock: respx.MockRouter) -> None:
+    mock_common(mock)
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{MAC_OK}/86400/50/All").respond(
+        text=_with_coa(only_coa=True)
+    )
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": MAC_OK})
+    assert out["verdict"].startswith("No login attempt"), out["verdict"]
+
+
+async def test_auth_history_labels_coa_and_compacts_reply(mock: respx.MockRouter) -> None:
+    mock_common(mock)
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{MAC_OK}/86400/20/All").respond(text=_with_coa())
+    out = await call_tool(make_server(), "ise_get_auth_history", {"mac": MAC_OK})
+    coa, login = out["attempts"][0], out["attempts"][1]
+    assert coa["kind"] == "coa"
+    assert coa["reply"] == "RadiusPacketType=CoANAK; reauthenticate-type=rerun; command=reauthenticate"
+    assert "kind" not in login
+    assert "Class=" not in login.get("reply", "")
+    assert "response" not in login
+
+
+def test_compact_reply_drops_key_material() -> None:
+    from ise_mcp.tools.sessions import compact_reply
+
+    raw = (
+        "{Class=CACS:1; EAP-Key-Name=0d:8c; cisco-av-pair=ACS:CiscoSecure-Defined-ACL=#ACSACL#-IP-x-1; "
+        "cisco-av-pair=cts:security-group-tag=0008-00; MS-MPPE-Send-Key=****; LicenseTypes=1; }"
+    )
+    assert compact_reply(raw) == "ACS:CiscoSecure-Defined-ACL=#ACSACL#-IP-x-1; cts:security-group-tag=0008-00"
+    assert compact_reply("{Class=x; }") is None
+    assert compact_reply(None) is None
+
+
+def test_compact_reply_keeps_semicolons_in_values() -> None:
+    from ise_mcp.tools.sessions import compact_reply
+
+    raw = "{Reply-Message=Access denied; call helpdesk; Class=CACS:1; State=abc; x; Filter-Id=f1; }"
+    assert compact_reply(raw) == "Reply-Message=Access denied; call helpdesk; Filter-Id=f1"

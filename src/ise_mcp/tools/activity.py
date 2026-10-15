@@ -32,7 +32,7 @@ from ise_mcp.client import IseApp
 from ise_mcp.knowledge import FAILURE_HINTS
 from ise_mcp.tools._common import gather_limited, normalize_mac, parse_ip
 from ise_mcp.tools.network import nad_networks, resolve_nad
-from ise_mcp.tools.sessions import auth_history, auth_row, find_session
+from ise_mcp.tools.sessions import auth_history, auth_row, find_session, is_coa_record
 from ise_mcp.xmlutil import as_list
 
 MNT_TIME = "%Y-%m-%d %H:%M:%S"
@@ -40,9 +40,6 @@ AUTH_LIST_COLUMNS = ["user", "mac", "nas_ip", "nad", "method", "authz_profiles",
 MAX_WINDOW_MINUTES = 7 * 24 * 60
 DETAIL_CAP = 100
 RECORDS_PER_MAC = 50
-COA_MESSAGE_CODES = {"5417", "5205"}
-# Dynamic-authorization (CoA) failure reasons that MnT stores alongside logins.
-COA_FAILURE_CODES = {"11213", "11215", "11216", "11217", "11218", "11219"}
 
 
 def parse_until(until: str | None) -> datetime:
@@ -108,14 +105,6 @@ async def auth_list(app: IseApp, start: datetime, end: datetime) -> list[dict[st
     if not isinstance(data, dict):
         return []
     return [s for s in as_list(data.get("activeSession")) if isinstance(s, dict)]
-
-
-def is_coa_record(rec: dict[str, Any]) -> bool:
-    """MnT AuthStatus also holds CoA/dynamic-authorization results (message code 5417/5205, failure
-    reasons 112xx); they are not login attempts."""
-    if str(rec.get("message_code") or "") in COA_MESSAGE_CODES:
-        return True
-    return str(rec.get("failure_reason") or "").split(" ", 1)[0] in COA_FAILURE_CODES
 
 
 def _session_row(s: dict[str, Any]) -> dict[str, Any]:

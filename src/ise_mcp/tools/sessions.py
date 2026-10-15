@@ -35,6 +35,66 @@ SESSION_COLUMNS = [
 ]
 
 
+COA_MESSAGE_CODES = {"5417", "5205"}
+# Dynamic-authorization (CoA) failure reasons that MnT stores alongside logins.
+COA_FAILURE_CODES = {"11213", "11215", "11216", "11217", "11218", "11219"}
+
+# RADIUS reply attributes worth showing; the rest (Class, EAP-Key-Name, MS-MPPE keys, State,
+# LicenseTypes ...) are session plumbing or key material.
+_REPLY_DROP = {
+    "Class",
+    "EAP-Key-Name",
+    "MS-MPPE-Send-Key",
+    "MS-MPPE-Recv-Key",
+    "LicenseTypes",
+    "State",
+    "Message-Authenticator",
+    "EAP-Message",
+    "cisco-command-code",
+}
+_AVPAIR_DROP = ("audit-session-id=",)
+
+
+def is_coa_record(rec: dict[str, Any]) -> bool:
+    """MnT AuthStatus also holds CoA/dynamic-authorization results (message code 5417/5205, failure
+    reasons 112xx, a CoA packet type in the response); they are not login attempts."""
+    if str(rec.get("message_code") or "") in COA_MESSAGE_CODES:
+        return True
+    if "RadiusPacketType=CoA" in str(rec.get("response") or ""):
+        return True
+    return str(rec.get("failure_reason") or "").split(" ", 1)[0] in COA_FAILURE_CODES
+
+
+def compact_reply(text: Any) -> str | None:
+    """MnT's response '{A=1; cisco-av-pair=x=y; ... }' without key material and session plumbing."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    body = text.strip().removeprefix("{").removesuffix("}")
+    kept: list[str] = []
+    dropped_last = False
+    for part in body.split(";"):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        key, sep, value = chunk.partition("=")
+        if not sep or " " in key:
+            # A ';' inside a value (e.g. a Reply-Message): glue it back onto the previous attribute.
+            if kept and not dropped_last:
+                kept[-1] += f"; {chunk}"
+            continue
+        dropped_last = key in _REPLY_DROP
+        if dropped_last:
+            continue
+        if key == "cisco-av-pair":
+            if value.startswith(_AVPAIR_DROP):
+                dropped_last = True
+                continue
+            kept.append(value)
+        else:
+            kept.append(f"{key}={value}")
+    return "; ".join(kept) or None
+
+
 def _clean(d: Any) -> Any:
     if isinstance(d, dict):
         return {k: _clean(v) for k, v in d.items() if v not in (None, "", {}, [])}
@@ -63,6 +123,7 @@ def auth_row(
     """Shape one MnT authStatusElements record."""
     row: dict[str, Any] = {
         "time": el.get("acs_timestamp"),
+        "kind": "coa" if is_coa_record(el) else None,
         "result": "PASS" if str(el.get("passed", "")).lower() == "true" else "FAIL",
         "user": el.get("user_name"),
         "mac": el.get("calling_station_id"),
@@ -77,7 +138,7 @@ def auth_row(
         "sgt": el.get("cts_security_group"),
         "posture": el.get("posture_status"),
         "failure_reason": el.get("failure_reason"),
-        "response": el.get("response"),
+        "reply": compact_reply(el.get("response")),
         "location": el.get("location"),
         "device_type": el.get("device_type"),
         "psn": el.get("acs_server"),
