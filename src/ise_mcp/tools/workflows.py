@@ -75,6 +75,7 @@ def register(reg: ToolRegistrar) -> None:
     @reg.prompt(
         title="Troubleshoot endpoint network access",
         uses=["ise", "cml", "catc"],
+        example={"mac": "AA:BB:CC:DD:EE:FF"},
         tools=[
             "ise_find_session",
             "ise_recent_auth_failures",
@@ -206,6 +207,7 @@ def register_quarantine(reg: ToolRegistrar) -> None:
     @reg.prompt(
         title="Quarantine a host",
         uses=["ise", "fmc", "cml", "catc"],
+        example={"reason": "INC-1234 malware alert", "mac": "AA:BB:CC:DD:EE:FF"},
         tools=[
             "ise_find_session",
             "ise_endpoint_360",
