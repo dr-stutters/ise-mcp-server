@@ -17,6 +17,7 @@ secret lives in the repo. Nothing here prints a secret.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import os
@@ -24,6 +25,7 @@ import secrets
 import socket
 import struct
 import sys
+import tempfile
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -92,6 +94,92 @@ class Ers:
 def check(r: httpx.Response, what: str) -> None:
     if r.is_error:
         sys.exit(f"{what} failed: HTTP {r.status_code} {r.text[:300]}")
+
+
+# --- least-privilege admin users (I16) --------------------------------------------------------
+
+# Built-in RBAC admin groups per server tier (see docs/least-privilege.md). Keep in sync with
+# health.py TIER_GROUPS.
+LP_USERS = {
+    "read": ("mcp-test-ro", ["ERS Operator", "Read Only Admin"]),
+    "write": (
+        "mcp-test-rw",
+        ["ERS Admin", "Policy Admin", "Network Device Admin", "Identity Admin", "MnT Admin"],
+    ),
+    "dangerous": ("mcp-test-admin", ["Super Admin"]),
+}
+
+
+def ro_env_hint(tier: str) -> str:
+    return "ISE_RO_USERNAME / ISE_RO_PASSWORD in .env" if tier == "read" else f"the {tier}-tier credentials"
+
+
+def _env_key(line: str) -> str:
+    """The variable name a .env line sets ('export FOO=1' -> 'FOO'), else the line itself."""
+    return line.split("=", 1)[0].strip().removeprefix("export ").strip()
+
+
+def _write_env_pair(k1: str, v1: str, k2: str, v2: str) -> None:
+    """Add/replace two keys in .env without printing the values. Atomic (temp file + os.replace) and
+    mode 0600 from creation, so a secret is never briefly world-readable or lost to a partial write."""
+    path = ".env"
+    lines = []
+    if os.path.exists(path):
+        with open(path) as fh:
+            lines = [ln for ln in fh.read().splitlines() if _env_key(ln) not in (k1, k2)]
+    lines += [f"{k1}={v1}", f"{k2}={v2}"]
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".env.")  # mkstemp creates the file mode 0600
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def seed_least_privilege(ers: Ers) -> None:
+    """Create the three tiered admin users via the OpenAPI admin-user endpoint (idempotent). On ISE
+    builds where that endpoint returns a generic HTTP 500 (a known 3.5 bug), print the exact GUI
+    steps instead so the operator can finish it by hand; this does not fail the rebuild."""
+    base = os.environ["ISE_URL"].rstrip("/")
+    verify = os.environ.get("ISE_VERIFY_SSL", "true").lower() not in ("false", "0", "no")
+    api = httpx.Client(
+        base_url=base,
+        auth=(os.environ["ISE_USERNAME"], os.environ["ISE_PASSWORD"]),
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        verify=verify,
+        timeout=30,
+    )
+    existing = {u.get("name") for u in api.get("/api/v1/rbac/admin-user").json().get("adminUserList", [])}
+    created = []
+    for tier, (name, groups) in LP_USERS.items():
+        if name in existing:
+            print(f"least-privilege: admin user {name} ({tier}) already exists")
+            continue
+        env_pw = os.environ.get(f"MCP_LP_{tier.upper()}_PASSWORD")
+        password = env_pw or ("Mcp-Lp-" + secrets.token_urlsafe(10) + "9!")
+        body = {"name": name, "password": password, "rbacGroups": groups, "status": True}
+        r = api.post("/api/v1/rbac/admin-user", json=body)
+        if r.is_success:
+            print(f"least-privilege: created admin user {name} ({tier}) with groups {groups}")
+            created.append((tier, name, None if env_pw else password))
+        elif r.status_code == 500:
+            print(
+                f"least-privilege: ISE returned HTTP 500 creating {name} (known ISE 3.5 build bug on "
+                f"POST /api/v1/rbac/admin-user). Create it in the GUI instead:\n"
+                f"  Administration > System > Admin Access > Administrators > Admin Users > Add:\n"
+                f"    name {name}, assign admin group(s): {', '.join(groups)}.\n"
+                f"  Then set {ro_env_hint(tier)} so the least-privilege live test can run as it."
+            )
+        else:
+            print(f"least-privilege: could not create {name}: HTTP {r.status_code} {r.text[:200]}")
+    for tier, name, password in created:
+        if tier == "read" and password:
+            _write_env_pair("ISE_RO_USERNAME", name, "ISE_RO_PASSWORD", password)
+            print("least-privilege: wrote ISE_RO_USERNAME / ISE_RO_PASSWORD to .env")
 
 
 # --- minimal RADIUS client (RFC 2865/2866), no dependencies -----------------------------------
@@ -178,6 +266,10 @@ def source_ip(host: str) -> str:
 def main() -> None:
     load_env()
     ers = Ers()
+    if "--least-privilege" in sys.argv:
+        seed_least_privilege(ers)
+        if "--only-least-privilege" in sys.argv:
+            return
     src = source_ip(ers.host)
     radius_secret = "mcp-" + secrets.token_urlsafe(18)
     user_password = "Mcp-" + secrets.token_urlsafe(12) + "1a"
