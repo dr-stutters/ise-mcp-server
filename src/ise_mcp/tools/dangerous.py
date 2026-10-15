@@ -65,6 +65,10 @@ async def session_or_blocker(app: IseApp, mac: str) -> tuple[dict[str, Any] | No
     session = await find_session(app, mac=mac)
     if not session:
         return None, [f"{mac} has no active session; there is nothing to send a CoA for"]
+    if session.get("active") is False:
+        return session, [
+            f"{mac}'s last session has ended (accounting Stop); there is nothing to send a CoA for"
+        ]
     if not session.get("acs_server"):
         return session, ["MnT doesn't say which PSN owns this session; can't route the CoA"]
     return session, []
@@ -270,12 +274,14 @@ def register(reg: ToolRegistrar) -> None:
             details={
                 "actions": anc.get("actions"),
                 "authz_rules_matching_it": rules or None,
-                "live_session": bool(session),
+                "live_session": bool(session) and sa.get("active") is not False,
                 "nad": sa.get("network_device_name"),
             },
             side_effects=[
                 f"Actions: {', '.join(actions)}",
-                "ISE sends a CoA to the live session itself, so the new authorization applies at once",
+                "ISE sends a CoA to the live session itself, so the new authorization applies at once"
+                if session and session.get("active") is not False
+                else "No live session: the policy applies when the endpoint next authenticates",
                 "Verify after a few seconds with ise_find_session: matched_policy.authorization_rule should "
                 "be the ANC rule above (an idle MAB endpoint re-authenticates only when it sends traffic)",
                 *extra_side,

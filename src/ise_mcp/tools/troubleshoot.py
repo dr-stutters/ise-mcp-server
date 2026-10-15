@@ -134,7 +134,8 @@ def register(reg: ToolRegistrar) -> None:
             session = await _safe(find_session(app, username=username))
             if isinstance(session, dict) and session.get("calling_station_id"):
                 mac = str(session["calling_station_id"])
-                out["note"] = f"MAC {mac} taken from {username}'s live session"
+                which = "last (ended)" if session.get("active") is False else "live"
+                out["note"] = f"MAC {mac} taken from {username}'s {which} session"
             else:
                 facts = await _safe(internal_user_facts(app, username))
                 return object_result(
@@ -207,7 +208,7 @@ def register(reg: ToolRegistrar) -> None:
                 out["rules_using_profile"] = await _safe(
                     rules_using_profile(app, str(latest["authz_profiles"]).split(",")[0].strip())
                 )
-            if session is None:
+            if session is None or (isinstance(session, dict) and session.get("active") is False):
                 out["session"] = "no active session now (the endpoint disconnected or the session ended)"
             return object_result(out)
 

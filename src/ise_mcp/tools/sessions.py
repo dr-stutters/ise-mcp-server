@@ -198,6 +198,17 @@ async def find_session(
         reply = compact_reply(session.pop("response"))
         if reply:
             session["reply"] = reply
+    if str(session.get("acct_status_type") or "").lower() == "stop" and str(
+        session.get("acct_acs_timestamp") or ""
+    ) >= str(session.get("auth_acs_timestamp") or ""):
+        # (A Stop older than the latest authentication is a late Stop from a previous NAD/session.)
+        # MnT's by-MAC/user/IP lookup returns the last session even after it ended.
+        session["active"] = False
+        session["note"] = (
+            f"This session ENDED (accounting Stop at {session.get('acct_acs_timestamp')}): the endpoint "
+            "is not connected now, and there is no live session to send a CoA to."
+        )
+        return session
     if not session.get("selected_azn_profiles") and not session.get("authentication_method"):
         # MnT returns the session's latest event, which can be accounting or a CoA without the auth result.
         session["note"] = (
@@ -380,8 +391,9 @@ def register(reg: ToolRegistrar) -> None:
     ) -> ToolResult:
         """Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give
         one). Returns the session's NAD, port, framed IP, PSN, timestamps, endpoint profile, posture and
-        accounting counters, or found=false when there is no active session (the endpoint may have
-        disconnected: see ise_get_auth_history for past attempts)."""
+        accounting counters, or found=false when MnT has no session. active=false means MnT only has
+        the last, ended session (accounting Stop): the endpoint is not connected now (see
+        ise_get_auth_history for past attempts)."""
         app: IseApp = get_client(ctx)
         session = await find_session(app, mac=mac, ip=ip, username=username, session_id=session_id)
         if session is None:
@@ -392,7 +404,7 @@ def register(reg: ToolRegistrar) -> None:
                     "with the MAC for recent attempts.",
                 }
             )
-        return object_result({"found": True, "session": session})
+        return object_result({"found": True, "active": session.get("active", True), "session": session})
 
     @reg.read(title="Authentication history for a MAC")
     async def ise_get_auth_history(
