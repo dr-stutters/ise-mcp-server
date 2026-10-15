@@ -76,3 +76,16 @@ L = rare or niche.
   them, and the spec tools describe the bodies.
 - **Endpoint bulk and custom attributes**: medium value. The obvious next candidates (one async-task
   tool each).
+
+## Phase 3 update (v0.3.0)
+
+- MnT: `Session/AuthList` is now curated (`ise_get_auth_list`); 13 of 14 MnT calls are behind tools.
+  Spike: MnT has **no** cross-endpoint query for failed attempts, so `ise_recent_auth_failures` checks
+  candidate MACs per `AuthStatus` call and reports its coverage.
+- Endpoints: bulk create/update/delete (`/api/v1/endpoint/bulk` + `/api/v1/task`), custom attribute
+  definitions and release of rejected endpoints are curated (Endpoints 2/12 -> 7/12, plus Task and
+  CustomAttributes groups).
+- Deployment health: PAN HA, repositories, last backup, patches, system certificates, licence tier/eval
+  state and ERS AD join points in one tool. Not in REST on 3.5: per-node patch levels, the backup
+  schedule (POST/PUT only) and per-node AD join status.
+- ERS spec: body wrapper names added for 46 resources.

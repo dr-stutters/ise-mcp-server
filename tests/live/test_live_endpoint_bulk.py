@@ -92,6 +92,14 @@ async def latest_auth(ise: Session, mac: str) -> dict:  # type: ignore[type-arg]
 async def test_authz_rule_on_custom_attribute(ise: Session) -> None:
     mac = str(SWITCH_MAC)
     await ensure_attr(ise)
+    for _ in range(12):  # a new custom attribute can take a moment to reach the policy dictionary
+        attrs = await ise.call(
+            "ise_list_dictionary_attributes",
+            {"dictionary": "EndPoints", "response_format": "json", "limit": 200},
+        )
+        if any(a["attribute"] == f"EndPoints:{ATTR}" for a in attrs["results"]):
+            break
+        await asyncio.sleep(5)
     await ise.apply("ise_set_endpoint", {"mac": mac, "custom_attributes": {ATTR: "gold"}})
     rule = {
         "policy_set": "mcp-test-wired",
