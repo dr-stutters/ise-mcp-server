@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastmcp.tools import ToolResult
-from stutters_mcp_core import InvalidRequest, NotFound, ResponseFormat, ValidationFailed
+from stutters_mcp_core import InvalidRequest, NotFound, ResponseFormat, UpstreamError, ValidationFailed
 from stutters_mcp_core import list_result as core_list_result
 from stutters_mcp_core.http import Page, page_of
 
@@ -145,10 +145,23 @@ def _strip_link(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if k != "link"}
 
 
+async def _name_candidates(app: IseApp, resource: str, key: str, cap: int = 6) -> list[dict[str, Any]]:
+    """Objects whose name contains `key` (ERS CONTAINS filter); [] when the filter isn't supported."""
+    try:
+        page = await app.ers_pager.fetch_page(
+            app.ers, f"/ers/config/{resource}", {"filter": f"name.CONTAINS.{key}"}, limit=cap
+        )
+    except (UpstreamError, NotFound, ValidationFailed):
+        return []
+    return [i for i in page.items if isinstance(i, dict) and i.get("id")]
+
+
 async def ers_resolve(
-    app: IseApp, resource: str, name_or_id: str, *, what: str, list_tool: str
+    app: IseApp, resource: str, name_or_id: str, *, what: str, list_tool: str, fuzzy: bool = False
 ) -> dict[str, Any]:
-    """Full ERS object by UUID or exact name. Raises NotFound with a pointer to the list tool."""
+    """Full ERS object by UUID or exact name. Raises NotFound with a pointer to the list tool and
+    the names that contain the key. With fuzzy=True (read tools only) a single name containing the
+    key is used instead; the object then carries `resolved_from` so the output can say so."""
     key = name_or_id.strip()
     if not key:
         raise InvalidRequest(f"Give a {what} name or id")
@@ -156,7 +169,14 @@ async def ers_resolve(
         return await app.ers_get(resource, key)
     hit = await app.ers_find(resource, key)
     if hit is None:
-        raise NotFound(f"No {what} named {key!r}. Use {list_tool} to find the exact name.", 404)
+        candidates = await _name_candidates(app, resource, key)
+        if fuzzy and len(candidates) == 1:
+            obj = await app.ers_get(resource, str(candidates[0]["id"]))
+            obj["resolved_from"] = f"no {what} is named {key!r}; using {obj.get('name')!r} (name contains it)"
+            return obj
+        names = ", ".join(repr(c.get("name")) for c in candidates[:5])
+        hint = f" Names containing it: {names}." if names else f" Use {list_tool} to find the exact name."
+        raise NotFound(f"No {what} named {key!r}.{hint}", 404)
     return await app.ers_get(resource, str(hit["id"]))
 
 

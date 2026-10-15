@@ -276,6 +276,8 @@ def register(reg: ToolRegistrar) -> None:
             side_effects=[
                 f"Actions: {', '.join(actions)}",
                 "ISE sends a CoA to the live session itself, so the new authorization applies at once",
+                "Verify after a few seconds with ise_find_session: matched_policy.authorization_rule should "
+                "be the ANC rule above (an idle MAB endpoint re-authenticates only when it sends traffic)",
                 *extra_side,
                 *warnings,
             ],
@@ -321,7 +323,8 @@ def register(reg: ToolRegistrar) -> None:
             fingerprint=fingerprint(current),
             side_effects=[
                 "ISE ends the live session (CoA); the endpoint re-authenticates with normal policy. An idle "
-                "MAB endpoint only re-authenticates when it next sends traffic"
+                "MAB endpoint only re-authenticates when it next sends traffic",
+                "Verify with ise_find_session: the authorization rule should no longer be the ANC rule",
             ],
             blast_radius=1,
         )

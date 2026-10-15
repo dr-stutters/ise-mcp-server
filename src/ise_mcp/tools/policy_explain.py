@@ -368,12 +368,15 @@ def register(reg: ToolRegistrar) -> None:
         EAP type, endpoint profile)."""
         app: IseApp = get_client(ctx)
         given = dict(attributes or {})
+        nad_note = None
         filled: dict[str, str] = {}
         if flow:
             filled.update(FLOW_ATTRIBUTES[flow])
             filled.update(FLOW_DEFAULTS)
         if nad:
-            filled.update(nad_attributes(await resolve_nad(app, nad)))
+            nad_obj = await resolve_nad(app, nad, fuzzy=True)
+            nad_note = nad_obj.get("resolved_from")
+            filled.update(nad_attributes(nad_obj))
         if flow and kind == "device-admin":
             raise InvalidRequest("flow is for network-access (RADIUS) requests; omit it for device-admin")
         full = {g.strip().casefold() for g in given}
@@ -506,6 +509,7 @@ def register(reg: ToolRegistrar) -> None:
             {
                 "verdict": verdict,
                 "note": note,
+                "nad_resolved": nad_note,
                 "assumed_attributes": {k: v or "(none)" for k, v in assumed.items()} or None,
                 "policy_set": chosen.get("name"),
                 "set_selection": set_trace or "evaluated only the given policy_set",

@@ -25,7 +25,7 @@ async def test_list_profiler_profiles_name_filter(mock: respx.MockRouter) -> Non
         await call_tool(
             make_server(),
             "ise_list_profiler_profiles",
-            {"name_contains": "Cisco", "response_format": "json"},
+            {"name": "Cisco", "response_format": "json"},
         )
     )
     names = [r["name"] for r in out["results"]]

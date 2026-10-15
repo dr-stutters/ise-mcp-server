@@ -29,6 +29,8 @@ log = logging.getLogger(__name__)
 
 ERS_JSON = {"Accept": "application/json", "Content-Type": "application/json"}
 SURFACES = ("openapi", "ers", "mnt")
+# ERS resources with GET .../name/{name} but no name filter: look them up directly.
+ERS_NAME_PATH = {"authorizationprofile"}
 SAFE_MNT_PATH = re.compile(r"^[A-Za-z0-9_\-/.:@%+]+$")
 SAFE_RESOURCE = re.compile(r"^[a-z]+$")
 
@@ -217,6 +219,14 @@ class IseApp:
         """Exact-name lookup ({"id", "name", ...}); None if not found. Uses the ERS name filter, or for
         resources that don't support it (e.g. authorizationprofile) a scan of the collection."""
         path = f"/ers/config/{self._res(resource)}"
+        if resource in ERS_NAME_PATH:
+            # No name filter on these, and listing them is slow (authz profiles: ~3.5 s for 100 on 3.5).
+            try:
+                obj = unwrap(await self.ers_request("GET", f"{path}/name/{quote(name, safe='')}"))
+            except NotFound:
+                obj = None  # fall through: the scan below also matches a name differing only in case
+            if isinstance(obj, dict) and obj.get("id"):
+                return obj
         try:
             page = await self.ers_pager.fetch_page(self.ers, path, {"filter": f"name.EQ.{name}"}, limit=5)
             items = page.items

@@ -19,7 +19,14 @@ from stutters_mcp_core import (
 from stutters_mcp_core.http import page_of
 
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_list, ers_resolve, list_result, render_condition, summarize_rule
+from ise_mcp.tools._common import (
+    ers_list,
+    ers_resolve,
+    gather_limited,
+    list_result,
+    render_condition,
+    summarize_rule,
+)
 
 PolicyKind = Annotated[
     Literal["network-access", "device-admin"],
@@ -338,8 +345,8 @@ async def rules_using_profile(
         sets = await list_policy_sets(app, kind)
     except UpstreamError:
         return out
-    for ps in sets:
-        rules = await policy_set_rules(app, kind, str(ps["id"]))
+    all_rules = await gather_limited(sets, lambda ps: policy_set_rules(app, kind, str(ps["id"])), limit=4)
+    for ps, rules in zip(sets, all_rules, strict=True):
         for section in ("authorization", "local_exceptions"):
             for r in rules[section]:
                 value = r.get(field) or []
