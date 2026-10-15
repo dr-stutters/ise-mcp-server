@@ -172,7 +172,7 @@ def register(reg: ToolRegistrar) -> None:
                 raise InvalidRequest(f"Command set {name!r} already has exactly these settings")
             plan = Plan(
                 f"Replace command set {name}",
-                details={"changes": field_changes(command_row(existing), command_row(desired))},
+                details={"changes": field_changes(command_row(existing), command_row(desired), replace=True)},
                 fingerprint=fingerprint(existing),
                 side_effects=[
                     "Admins whose rule returns this set get the new command list at their next command"
@@ -270,7 +270,7 @@ def register(reg: ToolRegistrar) -> None:
                 confirm=confirm,
                 plan=Plan(
                     f"Update shell profile {name}",
-                    details={"changes": field_changes(shell_row(existing), shell_row(desired))},
+                    details={"changes": field_changes(shell_row(existing), shell_row(desired), replace=True)},
                     fingerprint=fingerprint(existing),
                 ),
                 apply=lambda: ers_put(app, "tacacsprofile", "TacacsProfile", desired),

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.2 (2026-10-15)
+
+### Fixed
+- **Write previews show what a PUT removes** (core 0.12.4 `field_changes(..., replace=True)`): every update that
+  sends the whole object (ERS PUT, OpenAPI policy PUT) now lists fields the replacement drops as
+  `"removed": true` instead of hiding them: `ise_update_nad`, `ise_update_internal_user`, `ise_set_endpoint`,
+  `ise_update_authz_profile` (vlan/dacl '' removes them), `ise_set_dacl`, `ise_set_sgt`, `ise_set_egress_policy`,
+  `ise_set_command_set`, `ise_set_shell_profile`, `ise_set_cert_auth_profile`, `ise_set_identity_sequence`,
+  `ise_update_policy_set`, `ise_update_policy_rule`, `ise_set_ip_sgt` (deploy_to='all' drops the target) and
+  `ise_set_sxp_connection`. Removed secrets stay masked.
+- `ise_update_internal_user` doesn't list the password fields it leaves out of the PUT (ISE keeps the stored
+  password when they are omitted).
+
+### Changed
+- Core bumped to stutters-mcp-core 0.12.4. Cross-server manifests (`tests/manifests/fmc.json`, `catc.json`)
+  refreshed from their repos.
+
 ## 0.7.1 (2026-10-15)
 
 ### Changed

@@ -8,6 +8,7 @@ import pytest
 import respx
 from fastmcp import Client
 from stutters_mcp_core import InvalidRequest
+from stutters_mcp_core.formatting import MASK
 
 from ise_mcp.tools.policy_edit import condition_node
 from ise_mcp.tools.writes import masked_changes
@@ -242,3 +243,45 @@ async def test_delete_sgt_in_matrix_blocked(mock: respx.MockRouter) -> None:
     )
     preview, _ = await two_step("ise_delete_object", {"kind": "sgt", "target": "Dev"})
     assert preview["status"] == "blocked" and "egress matrix" in preview["blockers"][0]
+
+
+def test_masked_changes_replace_flags_removed_secret() -> None:
+    cur = {"tacacsSettings": {"sharedSecret": "s"}, "description": "a"}
+    out = masked_changes(cur, {"tacacsSettings": {}, "description": "a"}, replace=True)
+    assert out == {"tacacsSettings.sharedSecret": {"from": MASK, "to": None, "removed": True}}
+    dropped = masked_changes(cur, {"description": "a"}, replace=True)["tacacsSettings"]
+    assert dropped == {"from": {"sharedSecret": MASK}, "to": None, "removed": True}
+
+
+async def test_update_authz_profile_preview_shows_removed_dacl(mock: respx.MockRouter) -> None:
+    """Core 0.12.4 replace=True: dacl='' drops daclName from the ERS PUT; the preview must say so."""
+    profile = {"id": "p1", "name": "P1", "accessType": "ACCESS_ACCEPT", "daclName": "PERMIT_ALL_IPV4_TRAFFIC"}
+    mock.get("/ers/config/authorizationprofile/name/P1").respond(json={"AuthorizationProfile": profile})
+    mock.get("/ers/config/authorizationprofile/p1").respond(json={"AuthorizationProfile": profile})
+    mock.get("/api/v1/policy/network-access/policy-set").respond(json={"response": []})
+    put = mock.put("/ers/config/authorizationprofile/p1").respond(json={})
+    preview, _ = await two_step("ise_update_authz_profile", {"profile": "P1", "dacl": ""})
+    assert preview["preview"]["changes"] == {
+        "daclName": {"from": "PERMIT_ALL_IPV4_TRAFFIC", "to": None, "removed": True}
+    }
+    assert "daclName" not in json.loads(put.calls.last.request.content)["AuthorizationProfile"]
+
+
+async def test_update_user_preview_does_not_list_kept_password(mock: respx.MockRouter) -> None:
+    """The password placeholder is left out of the PUT but ISE keeps the password: not a removal."""
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.bob"}).respond(
+        json=ers_page([{"id": "u1", "name": "bob"}])
+    )
+    user = {
+        "id": "u1",
+        "name": "bob",
+        "enabled": True,
+        "password": "*******",
+        "passwordIDStore": "Internal Users",
+    }
+    mock.get("/ers/config/internaluser/u1").respond(json={"InternalUser": user})
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        preview = (
+            await c.call_tool("ise_update_internal_user", {"user": "bob", "enabled": False})
+        ).structured_content
+    assert preview["preview"]["changes"] == {"enabled": {"from": True, "to": False}}

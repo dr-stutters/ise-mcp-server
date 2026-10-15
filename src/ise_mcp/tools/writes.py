@@ -27,7 +27,7 @@ from stutters_mcp_core import (
     get_client,
     preview_or_apply,
 )
-from stutters_mcp_core.formatting import MASK, is_secret_key
+from stutters_mcp_core.formatting import MASK, is_secret_key, mask_secrets
 
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, ers_resolve, is_uuid, normalize_mac
@@ -42,14 +42,19 @@ def fingerprint(obj: Any) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def masked_changes(current: dict[str, Any], desired: dict[str, Any]) -> dict[str, Any]:
-    """field_changes() with secret fields reduced to 'changed'."""
+def masked_changes(
+    current: dict[str, Any], desired: dict[str, Any], *, replace: bool = False
+) -> dict[str, Any]:
+    """field_changes() with secret fields reduced to 'changed' (and removals still flagged)."""
     out: dict[str, Any] = {}
-    for key, change in field_changes(current, desired).items():
+    for key, change in field_changes(current, desired, replace=replace).items():
         if is_secret_key(key.rsplit(".", 1)[-1]):
             out[key] = {"from": MASK if change["from"] else None, "to": MASK if change["to"] else None}
+            if change.get("removed"):
+                out[key]["removed"] = True
         else:
-            out[key] = change
+            # A removed (or replaced) nested object may hold secrets: mask inside it too.
+            out[key] = {k: mask_secrets(v) if k in ("from", "to") else v for k, v in change.items()}
     return out
 
 
@@ -286,7 +291,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         side = ["RADIUS from this device fails until its secret matches"] if radius_secret is not None else []
         plan = Plan(
             f"Update network device {current.get('name')}",
-            details={"changes": masked_changes(current, desired)},
+            details={"changes": masked_changes(current, desired, replace=True)},  # ERS PUT replaces
             fingerprint=fingerprint(current),
             side_effects=side,
             blockers=blockers,
@@ -392,7 +397,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             desired = deep_merge(existing, patch)
             plan = Plan(
                 f"Update endpoint {mac_n}",
-                details={"changes": field_changes(existing, desired)},
+                details={"changes": field_changes(existing, desired, replace=True)},
                 fingerprint=fingerprint(existing),
                 blockers=blockers,
             )
@@ -521,13 +526,17 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         if not patch:
             raise InvalidRequest("Nothing to change: give at least one field")
         desired = deep_merge(current, patch)
+        shown = current
         if "password" not in patch:
             # GET returns a placeholder ("*******"); sending it back would reset the password to it.
-            for key in ("password", "enablePassword", "passwordIDStore"):
+            # ISE keeps the stored password when the PUT omits these, so they are not removals.
+            kept = ("password", "enablePassword", "passwordIDStore")
+            for key in kept:
                 desired.pop(key, None)
+            shown = {k: v for k, v in current.items() if k not in kept}
         plan = Plan(
             f"Update internal user {current.get('name')}",
-            details={"changes": masked_changes(current, desired)},
+            details={"changes": masked_changes(shown, desired, replace=True)},  # ERS PUT replaces
             fingerprint=fingerprint(current),
         )
         return await preview_or_apply(
@@ -703,7 +712,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         users = await rules_using_profile(app, str(current.get("name")))
         plan = Plan(
             f"Update authorization profile {current.get('name')}",
-            details={"changes": field_changes(current, desired), "used_by_rules": users},
+            details={"changes": field_changes(current, desired, replace=True), "used_by_rules": users},
             fingerprint=fingerprint(current),
             side_effects=[f"Affects {len(users)} rule(s) at the next authentication"] if users else [],
         )
@@ -755,7 +764,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 raise InvalidRequest(f"dACL {name!r} already has exactly these ACEs and settings")
             plan = Plan(
                 f"Update dACL {name}",
-                details={"changes": field_changes(current, desired)},
+                details={"changes": field_changes(current, desired, replace=True)},
                 fingerprint=fingerprint(current),
             )
             return await preview_or_apply(
@@ -811,7 +820,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             )
             plan = Plan(
                 f"Update SGT {name}",
-                details={"changes": field_changes(current, desired)},
+                details={"changes": field_changes(current, desired, replace=True)},
                 fingerprint=fingerprint(current),
                 side_effects=side,
             )
@@ -896,7 +905,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             desired = deep_merge(current, body)
             plan = Plan(
                 f"Update egress cell {summary}",
-                details={"changes": field_changes(current, desired)},
+                details={"changes": field_changes(current, desired, replace=True)},
                 fingerprint=fingerprint(current),
             )
             return await preview_or_apply(

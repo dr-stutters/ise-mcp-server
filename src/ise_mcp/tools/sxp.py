@@ -279,7 +279,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             )
         side.append("Devices without SXP only get it after ise_deploy_ip_sgt")
         if current:
-            changes = field_changes(current, desired)
+            changes = field_changes(current, desired, replace=True)
             if "sgt" in changes:
                 names = await ers_name_map(app, "sgt")
                 changes["sgt"] = {k: names.get(str(v), v) for k, v in changes["sgt"].items()}
@@ -413,7 +413,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "global SXP password is set in ISE, use 'password default' with the same password",
         }
         if current:
-            changes = field_changes(current, desired)
+            changes = field_changes(current, desired, replace=True)
             if not changes:
                 blockers.append(f"Nothing changes: the SXP connection to {ip} is already set like this")
             plan = Plan(
