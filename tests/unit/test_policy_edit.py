@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 import respx
 from fastmcp import Client
-from stutters_mcp_core import InvalidRequest
 
+from ise_mcp._core import InvalidRequest
 from ise_mcp.tools.device_admin import parse_commands
 from ise_mcp.tools.policy_edit import check_attribute, condition_node, landing
 from tests.unit.conftest import BASE, ers_page, make_server

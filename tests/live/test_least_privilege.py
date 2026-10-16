@@ -9,8 +9,8 @@ write tool being visible to `ro`.
 from __future__ import annotations
 
 import pytest
-from stutters_mcp_core.testing.least_privilege import assert_read_tier_works, readonly_live_settings
 
+from ise_mcp._core.testing.least_privilege import assert_read_tier_works, readonly_live_settings
 from ise_mcp.config import Settings
 from ise_mcp.server import create_server
 

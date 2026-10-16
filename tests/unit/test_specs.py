@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import respx
-from stutters_mcp_core.spec import build_index
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core.spec import build_index
+from ise_mcp._core.testing import call_tool
 from ise_mcp.specs import MNT_DOC, ers_doc_from_data_model
 from tests.unit.conftest import make_server
 

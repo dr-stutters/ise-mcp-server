@@ -6,8 +6,8 @@ import json
 import pytest
 import respx
 from fastmcp import Client
-from stutters_mcp_core import InvalidRequest
 
+from ise_mcp._core import InvalidRequest
 from ise_mcp.tools.certs import pem_certs
 from tests.unit.conftest import BASE, ers_page, make_server
 from tests.unit.test_writes import two_step

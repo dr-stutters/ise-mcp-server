@@ -7,8 +7,8 @@ from typing import Any
 
 import respx
 from fastmcp import Client
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core.testing import call_tool
 from ise_mcp.knowledge import FAILURE_HINTS
 from ise_mcp.tools.policy_edit import check_attribute
 from ise_mcp.tools.policy_explain import eval_multi, evaluate

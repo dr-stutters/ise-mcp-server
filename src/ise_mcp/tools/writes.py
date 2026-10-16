@@ -16,7 +16,8 @@ from typing import Annotated, Any, Literal
 
 from fastmcp import Context
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     Confirm,
     InvalidRequest,
     NotFound,
@@ -27,8 +28,7 @@ from stutters_mcp_core import (
     get_client,
     preview_or_apply,
 )
-from stutters_mcp_core.formatting import MASK, is_secret_key, mask_secrets
-
+from ise_mcp._core.formatting import MASK, is_secret_key, mask_secrets
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, ers_resolve, is_uuid, normalize_mac
 from ise_mcp.tools.endpoint_bulk import check_custom_values, custom_attribute_defs

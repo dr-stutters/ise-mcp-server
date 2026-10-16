@@ -25,3 +25,4 @@ tests/fixtures/raw/
 .vscode/
 .idea/
 .DS_Store
+src/ise_mcp/_core/

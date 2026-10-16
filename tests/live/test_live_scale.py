@@ -8,8 +8,8 @@ import secrets
 import time
 
 import pytest
-from stutters_mcp_core.testing import live_settings
 
+from ise_mcp._core.testing import live_settings
 from ise_mcp.client import IseApp
 from ise_mcp.config import Settings
 from ise_mcp.tools._common import gather_limited

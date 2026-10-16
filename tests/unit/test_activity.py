@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 import pytest
 import respx
 from fastmcp.exceptions import ToolError
-from stutters_mcp_core import InvalidRequest
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core import InvalidRequest
+from ise_mcp._core.testing import call_tool
 from ise_mcp.tools.activity import is_coa_record, parse_until
 from tests.unit.conftest import FAILURE_REASONS_XML, ers_page, make_server, xml
 

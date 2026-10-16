@@ -17,9 +17,9 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
-from stutters_mcp_core import AuthError, InvalidRequest, NotFound, UpstreamError, ValidationFailed, metrics
-from stutters_mcp_core.http import ApiClient, BasicAuth, PageNumber, RateLimiter, default_error_detail
 
+from ise_mcp._core import AuthError, InvalidRequest, NotFound, UpstreamError, ValidationFailed, metrics
+from ise_mcp._core.http import ApiClient, BasicAuth, PageNumber, RateLimiter, default_error_detail
 from ise_mcp.config import Settings
 from ise_mcp.xmlutil import mnt_error_detail, parse_xml
 

@@ -52,11 +52,26 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 
 ```bash
 git clone https://github.com/dr-stutters/ise-mcp-server && cd ise-mcp-server
+python3 scripts/bundle_core.py vendor      # bundles the pinned stutters-mcp-core as ise_mcp._core (needs git)
 cp .env.example .env && chmod 600 .env     # set ISE_URL, ISE_USERNAME, ISE_PASSWORD
 uv sync
 uv run ise-mcp-server check                # prints ise_status as JSON; exit 1 if ISE is unreachable
 uv run ise-mcp-server config               # effective settings and where each came from (no ISE contact)
 ```
+
+The shared [stutters-mcp-core](https://github.com/dr-stutters/stutters-mcp-core) library is **bundled** into the
+package as `ise_mcp._core` (core ADR-005): the wheel, the sdist and the Docker image need nothing but their PyPI
+dependencies, with no git dependency and no token. A built wheel installs on its own:
+
+```bash
+uv build                                   # dist/ise_mcp_server-<version>-py3-none-any.whl (core included)
+pip install dist/ise_mcp_server-*.whl      # pulls only PyPI dependencies
+```
+
+The pinned core tag is `[tool.bundle-core]` in `pyproject.toml`; `ise_status` reports it as `core_version`.
+The vendored copy is generated, not committed: `scripts/bundle_core.py vendor` writes it, `check` reports
+drift, and `update --tag vX.Y.Z` moves the pin (then `uv lock`). A plain git checkout has no `ise_mcp/_core`,
+so install from a release wheel (attached to every GitHub release) rather than `git+https://...`.
 
 ## Configuration
 
@@ -170,7 +185,7 @@ claude mcp add --transport http ise http://cortex:8033/mcp --header "Authorizati
 
 ```bash
 uv run ise-mcp-server token alice           # put the printed hash line in .env as MCP_AUTH_TOKENS=...
-CORE_READ_TOKEN=$(gh auth token) docker compose up -d --build   # needs the core read token while repos are private
+docker compose up -d --build                # no token: the image is built from the bundled wheel
 curl http://localhost:8033/health
 ```
 

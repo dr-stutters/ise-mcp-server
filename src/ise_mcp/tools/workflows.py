@@ -6,8 +6,8 @@ import re
 from typing import Annotated
 
 from pydantic import Field
-from stutters_mcp_core import InvalidRequest, ToolRegistrar, tool_ref
 
+from ise_mcp._core import InvalidRequest, ToolRegistrar, tool_ref
 from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, normalize_mac, parse_ip
 
 # Prompt arguments are interpolated into instructions, so they are held to strict shapes.
