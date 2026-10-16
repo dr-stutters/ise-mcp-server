@@ -2,6 +2,26 @@
 
 ## 0.10.0 (unreleased)
 
+### Added
+- **`ise-mcp-server check` preflight (I36, #2; core C21).** Runs without an MCP client: one row per surface
+  (OpenAPI, ERS on `ISE_ERS_PORT`, MnT), TLS trust, credentials, the account's ISE admin groups (ERS
+  `adminuser`) against the enabled tiers (fails when writes/dangerous are on without ERS Admin / Super Admin,
+  warns when a read-only server runs as Super Admin), and the ISE version against the tested matrix (3.5; 3.1
+  minimum). Text or `--json`, `--strict`, `--instance`; exit 1 on a failure; every `ISE_INSTANCES` deployment.
+  `serve --http` / `serve --stdio`. README quickstart for a release wheel (`uvx --from`) and for the image,
+  with Claude Code / Claude Desktop config. PyPI publishing stays open (deferred).
+- **Published image (I37, #3; core C22).** `release.yml` calls core `publish-image.yml`:
+  `ghcr.io/dr-stutters/ise-mcp-server` for amd64 and arm64, cosign keyless signature, SPDX SBOM attestation;
+  `<version>` + `latest` on releases, `<version>-rcN` + `rc` on pre-release tags. `docker-compose.yml` pulls it
+  (`MCP_IMAGE_TAG`; `--build` still builds locally).
+- **Shared-host guide and example (I38, #4).** `docs/deploying.md` (read-only defaults, per-user tokens and the
+  audit log, several deployments with `ISE_INSTANCES`, Caddy TLS, the least-privilege account step by step,
+  upgrades and verifying signatures) and `examples/shared-host/` (server + Caddy, and a test override with two
+  mocked ISE deployments). Contract tests pin the tier defaults (`tests/unit/test_tier_defaults.py`).
+
+### Changed
+- Bundled core v0.14.0.
+
 ### Changed
 - **stutters-mcp-core is bundled into the package (I35, #1; core C20 / ADR-005).** The wheel, sdist and image
   carry core v0.13.0 as `ise_mcp._core`, so installing needs no git dependency and Docker needs no
