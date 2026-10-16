@@ -70,7 +70,8 @@ pip install dist/ise_mcp_server-*.whl      # pulls only PyPI dependencies
 
 The pinned core tag is `[tool.bundle-core]` in `pyproject.toml`; `ise_status` reports it as `core_version`.
 The vendored copy is generated, not committed: `scripts/bundle_core.py vendor` writes it, `check` reports
-drift, and `update --tag vX.Y.Z` moves the pin (then `uv lock`).
+drift, and `update --tag vX.Y.Z` moves the pin (then `uv lock`). A plain git checkout has no `ise_mcp/_core`,
+so install from a release wheel (attached to every GitHub release) rather than `git+https://...`.
 
 ## Configuration
 

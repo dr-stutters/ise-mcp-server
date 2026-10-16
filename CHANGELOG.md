@@ -7,7 +7,8 @@
   carry core v0.12.4 as `ise_mcp._core`, so installing needs no git dependency and Docker needs no
   `CORE_READ_TOKEN`. The pin is `[tool.bundle-core]` (tag + commit) in `pyproject.toml`; core's runtime
   dependencies are listed in the server's own. `scripts/bundle_core.py` vendors it (`vendor`, after a clone),
-  checks for drift (`check`) and moves the pin (`update --tag`). Code and tests import `ise_mcp._core`.
+  checks for drift (`check`) and moves the pin (`update --tag`). Code and tests import `ise_mcp._core`; importing
+  the package without the bundle says how to fix it.
 - `ise_status` reports the bundled core version (`server.core_version`).
 - CI: the core `bundle-core.yml` job vendors, fails on drift, builds the wheel and sdist, installs the wheel
   with `pip install --no-index` in a clean venv and runs the unit + contract suite against it. The release
