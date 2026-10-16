@@ -179,11 +179,11 @@ the spec cache.
 
 ## Tools
 
-106 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 57 read tools plus `ise_api_call` (GET-only) are registered. Everything
+114 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 60 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (57)
+### Read (60)
 
 | Tool | What it does |
 |---|---|
@@ -204,6 +204,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_license_status` | Licensing summary: smart-licensing registration state, connection type, evaluation period, and per-tier (Essentials/Advantage/Premier/Device Admin/...) status, compliance and consumption. |
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
 | `ise_get_policy_set` | One policy set with all of its rules in order: authentication rules (condition -> identity source, if-fail/if-not-found actions), authorization rules (condition -> profiles and SGT) and local exceptions, each with hit counts and ids. |
+| `ise_get_pxgrid_client` | One pxGrid client: state, the product that registered it, description, groups, and what to do next (approve a pending one; a 'created' account never activated). |
 | `ise_get_task` | Status of an asynchronous ISE task (e.g. |
 | `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN, audit session id), plus total, posture and profiler session counts. |
 | `ise_list_ad_groups` | Search the joined domain for groups (name as ISE writes it, e.g. |
@@ -233,23 +234,26 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_posture_policies` | List posture policies (which OS/identity-group a requirement set applies to): name, enabled, OS, agent type, requirement count and enforcement (MANDATORY/OPTIONAL/AUDIT), compliance module. |
 | `ise_list_posture_requirements` | List posture requirements (the checks a policy enforces): name, OS, agent type, the rules it contains, how they are combined (ALL_SUCCEED / ANY_FAIL), and the remediation. |
 | `ise_list_profiler_profiles` | List endpoint profiler profiles (ISE ships ~900, e.g. |
+| `ise_list_pxgrid_clients` | The pxGrid 2.0 clients registered with ISE (FMC, Catalyst Center, SIEMs, scripts): name, state (pending / enabled / disabled / created), the product that registered it when the name shows it (FMC uses iseagent-* and firesightisetest-*), description and groups. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
+| `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (34)
+### Write (39)
 
 | Tool | What it does |
 |---|---|
 | `ise_add_ad_groups` | Make AD groups usable in policy: after this, '<join point>:ExternalGroups EQUALS <group name>' conditions accept them (ise_create_authz_rule). |
+| `ise_approve_pxgrid_client` | Approve a pending pxGrid client so it can look up and subscribe to ISE's pxGrid services (sessions, TrustSec, ANC). |
 | `ise_bulk_endpoints` | Create, update or delete many endpoints in one ISE bulk task (e.g. |
 | `ise_create_ad_join_point` | Create an Active Directory join point (the definition only; no node joins yet). |
 | `ise_create_anc_policy` | Create an Adaptive Network Control policy that ise_apply_anc can put on endpoints. |
@@ -261,11 +265,14 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_nad` | Add a network access device (switch, WLC, VPN) so ISE accepts its RADIUS and/or TACACS+ requests. |
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
+| `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile, or AD join point (after ise_leave_ad). |
+| `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
 | `ise_import_trusted_cert` | Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth). |
+| `ise_issue_pxgrid_client_cert` | Issue the certificate an external pxGrid consumer (FMC, a SIEM) authenticates to ISE with. |
 | `ise_release_rejected_endpoint` | Release endpoints from ISE's rejected list (Context Visibility > Rejected Endpoints), e.g. |
 | `ise_set_cert_auth_profile` | A certificate authentication profile tells ISE how to read an EAP-TLS client certificate: which field is the username, and optionally which identity store to look it up in. |
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
@@ -275,6 +282,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
+| `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
 | `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
@@ -342,6 +350,28 @@ in AD fail. The lab profile therefore has no store.
 
 `ise_delete_certificate` blocks deleting a trusted CA that still issued a system certificate (ISE refuses
 it).
+
+### pxGrid (for FMC, Catalyst Center and other consumers)
+Appliance to appliance only: the server never connects to pxGrid as a client or subscribes (ADR-003).
+`ise_pxgrid_status` says whether a consumer can use pxGrid: the persona per node, the certificate bound
+to pxGrid (issuer chain through ISE's trusted store, hostname vs the node FQDN, both EKUs) and what port
+8910 actually presents (a TLS handshake, nothing sent), plus pending clients. `ise_list_pxgrid_clients` /
+`ise_get_pxgrid_client` (FMC registers as `iseagent-*` and `firesightisetest-*`), then
+`ise_approve_pxgrid_client`, `ise_decline_pxgrid_client` (ISE's REST API has no Decline: the pending
+registration is removed) or `ise_delete_pxgrid_client` (ISE's own `~ise-*` clients are refused).
+`ise_set_pxgrid_settings` sets auto-approve for cert-based accounts and password-based accounts; ISE 3.5
+can't read these back over REST, so the tool always sets both.
+
+`ise_issue_pxgrid_client_cert` issues a consumer's client certificate in two steps. Step 1 generates an RSA
+key and a CSR (Client + Server Authentication EKU) in the server; the key stays in memory for 2 hours,
+bound to the caller, and is never logged. Sign the CSR at a CA ISE trusts; Windows AD CS needs a template
+with both EKUs (WebServer has server auth only; the lab uses `mcpPxGrid`, created by `build-dc.py`). Step 2
+(request_id + the signed certificate) previews the checks (key match, EKU, validity, issuer trusted in ISE
+for authentication within ISE) and, on confirm, returns the certificate, the private key (PKCS#8, optionally
+encrypted with `key_passphrase`), the CA chain and `server_ca_pem`, the CA the consumer must trust for
+ISE's pxGrid server. The key is then forgotten. ISE's own pxGrid certificate is issued with the certificate
+tools: `ise_generate_csr usage=PXGRID` (vary the subject from the EAP certificate's, or ISE answers 409) ->
+sign -> `ise_bind_certificate use_for=['pxgrid']` (pxGrid restarts on the node for a minute or two).
 
 ### Active Directory
 `ise_create_ad_join_point` (the join point name becomes the policy dictionary, e.g. `CORP:ExternalGroups`) ->

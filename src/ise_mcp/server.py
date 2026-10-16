@@ -27,6 +27,7 @@ from ise_mcp.tools import (
     policy_edit,
     policy_explain,
     profiler_posture,
+    pxgrid,
     sessions,
     sxp,
     system,
@@ -61,8 +62,12 @@ ise_set_shell_profile; the node needs the DeviceAdmin service. Quarantine: an au
 'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Active Directory: ise_create_ad_join_point
 -> ise_join_ad -> ise_list_ad_groups -> ise_add_ad_groups, then rules on '<join point>:ExternalGroups
 equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_user (a user's groups) for
-AD login failures. Names or ids are accepted wherever a tool
-takes an object. Shared secrets, SNMP communities and passwords are always masked. For anything without
+AD login failures. pxGrid (appliance to appliance; this server never subscribes): ise_pxgrid_status
+(persona, certificate chain + hostname as consumers see them, pending clients) -> ise_list_pxgrid_clients ->
+ise_approve_pxgrid_client; ise_set_pxgrid_settings (auto-approve); ise_issue_pxgrid_client_cert (key + CSR,
+then the signed bundle) for a consumer such as FMC. Names or ids are accepted wherever a tool
+takes an object. Shared secrets, SNMP communities and passwords are always masked (the one exception:
+ise_issue_pxgrid_client_cert returns the consumer's new private key once, on confirm). For anything without
 a tool: ise_search_spec -> ise_get_definition -> ise_api_call(source=openapi|ers|mnt).
 """.strip()
 
@@ -107,6 +112,7 @@ def create_server(
             sxp.register,
             certs.register,
             ad.register,
+            pxgrid.register,
             dangerous.register,
             workflows.register,
         ],

@@ -1,5 +1,5 @@
 # ise-mcp-server roadmap
-_Last updated 2026-10-16: **I11 (AD) delivered in v0.8.0** against a real Windows DC, and I8 re-proven with its AD CS. **Next delivered in v0.4.0** (I8–I10). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.8.0 (AD, I11). Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
+_Last updated 2026-10-16: **I30 (pxGrid clients + certs for FMC) delivered in v0.9.0.** **I11 (AD) delivered in v0.8.0** against a real Windows DC, and I8 re-proven with its AD CS. **Next delivered in v0.4.0** (I8–I10). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.8.0 (AD, I11). Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
 
 ## Summary
 - v0.2.0 covers the day-to-day ISE work across OpenAPI, ERS and MnT: 72 tools for troubleshooting, policy and device-admin editing, TrustSec reads, ANC and CoA. They are live-tested against ISE 3.5 with a real cat9000v switch and client (CML `ise-access`).
@@ -112,7 +112,7 @@ See the [suite roadmap](https://github.com/dr-stutters/stutters-mcp-core/blob/ma
 
 | # | Item | Milestone |
 |---|---|---|
-| [I30](https://github.com/dr-stutters/ise-mcp-server/issues/71) | pxGrid client management + certs for FMC | Next |
+| ✅ [I30](https://github.com/dr-stutters/ise-mcp-server/issues/71) | pxGrid client management + certs for FMC (v0.9.0): 8 tools; ISE pxGrid cert from mitchcloud-CA; FMC client cert in `~/MCP-Suite/lab-ca/` | Next |
 | [I31](https://github.com/dr-stutters/ise-mcp-server/issues/72) | Guest + sponsor (AD sponsors, portals, guest accounts) | Next |
 | [I32](https://github.com/dr-stutters/ise-mcp-server/issues/73) | Posture (blocked: Windows client VM + Secure Client) | Later |
 | [I33](https://github.com/dr-stutters/ise-mcp-server/issues/74) | Machine + user EAP-TLS via GPO auto-enrolment (blocked: Windows client VM) | Later |
