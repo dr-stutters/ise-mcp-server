@@ -14,7 +14,8 @@ from urllib.parse import quote
 
 from fastmcp import Context
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     Confirm,
     InvalidRequest,
     NotFound,
@@ -25,7 +26,6 @@ from stutters_mcp_core import (
     get_client,
     preview_or_apply,
 )
-
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import render_condition
 from ise_mcp.tools.endpoint_bulk import custom_attribute_defs

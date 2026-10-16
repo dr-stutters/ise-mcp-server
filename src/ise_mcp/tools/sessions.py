@@ -9,7 +9,8 @@ from urllib.parse import quote
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     InvalidRequest,
     ResponseFormat,
     ToolRegistrar,
@@ -18,8 +19,7 @@ from stutters_mcp_core import (
     list_result,
     object_result,
 )
-from stutters_mcp_core.http import page_of
-
+from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.knowledge import FAILURE_HINTS, decode_steps
 from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, gather_limited, normalize_mac, parse_ip

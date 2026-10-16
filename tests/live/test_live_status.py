@@ -1,6 +1,7 @@
 import pytest
 from fastmcp import FastMCP
-from stutters_mcp_core.testing import call_tool
+
+from ise_mcp._core.testing import call_tool
 
 pytestmark = pytest.mark.live
 

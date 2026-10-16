@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.resources
+import json
 
 import httpx
 import pytest
 import respx
-from stutters_mcp_core import AuthError, ValidationFailed
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core import AuthError, ValidationFailed
+from ise_mcp._core import __version__ as core_version
+from ise_mcp._core.testing import call_tool
 from ise_mcp.client import IseApp, ers_error_detail, unwrap, with_port
 from ise_mcp.xmlutil import as_list, mnt_error_detail, parse_xml
 from tests.unit.conftest import BASE, make_server, make_settings, xml
@@ -91,7 +94,9 @@ async def test_status_all_surfaces(mock: respx.MockRouter) -> None:
     assert "warning" not in ise
     assert "server_version" not in ise  # core reports it under server
     assert out["server"]["server_version"] == importlib.metadata.version("ise-mcp-server")
-    assert out["server"]["core_version"] == importlib.metadata.version("stutters-mcp-core")
+    # core is bundled (ise_mcp._core); status reports the bundled version, not an installed one
+    bundle = json.loads((importlib.resources.files("ise_mcp._core") / "BUNDLE.json").read_text())
+    assert out["server"]["core_version"] == bundle["version"] == core_version
 
 
 async def test_status_ers_down(mock: respx.MockRouter) -> None:
@@ -202,7 +207,7 @@ async def test_status_malformed_surface(mock: respx.MockRouter) -> None:
 
 
 async def test_mnt_path_validation() -> None:
-    from stutters_mcp_core import InvalidRequest
+    from ise_mcp._core import InvalidRequest
 
     app = IseApp(make_settings())
     with pytest.raises(InvalidRequest):
@@ -316,8 +321,8 @@ async def test_db_transient_500_retried_on_get(mock: respx.MockRouter) -> None:
 
 async def test_db_transient_500_not_retried_on_post(mock: respx.MockRouter) -> None:
     import httpx as _httpx
-    from stutters_mcp_core import UpstreamError
 
+    from ise_mcp._core import UpstreamError
     from ise_mcp.client import IseApp
 
     calls = {"n": 0}
@@ -338,8 +343,8 @@ async def test_db_transient_500_not_retried_on_post(mock: respx.MockRouter) -> N
 
 async def test_non_db_500_not_retried(mock: respx.MockRouter) -> None:
     import httpx as _httpx
-    from stutters_mcp_core import UpstreamError
 
+    from ise_mcp._core import UpstreamError
     from ise_mcp.client import IseApp
 
     calls = {"n": 0}

@@ -33,7 +33,8 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     Confirm,
     InvalidRequest,
     NotFound,
@@ -45,8 +46,7 @@ from stutters_mcp_core import (
     get_client,
     preview_or_apply,
 )
-from stutters_mcp_core.http import page_of
-
+from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import gather_limited, list_result, openapi_all
 from ise_mcp.tools.certs import pem_certs

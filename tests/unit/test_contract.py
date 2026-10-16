@@ -1,11 +1,11 @@
 import pytest
 from fastmcp import Client
-from stutters_mcp_core.testing import (
+
+from ise_mcp._core.testing import (
     assert_prompt_contract,
     assert_tool_contract,
     load_tool_manifests,
 )
-
 from tests.unit.conftest import make_server
 
 PROMPT_SAMPLES = {

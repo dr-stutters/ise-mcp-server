@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastmcp.tools import ToolResult
-from stutters_mcp_core import InvalidRequest, NotFound, ResponseFormat, UpstreamError, ValidationFailed
-from stutters_mcp_core import list_result as core_list_result
-from stutters_mcp_core.http import Page, page_of
 
+from ise_mcp._core import InvalidRequest, NotFound, ResponseFormat, UpstreamError, ValidationFailed
+from ise_mcp._core import list_result as core_list_result
+from ise_mcp._core.http import Page, page_of
 from ise_mcp.client import IseApp
 
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")

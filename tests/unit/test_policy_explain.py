@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 import respx
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core.testing import call_tool
 from ise_mcp.tools.policy_explain import eval_operator, evaluate
 from tests.unit.conftest import make_server
 

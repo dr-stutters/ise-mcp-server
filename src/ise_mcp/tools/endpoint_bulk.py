@@ -12,7 +12,8 @@ from urllib.parse import quote
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import BaseModel, Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     Confirm,
     InvalidRequest,
     NotFound,
@@ -26,8 +27,7 @@ from stutters_mcp_core import (
     poll_until,
     preview_or_apply,
 )
-from stutters_mcp_core.http import page_of
-
+from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, gather_limited, is_uuid, normalize_mac
 

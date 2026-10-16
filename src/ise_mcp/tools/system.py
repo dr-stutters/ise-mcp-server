@@ -10,7 +10,8 @@ from urllib.parse import quote
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     ResponseFormat,
     ToolRegistrar,
     UpstreamError,
@@ -18,8 +19,7 @@ from stutters_mcp_core import (
     list_result,
     object_result,
 )
-from stutters_mcp_core.http import page_of
-
+from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import openapi_all
 

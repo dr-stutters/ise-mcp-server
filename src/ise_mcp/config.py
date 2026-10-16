@@ -3,7 +3,8 @@
 from typing import ClassVar
 
 from pydantic import Field
-from stutters_mcp_core import BaseServerSettings, server_config
+
+from ise_mcp._core import BaseServerSettings, server_config
 
 
 class Settings(BaseServerSettings):

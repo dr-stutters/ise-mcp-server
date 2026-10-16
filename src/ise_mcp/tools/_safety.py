@@ -17,8 +17,7 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from stutters_mcp_core import InvalidRequest
-
+from ise_mcp._core import InvalidRequest
 from ise_mcp.tools._common import normalize_mac
 from ise_mcp.xmlutil import as_list
 
