@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.0 (2026-10-16)
+
+### Added
+- **Active Directory (I11, #18):** `ise_get_ad_join_point` (config + join status), `ise_list_ad_groups`,
+  `ise_test_ad_user` (read); `ise_create_ad_join_point`, `ise_add_ad_groups` (write); `ise_join_ad`,
+  `ise_leave_ad` (dangerous; the domain account is passed per call and never stored or shown).
+  `ise_delete_object kind=ad_join_point` (blocked while joined). A single-node join sends the node FQDN, which
+  ISE 3.5 requires.
+- `ise_why_auth_failed` adds the join status and the user's AD groups for AD failures (244xx/247xx, 22056, a
+  non-local identity store). It explains 15039 when no AD-group rule matched, and uses the given `username`
+  when MnT records the user as `INVALID`.
+- `ise_policy_explain(ad_user=...)` fills `<join point>:ExternalGroups` with the user's groups that are added to
+  the join point. Attributes may be lists, for multi-valued attributes.
+- `ExternalGroups` conditions accept a unique bare group name (`mcp-employees`).
+- `scripts/lab_policy.py ad` / `ad-down` / `certs`: AD join point and rules; lab CA trust, an EAP certificate
+  signed by the lab AD CS, and the EAP-TLS rule (idempotent).
+
+### Fixed
+- AD failure hints rebuilt from ISE's catalog. **24415** is "account locked out" (the hint said the join point
+  was unreachable), and **24419** is "attribute retrieval failed" (it said locked or disabled). New hints for
+  24406-24414, 24417, 24428/24429, 24446/24447, 24465, 24493/24494, 24708 and 25058. AD execution steps are decoded.
+- `ise_delete_certificate` blocks deleting a trusted CA that still issued a system certificate (ISE refuses
+  with 400). A 422 without detail on a system certificate now points to the GUI.
+
+### Docs
+- README: Active Directory section; certificates tested with Windows AD CS (WebServer / User templates) and with
+  OpenSSL. least-privilege.md: the AD query operations are ERS PUTs, so they need ERS Admin.
+
 ## 0.7.2 (2026-10-15)
 
 ### Fixed
