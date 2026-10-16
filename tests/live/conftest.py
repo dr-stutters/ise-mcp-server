@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,6 +12,31 @@ from fastmcp import Client, FastMCP
 from ise_mcp._core.testing import live_settings
 from ise_mcp.config import Settings
 from ise_mcp.server import create_server
+
+DOCS = "docs/live-tests.md"
+SEED_HINT = f"seed the mcp-test-* objects first; see {DOCS}"
+
+
+def live_env(name: str) -> str:
+    """A lab-specific live-test input (ISE_LIVE_*, see docs/live-tests.md): the environment first, then
+    ./.env. Empty string when unset."""
+    if os.environ.get(name):
+        return os.environ[name]
+    env = Path(".env")
+    if env.is_file():
+        for line in env.read_text().splitlines():
+            key, sep, value = line.strip().removeprefix("export ").partition("=")
+            if sep and key.strip() == name:
+                return value.strip().strip('"').strip("'")
+    return ""
+
+
+def need_env(name: str, what: str) -> str:
+    """live_env(name), or pytest.skip() naming the variable when it is unset."""
+    value = live_env(name)
+    if not value:
+        pytest.skip(f"{name} not set ({what}; see {DOCS})")
+    return value
 
 
 def live_server(**overrides: Any) -> FastMCP[Any]:

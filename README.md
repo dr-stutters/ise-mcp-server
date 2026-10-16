@@ -112,8 +112,8 @@ so install from a release wheel (attached to every GitHub release) rather than `
      Admin** and **Policy Admin**. MnT CoA needs **MnT Admin** (or Super Admin).
 3. For read-only use, keep `MCP_ENABLE_WRITES=false`. The write tools aren't registered at all then.
 
-See [docs/least-privilege.md](docs/least-privilege.md) for the full tier → admin-group mapping, the
-seed step (`scripts/seed_lab.py --least-privilege`) and the read-tier verification test.
+See [docs/least-privilege.md](docs/least-privilege.md) for the full tier → admin-group mapping, how to
+create the accounts and the read-tier verification test.
 `ise_deployment_health` reports the server's own account and flags it when it holds more than the
 enabled tiers need.
 
@@ -411,15 +411,14 @@ over SSH instead, and `ise_push_trustsec_matrix` makes TrustSec devices refresh 
 
 ```bash
 uv run pytest                          # unit tests (respx-mocked, includes the tool contract)
-uv run python scripts/seed_lab.py      # lab only: mcp-test-* objects + real RADIUS traffic for MnT
-uv run pytest tests/live -m live       # live tests against ISE_URL (skipped if unreachable)
-uv run python scripts/lab_policy.py up # ISE side of the CML 'ise-access' lab (switch + client); 'down' removes it
-ISE_LIVE_SWITCH_MAC=<client MAC> uv run pytest tests/live -m live -k switch   # session/CoA/ANC via the real switch
+uv run pytest tests/live -m live -rs   # live tests against ISE_URL (skipped if unreachable or not configured)
+ISE_LIVE_SWITCH_MAC=<client MAC> uv run pytest tests/live -m live -k switch   # session/CoA/ANC via a real switch
 ```
 
-`scripts/seed_lab.py` creates a NAD for this host's source IP and an internal user, then sends RADIUS
-PAP requests and an accounting start, so the session/auth-history/CoA tools have real data. The live
-write tests create and delete `mcp-test-*` objects.
+[docs/live-tests.md](docs/live-tests.md) lists the `ISE_LIVE_*` inputs (MACs, join point, CA, SXP peer, ...),
+the seeded `mcp-test-*` objects and RADIUS history some tests expect, and the switch test policy. Without
+them those tests skip with a message naming what is missing. The live write tests create and delete
+`mcp-test-*` objects. The suite's own lab seed scripts live in its private lab repo (stutters-mcp-lab).
 
 ## Notes and limits
 

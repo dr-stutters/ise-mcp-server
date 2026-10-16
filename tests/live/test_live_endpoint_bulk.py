@@ -1,21 +1,21 @@
 """Live (I4): custom attributes, endpoint bulk create/update/delete, and an authz rule on a custom
-attribute matched by the CML ise-access client (needs ISE_LIVE_SWITCH_MAC). Everything is mcp-test-*
+attribute matched by a real client behind a switch (needs ISE_LIVE_SWITCH_MAC and the switch test policy;
+see docs/live-tests.md). Everything is mcp-test-*
 and removed at the end."""
 
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 
-from tests.live.conftest import Session
+from tests.live.conftest import DOCS, Session, live_env
 
 pytestmark = pytest.mark.live
 
 ATTR = "mcpTestTier"
 MACS = ["02:00:5E:00:01:10", "02:00:5E:00:01:11", "02:00:5E:00:01:12"]
-SWITCH_MAC = os.environ.get("ISE_LIVE_SWITCH_MAC")
+SWITCH_MAC = live_env("ISE_LIVE_SWITCH_MAC")
 
 
 async def ensure_attr(ise: Session) -> None:
@@ -88,7 +88,10 @@ async def latest_auth(ise: Session, mac: str) -> dict:  # type: ignore[type-arg]
     return next((a for a in hist.get("attempts", []) if a.get("result") == "PASS"), {})
 
 
-@pytest.mark.skipif(not SWITCH_MAC, reason="set ISE_LIVE_SWITCH_MAC (CML ise-access lab up)")
+REASON = f"ISE_LIVE_SWITCH_MAC not set (needs a switch and client; see {DOCS})"
+
+
+@pytest.mark.skipif(not SWITCH_MAC, reason=REASON)
 async def test_authz_rule_on_custom_attribute(ise: Session) -> None:
     mac = str(SWITCH_MAC)
     await ensure_attr(ise)

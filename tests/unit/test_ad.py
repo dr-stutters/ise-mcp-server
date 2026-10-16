@@ -323,7 +323,7 @@ async def test_why_auth_failed_ad_disabled_account(mock: respx.MockRouter) -> No
     mock.get(f"/admin/API/mnt/Session/MACAddress/{AD_MAC}").respond(500, text=MISSING_SESSION)
     mock.get("/ers/config/networkdevice").respond(json=ers_page([]))
     mock_jp(mock)
-    mock.get("/ers/config/activedirectory").respond(json=ers_page([{"id": JP_ID, "name": "MITCHCLOUD"}]))
+    mock.get("/ers/config/activedirectory").respond(json=ers_page([{"id": JP_ID, "name": "CORP"}]))
     lookup = mock.put(f"{OP}/getUserGroups").respond(
         json={
             "ERSActiveDirectoryGroups": {

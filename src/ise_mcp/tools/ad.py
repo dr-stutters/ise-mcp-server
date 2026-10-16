@@ -168,7 +168,7 @@ async def all_join_points(app: IseApp) -> list[dict[str, Any]]:
 
 
 def strip_domain(username: str) -> str:
-    """'MITCHCLOUD\\alice' -> 'alice'; UPNs are kept (AD resolves them)."""
+    """'CORP\\alice' -> 'alice'; UPNs are kept (AD resolves them)."""
     return username.split("\\", 1)[-1]
 
 
@@ -239,7 +239,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
         """Search the joined domain for groups (name as ISE writes it, e.g.
-        'mitchcloud.lab/MCP-Lab/mcp-employees', SID, scope) and say which are already added to the
+        'corp.example.com/Groups/employees', SID, scope) and say which are already added to the
         join point. Only added groups can be used in policy (ise_add_ad_groups). Needs a joined node."""
         app: IseApp = get_client(ctx)
         jp = await resolve_join_point(app, join_point)

@@ -85,7 +85,7 @@ The suite catalogue also lists `catc_onboard_switch_with_nac` (owned by catc) an
 | ISE 3.5 standalone node (dCloud, `ise` 198.18.134.35), OpenAPI/ERS/MnT | All | dCloud lab | cortex → ISE :443 (ERS also :9060, open) | ✅ in place |
 | ISE licence: Advantage, Device Admin | TrustSec, ANC and device-admin tools | ISE evaluation licence (all tiers enabled, **evaluation**: expires) | — | ✅ evaluation only |
 | CML recipe `ise-access` (cat9000v sw1 + Alpine client with wpa_supplicant) | I2, I3, I4, I8–I11, I13, I15, I18 | cml-mcp-server recipe (lab `mcp-cml-ise`, stopped) | sw1 ↔ ISE RADIUS 1812/1813, CoA 1700, TACACS 49 | ✅ defined (TACACS lines need re-applying) |
-| RADIUS test client on cortex (`scripts/seed_lab.py`, PAP) | I3, I5 | This repo | cortex → ISE UDP 1812/1813 | ✅ in place |
+| RADIUS test client on cortex (seed script, PAP) | I3, I5 | Provided by the suite's private lab repo (stutters-mcp-lab) | cortex → ISE UDP 1812/1813 | ✅ in place |
 | eapol_test / wpa_supplicant for EAP-TLS and PEAP-AD | I8, I11 | `ise-access` client (wpa_supplicant installed) | client ↔ sw1 802.1X | ✅ PEAP-AD and EAP-TLS (AD CS) live |
 | Windows AD + AD CS lab server | I8, I11 | DC01.mitchcloud.lab 198.18.130.11 (dCloud VM; rebuilt by `~/MCP-Suite/scripts/build-dc.py`) | ISE → DC 53/88/389/3268/445; cortex → DC WinRM 5985 | ✅ up; the Samba/OpenSSL stand-in (CML dc1 .180) is retired |
 | SXP service on a PSN; switch SXP peer | I9 | ISE node service + sw1 config | ISE ↔ sw1 TCP 64999 | ✅ enabled (sw1 listener, CTS PAC) |
@@ -170,7 +170,7 @@ Scoping answers (2026-10-16):
 |---|---|---|
 | PyPI account, `ise-mcp-server` name, trusted publisher | I36 | ⏳ owner |
 | GHCR package permissions | I37 | ⏳ owner |
-| Private repo `stutters-mcp-lab` | I39 | ⏳ owner |
+| Private repo `stutters-mcp-lab` | I39 | ✅ in place |
 | ISE 3.5 lab back up | I31, I40–I46, I48 | ⏳ owner |
 | TACACS+ re-applied on sw1 | I41 | ⏳ when the lab is back |
 | Profiler probes (DHCP/RADIUS) reaching the PSN | I40 | ⏳ when the lab is back |

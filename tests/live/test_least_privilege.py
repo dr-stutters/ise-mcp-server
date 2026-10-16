@@ -1,7 +1,7 @@
 """Least-privilege contract (I16 / core G3): run the read tier as a dedicated read-only ISE admin.
 
 Skipped unless ISE_RO_USERNAME / ISE_RO_PASSWORD are set (the `mcp-test-ro` account from
-docs/least-privilege.md; create it with `scripts/seed_lab.py --least-privilege`). It logs in as that
+docs/least-privilege.md, which describes how to create it). It logs in as that
 account with MCP caller role `ro`, calls every read tool, and fails on any appliance denial or on a
 write tool being visible to `ro`.
 """
@@ -16,7 +16,7 @@ from ise_mcp.server import create_server
 
 pytestmark = pytest.mark.live
 
-# Objects the lab seed (scripts/seed_lab.py, lab_policy.py) creates, so the sampled read tools resolve.
+# Seeded mcp-test-* objects (docs/live-tests.md), so the sampled read tools resolve.
 SAMPLES = {
     "ise_get_nad": {"name": "mcp-test-radius-client"},
     "ise_get_internal_user": {"name": "mcp-test-user"},
