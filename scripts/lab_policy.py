@@ -9,8 +9,8 @@ the way a model would (preview, then confirm).
     uv run python scripts/lab_policy.py pxgrid  # pxGrid settings + cert from the lab CA, FMC client cert
 
 What 'up' creates (all named mcp-test-*; idempotent: existing objects are left alone):
-- NDG Location#All Locations#mcp-test-lab; NAD mcp-test-sw1 198.18.128.154 (RADIUS + TACACS+ key ***REDACTED***,
-  the lab switch's key)
+- NDG Location#All Locations#mcp-test-lab; NAD mcp-test-sw1 198.18.128.154 (RADIUS + TACACS+ key
+  LAB_RADIUS_SECRET, the lab switch's key)
 - dACLs mcp-test-permit-dacl / mcp-test-quarantine-dacl; authz profiles mcp-test-permit / mcp-test-quarantine
 - network-access policy set mcp-test-wired (DEVICE:Location = the lab NDG AND NAS-Port-Type Ethernet):
   authn mcp-test-mab (Internal Endpoints, CONTINUE) and mcp-test-dot1x (Internal Users); authz
@@ -18,8 +18,8 @@ What 'up' creates (all named mcp-test-*; idempotent: existing objects are left a
   mcp-test-dot1x-netops (802.1X + group mcp-test-netops -> permit + SGT Employees),
   mcp-test-mab-permit (Wired_MAB -> permit + SGT Employees)
 - ANC policy mcp-test-quarantine (QUARANTINE)
-- identity group mcp-test-netops, user mcp-test-netops1 (password from MCP_LAB_USER_PASSWORD, default
-  ***REDACTED***), command set mcp-test-show-only, shell profile mcp_test_priv15, device-admin policy
+- identity group mcp-test-netops, user mcp-test-netops1 (password from MCP_LAB_USER_PASSWORD or
+  LAB_NETOPS_PASSWORD), command set mcp-test-show-only, shell profile mcp_test_priv15, device-admin policy
   set mcp-test-devadmin with rule mcp-test-netops
 'ad' (needs the lab DC, ~/MCP-Suite/scripts/build-dc.py; secrets from LAB_* env vars or LAB_SECRETS_FILE,
 default ~/MCP-Suite/lab-secrets.env): join point MITCHCLOUD for LAB_AD_DOMAIN, node joined with
@@ -58,7 +58,8 @@ from ise_mcp.config import Settings
 from ise_mcp.server import create_server
 
 LAB_NDG = "Location#All Locations#mcp-test-lab"
-PASSWORD = os.environ.get("MCP_LAB_USER_PASSWORD", "***REDACTED***")
+# Filled in from lab_secrets() when "up" runs (see with_secrets)
+NAD_SECRET, PASSWORD = "$LAB_RADIUS_SECRET", "$LAB_NETOPS_PASSWORD"
 
 UP: list[tuple[str, dict[str, Any]]] = [
     ("ise_create_ndg", {"path": LAB_NDG, "description": "mcp-test CML lab"}),
@@ -67,8 +68,8 @@ UP: list[tuple[str, dict[str, Any]]] = [
         {
             "name": "mcp-test-sw1",
             "ips": ["198.18.128.154"],
-            "radius_secret": "***REDACTED***",
-            "tacacs_secret": "***REDACTED***",
+            "radius_secret": NAD_SECRET,
+            "tacacs_secret": NAD_SECRET,
             "groups": [LAB_NDG, "Device Type#All Device Types"],
             "description": "mcp-test CML sw1",
         },
@@ -235,6 +236,21 @@ def lab_secrets() -> dict[str, str]:
                 out[k.strip()] = v.strip().strip('"').strip("'")
     out.update({k: v for k, v in os.environ.items() if k.startswith("LAB_")})
     return out
+
+
+def with_secrets(
+    steps: list[tuple[str, dict[str, Any]]], sec: dict[str, str]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Replace "$LAB_*" values with lab secrets; exit naming any that are missing."""
+    if os.environ.get("MCP_LAB_USER_PASSWORD"):
+        sec = {**sec, "LAB_NETOPS_PASSWORD": os.environ["MCP_LAB_USER_PASSWORD"]}
+    names = {v[1:] for _, a in steps for v in a.values() if isinstance(v, str) and v.startswith("$LAB_")}
+    if missing := sorted(names - sec.keys()):
+        sys.exit(f"missing lab secrets: {', '.join(missing)} (set them or add them to LAB_SECRETS_FILE)")
+    return [
+        (tool, {k: sec[v[1:]] if isinstance(v, str) and v.startswith("$LAB_") else v for k, v in a.items()})
+        for tool, a in steps
+    ]
 
 
 def ad_steps(sec: dict[str, str]) -> list[tuple[str, dict[str, Any]]]:
@@ -616,7 +632,8 @@ async def main() -> None:
         if stage == "ad-down":
             await ad_down(c, lab_secrets())
             return
-        for tool, args in UP if stage == "up" else DOWN:
+        steps = with_secrets(UP, lab_secrets()) if stage == "up" else DOWN
+        for tool, args in steps:
             await run(c, tool, args)
 
 
