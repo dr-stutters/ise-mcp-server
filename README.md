@@ -48,30 +48,84 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   policy or certificates) need a second switch.
 - Shared secrets, SNMP communities and passwords are never returned: they show as `********`.
 
-## Install and check
+## Quickstart (5 minutes)
+
+You need: an ISE admin account for the server (read-only is enough to start: admin groups **ERS Operator** +
+**Read Only Admin**, see [docs/least-privilege.md](docs/least-privilege.md)) and ERS + Open API enabled under
+**Administration > System > Settings > API Settings**.
+
+**A. On your laptop (stdio), from a release wheel.** Every [GitHub release](https://github.com/dr-stutters/ise-mcp-server/releases)
+has a wheel with stutters-mcp-core bundled in; it needs only PyPI dependencies.
+
+```bash
+WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.10.0/ise_mcp_server-0.10.0-py3-none-any.whl
+export ISE_URL=https://ise.example.com ISE_USERNAME=mcp-ro ISE_PASSWORD='...'
+uvx --from "$WHEEL" ise-mcp-server check            # preflight: surfaces, TLS, login, admin groups, version
+claude mcp add ise -e ISE_URL=$ISE_URL -e ISE_USERNAME=$ISE_USERNAME -e ISE_PASSWORD="$ISE_PASSWORD" \
+  -- uvx --from "$WHEEL" ise-mcp-server              # stdio is the default transport
+```
+
+Claude Desktop (`claude_desktop_config.json`), same idea:
+
+```json
+{
+  "mcpServers": {
+    "ise": {
+      "command": "uvx",
+      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.10.0/ise_mcp_server-0.10.0-py3-none-any.whl", "ise-mcp-server"],
+      "env": {"ISE_URL": "https://ise.example.com", "ISE_USERNAME": "mcp-ro", "ISE_PASSWORD": "..."}
+    }
+  }
+}
+```
+
+**B. On a shared host (HTTP), from the image.** Multi-arch (amd64/arm64), signed, with an SBOM:
+`ghcr.io/dr-stutters/ise-mcp-server:<version>` (or `:latest`).
+
+```bash
+docker run --rm -e ISE_URL=https://ise.example.com -e ISE_USERNAME=mcp-ro -e ISE_PASSWORD='...' \
+  ghcr.io/dr-stutters/ise-mcp-server ise-mcp-server check
+docker run --rm ghcr.io/dr-stutters/ise-mcp-server ise-mcp-server token alice   # one token per person
+cp .env.example .env && chmod 600 .env    # ISE_*, MCP_AUTH_TOKENS=alice:sha256:...
+docker compose up -d                      # pulls the image; http://localhost:8033/mcp
+```
+
+For a team, use [docs/deploying.md](docs/deploying.md): read-only by default, per-user tokens in the audit
+log, several ISE deployments, TLS with Caddy, upgrades.
+
+**`check`** runs without an MCP client and exits 1 on a failure (`--json` for scripts, `--strict` to fail on
+warnings, `--instance dr` for one deployment). It reports each surface (OpenAPI, ERS on `ISE_ERS_PORT`, MnT),
+TLS trust, the login, the account's admin groups against the enabled tiers, and the ISE version against the
+tested matrix:
+
+```text
+  OK    reachability[openapi]  OpenAPI answered (1 node(s)) (16 ms)
+  FAIL  reachability[ers]      Could not connect to ISE at https://ise.example.com: ...
+                               -> Check ISE_URL ... check ISE_ERS_PORT (443 on ISE 3.1+, 9060 ...)
+  OK    role                   role 'ERS Operator, Read Only Admin' allows the enabled tier(s): read
+  OK    version                Cisco ISE 3.5.0.527: tested
+```
+
+`ise-mcp-server serve --http` serves HTTP (needs `MCP_AUTH_TOKENS`); `ise-mcp-server config` shows the
+effective settings and where each came from, without contacting ISE.
+
+### From source
 
 ```bash
 git clone https://github.com/dr-stutters/ise-mcp-server && cd ise-mcp-server
 python3 scripts/bundle_core.py vendor      # bundles the pinned stutters-mcp-core as ise_mcp._core (needs git)
 cp .env.example .env && chmod 600 .env     # set ISE_URL, ISE_USERNAME, ISE_PASSWORD
 uv sync
-uv run ise-mcp-server check                # prints ise_status as JSON; exit 1 if ISE is unreachable
-uv run ise-mcp-server config               # effective settings and where each came from (no ISE contact)
+uv run ise-mcp-server check
 ```
 
 The shared [stutters-mcp-core](https://github.com/dr-stutters/stutters-mcp-core) library is **bundled** into the
 package as `ise_mcp._core` (core ADR-005): the wheel, the sdist and the Docker image need nothing but their PyPI
-dependencies, with no git dependency and no token. A built wheel installs on its own:
-
-```bash
-uv build                                   # dist/ise_mcp_server-<version>-py3-none-any.whl (core included)
-pip install dist/ise_mcp_server-*.whl      # pulls only PyPI dependencies
-```
-
+dependencies, with no git dependency and no token. `uv build` writes the wheel to `dist/`.
 The pinned core tag is `[tool.bundle-core]` in `pyproject.toml`; `ise_status` reports it as `core_version`.
 The vendored copy is generated, not committed: `scripts/bundle_core.py vendor` writes it, `check` reports
 drift, and `update --tag vX.Y.Z` moves the pin (then `uv lock`). A plain git checkout has no `ise_mcp/_core`,
-so install from a release wheel (attached to every GitHub release) rather than `git+https://...`.
+so install from a release wheel rather than `git+https://...`.
 
 ## Configuration
 
@@ -184,13 +238,13 @@ claude mcp add --transport http ise http://cortex:8033/mcp --header "Authorizati
 ## Docker
 
 ```bash
-uv run ise-mcp-server token alice           # put the printed hash line in .env as MCP_AUTH_TOKENS=...
-docker compose up -d --build                # no token: the image is built from the bundled wheel
+docker compose up -d                        # pulls ghcr.io/dr-stutters/ise-mcp-server (MCP_IMAGE_TAG, default latest)
+docker compose up -d --build                # or build from this checkout (no token: core is bundled)
 curl http://localhost:8033/health
 ```
 
 The container runs as non-root with a read-only root filesystem, no capabilities and a named volume for
-the spec cache.
+the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrades): [docs/deploying.md](docs/deploying.md).
 
 ## Tools
 
