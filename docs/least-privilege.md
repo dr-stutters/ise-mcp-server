@@ -69,17 +69,11 @@ policy-set deletes) needs Super Admin, so a write-only deployment cannot perform
 
 Store the passwords as Docker secrets (`ISE_PASSWORD_FILE`, core G4) on hosted servers, not in `.env`.
 
-**Create them** — seed script (idempotent):
-
-```bash
-uv run python scripts/seed_lab.py --least-privilege   # or --only-least-privilege
-```
-
-It POSTs `/api/v1/rbac/admin-user` for each user and writes `ISE_RO_USERNAME` / `ISE_RO_PASSWORD` to
-`.env` when it creates `mcp-test-ro` with a generated password (set `MCP_LP_READ_PASSWORD` etc. to pin
-them). **Known ISE 3.5 build bug:** `POST /api/v1/rbac/admin-user` can return a generic HTTP 500
-("Unexpected Error in admin user creation") regardless of body; ERS `adminuser` is GET-only, so there is
-no API fallback. The seed script detects the 500 and prints the GUI steps:
+**Create them** with `POST /api/v1/rbac/admin-user` (one call per user, with the groups above) or in the
+GUI, then set `ISE_RO_USERNAME` / `ISE_RO_PASSWORD` in `.env` for the read-only one. The suite's private lab
+repo (stutters-mcp-lab) has an idempotent seed script that does the API calls. **Known ISE 3.5 build bug:**
+`POST /api/v1/rbac/admin-user` can return a generic HTTP 500 ("Unexpected Error in admin user creation")
+regardless of body; ERS `adminuser` is GET-only, so there is no API fallback. Use the GUI then:
 
 ```text
 Administration > System > Admin Access > Administrators > Admin Users > Add:
@@ -111,6 +105,5 @@ creating the three users in the GUI (one-time; see §3) on the rebuilt lab.
 
 ## 5. Lab rebuild
 
-`scripts/seed_lab.py --least-privilege` (idempotent) is the create step; it is listed under ISE in
-`~/MCP-Suite/LAB-REBUILD.md`. On a fixed ISE build it creates the three users; otherwise it prints the
-GUI steps above.
+Creating the three users is a step of the suite's lab rebuild, in its private lab repo (stutters-mcp-lab).
+On a fixed ISE build the seed script there creates them; otherwise it prints the GUI steps above.
