@@ -179,19 +179,20 @@ the spec cache.
 
 ## Tools
 
-99 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 50 read tools plus `ise_api_call` (GET-only) are registered. Everything
+106 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 57 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (54)
+### Read (57)
 
 | Tool | What it does |
 |---|---|
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
-| `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points. |
+| `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
+| `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
 | `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes, device profile. |
@@ -204,7 +205,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
 | `ise_get_policy_set` | One policy set with all of its rules in order: authentication rules (condition -> identity source, if-fail/if-not-found actions), authorization rules (condition -> profiles and SGT) and local exceptions, each with hit counts and ids. |
 | `ise_get_task` | Status of an asynchronous ISE task (e.g. |
-| `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAD IP, PSN, audit session id), plus total, posture and profiler session counts. |
+| `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN, audit session id), plus total, posture and profiler session counts. |
+| `ise_list_ad_groups` | Search the joined domain for groups (name as ISE writes it, e.g. |
 | `ise_list_allowed_protocols` | List allowed-protocols services (selected by each policy set) and which authentication protocols each permits: PAP, CHAP, MS-CHAPv2, EAP-MD5, EAP-TLS, PEAP, EAP-FAST, TEAP, LEAP. |
 | `ise_list_anc_endpoints` | List endpoints that currently have an ANC policy applied (e.g. |
 | `ise_list_anc_policies` | List Adaptive Network Control (ANC) policies and their actions (QUARANTINE, PORTBOUNCE, SHUTDOWN, REAUTHENTICATE). |
@@ -228,25 +230,28 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_nodes` | List the ISE nodes in the deployment: hostname, FQDN, IP, roles (PAN/MnT/PSN/Standalone), enabled services (Session = PSN, Profiler, pxGrid, ...) and sync status. |
 | `ise_list_patches` | List installed ISE patches and hot patches with install dates, plus the base ISE version. |
 | `ise_list_policy_sets` | List policy sets in evaluation order: rank, name, state, the condition that selects the set, its allowed-protocols service, hit count and id. |
-| `ise_policy_explain` | Predict which policy set and authorization rule a request would hit, client-side (ISE has no evaluate API): walks sets and rules in rank order, evaluating the conditions it understands against supplied attributes, or filled from `nad` + `flow` (e.g. nad=sw1, flow=wired-mab); unresolved/posture/profiler/time conditions are reported as unknown, never guessed. |
-| `ise_list_profiler_profiles` | List endpoint profiler profiles (name, description, id; ~900 built-in) with a name filter, e.g. to find a profile for an EndPoints:EndPointPolicy authorization condition. |
-| `ise_list_posture_policies` | Read-only summary of posture policies: OS/identity-group scope, agent type, requirement count and enforcement (MANDATORY/OPTIONAL/AUDIT), compliance module. |
-| `ise_list_posture_requirements` | Read-only summary of posture requirements: OS, agent type, the rules, how they combine (ALL_SUCCEED/ANY_FAIL) and the remediation. |
+| `ise_list_posture_policies` | List posture policies (which OS/identity-group a requirement set applies to): name, enabled, OS, agent type, requirement count and enforcement (MANDATORY/OPTIONAL/AUDIT), compliance module. |
+| `ise_list_posture_requirements` | List posture requirements (the checks a policy enforces): name, OS, agent type, the rules it contains, how they are combined (ALL_SUCCEED / ANY_FAIL), and the remediation. |
+| `ise_list_profiler_profiles` | List endpoint profiler profiles (ISE ships ~900, e.g. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
+| `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
+| `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (32)
+### Write (34)
 
 | Tool | What it does |
 |---|---|
+| `ise_add_ad_groups` | Make AD groups usable in policy: after this, '<join point>:ExternalGroups EQUALS <group name>' conditions accept them (ise_create_authz_rule). |
 | `ise_bulk_endpoints` | Create, update or delete many endpoints in one ISE bulk task (e.g. |
+| `ise_create_ad_join_point` | Create an Active Directory join point (the definition only; no node joins yet). |
 | `ise_create_anc_policy` | Create an Adaptive Network Control policy that ise_apply_anc can put on endpoints. |
 | `ise_create_authn_rule` | Add an authentication rule to a policy set: conditions -> identity source, with what to do when authentication fails, the user isn't found, or the store is unreachable. |
 | `ise_create_authz_profile` | Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL, reauth timer, voice domain. |
@@ -257,7 +262,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, or TACACS+ command set / shell profile. |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile, or AD join point (after ise_leave_ad). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
 | `ise_import_trusted_cert` | Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth). |
@@ -279,7 +284,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (13)
+### Dangerous (15)
 
 | Tool | What it does |
 |---|---|
@@ -294,6 +299,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
 | `ise_delete_policy_set` | Delete a whole policy set with all its rules. |
 | `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
+| `ise_join_ad` | Join one or all ISE nodes to the join point's AD domain (creates the computer account). |
+| `ise_leave_ad` | Take one or all ISE nodes out of the AD domain: AD-backed logins through this join point stop working there at once. |
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
@@ -302,8 +309,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | Prompt | What it does |
 |---|---|
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
+| `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
-| `ise_incident_timeline` | One time-ordered incident timeline for a host across ISE, FMC and Catalyst Center, each queried on demand and merged by timestamp (read-only; FMC/CatC steps skipped if those servers are not connected). |
 
 The prompts walk a model through ISE and the access switch (via the cml or catc MCP server, when
 connected). `ise_troubleshoot_endpoint_access` ends with a preview-only fix, and its fix step offers write
@@ -318,6 +325,19 @@ step-ca or a public CA. Flow: `ise_generate_csr` -> `ise_export_csr` -> sign at 
 (dangerous; the Admin role restarts the node's application server). For EAP-TLS, add
 `ise_set_cert_auth_profile` and `ise_set_identity_sequence`, then use the sequence as an authentication
 rule's identity source.
+
+### Active Directory
+`ise_create_ad_join_point` (the join point name becomes the policy dictionary, e.g. `CORP:ExternalGroups`) ->
+`ise_join_ad` (dangerous; the domain account and password are passed per call and never stored or shown) ->
+`ise_list_ad_groups` -> `ise_add_ad_groups` (names are resolved against the domain first; a bare group name
+is accepted when unique) -> authorization rules on `CORP:ExternalGroups equals <domain/OU/group>` (the bare
+group name works there too). `ise_get_ad_join_point` shows the join status (ERS has no status call: the
+tool reads the trusted domains, which fail with "not joined" otherwise) and `ise_test_ad_user` a user's
+groups. `ise_why_auth_failed` adds the join status and the user's groups for AD failures (24408 wrong
+password, 24409 disabled, 24415 locked out, 24412/22056 not found, and 15039 when no AD-group rule
+matched), and `ise_policy_explain(ad_user=...)` fills `<join point>:ExternalGroups` so AD-group rules
+evaluate. ISE must resolve the domain through its name server (CLI `ip name-server`) and reach the DC on
+53/88/389/445/3268 with NTP in sync. `ise_leave_ad`, then `ise_delete_object kind=ad_join_point`, removes it.
 
 ### TrustSec / SXP
 `ise_set_sxp_connection` takes the device's role (`peer_role`, ISE's "Peer Role"). LISTENER means the

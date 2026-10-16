@@ -177,6 +177,12 @@ def check_attribute(node: dict[str, Any], attrs: list[dict[str, Any]]) -> list[s
             if value.lower() in (str(v.get("key")).lower(), str(v.get("value")).lower()):
                 node["attributeValue"] = v.get("key")
                 return []
+        if str(node["attributeName"]).lower() == "externalgroups" and "/" not in value:
+            # AD groups are stored as 'domain/OU/group'; accept the bare group name when it is unique.
+            tails = [v for v in allowed if str(v.get("key")).rsplit("/", 1)[-1].lower() == value.lower()]
+            if len(tails) == 1:
+                node["attributeValue"] = tails[0].get("key")
+                return []
         keys = ", ".join(str(v.get("key")) for v in allowed[:25])
         return [f"{node['dictionaryName']}:{node['attributeName']} can't be {value!r}; allowed: {keys}"]
     return []

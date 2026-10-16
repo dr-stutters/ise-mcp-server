@@ -154,6 +154,7 @@ DELETE_KINDS = {
     "anc_policy": "ancpolicy",
     "command_set": "tacacscommandsets",
     "shell_profile": "tacacsprofile",
+    "ad_join_point": "activedirectory",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -966,6 +967,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "anc_policy",
                 "command_set",
                 "shell_profile",
+                "ad_join_point",
             ],
             Field(description="What to delete"),
         ],
@@ -973,7 +975,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
-        SGACL, device group, ANC policy, or TACACS+ command set / shell profile. Preview-first: shows
+        SGACL, device group, ANC policy, TACACS+ command set / shell profile, or AD join point (after
+        ise_leave_ad). Preview-first: shows
         the object and what still references it (e.g. rules using a profile, which blocks the delete).
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
@@ -1008,6 +1011,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 full = await app.ers_get("authorizationprofile", str(prof["id"]))
                 if name in (full.get("daclName"), full.get("ipv6DaclName")):
                     blockers.append(f"Used by authorization profile {full.get('name')}")
+        if kind == "ad_join_point":
+            from ise_mcp.tools.ad import join_status  # noqa: PLC0415 - ad imports this module
+
+            if (await join_status(app, current)).get("joined"):
+                blockers.append(f"{name} is still joined to {current.get('domain')}: ise_leave_ad first")
+            side.append(f"Policy conditions on {name}:ExternalGroups stop working")
         blockers += await references(app, kind, current)
         if kind in ("identity_group", "endpoint_group", "sgt"):
             side.append(
