@@ -1,5 +1,5 @@
-"""Read-only live tests. Seeded objects (scripts/seed_lab.py) make some checks stronger; without them
-those checks skip. MnT tests tolerate an empty session table."""
+"""Read-only live tests. Seeded mcp-test-* objects (docs/live-tests.md) make some checks stronger; without
+them those checks skip. MnT tests tolerate an empty session table."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 from fastmcp import Client, FastMCP
+
+from tests.live.conftest import SEED_HINT
 
 pytestmark = pytest.mark.live
 
@@ -87,14 +89,14 @@ async def test_why_auth_failed_tolerates_unknown_mac(server: FastMCP[Any]) -> No
 async def test_endpoint_360_seeded(server: FastMCP[Any]) -> None:
     out = await call(server, "ise_endpoint_360", {"mac": SEED_MAC})
     if out["endpoint"] == "not in the ISE endpoint database":
-        pytest.skip("lab not seeded (scripts/seed_lab.py)")
+        pytest.skip(f"mcp-test-* objects not seeded ({SEED_HINT})")
     assert out["endpoint"]["group"] == "mcp-test-endpoints"
 
 
 async def test_why_auth_failed_seeded(server: FastMCP[Any]) -> None:
     out = await call(server, "ise_why_auth_failed", {"mac": SEED_FAIL_MAC, "minutes": 10080})
     if "no authentication record" in out["verdict"]:
-        pytest.skip("no seeded RADIUS history (run scripts/seed_lab.py)")
+        pytest.skip(f"no seeded RADIUS history ({SEED_HINT})")
     assert out["failure"]["code"] in ("22040", "22056")
     assert "network_device" in out["checks"]
 

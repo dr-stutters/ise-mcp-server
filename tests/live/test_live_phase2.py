@@ -1,19 +1,18 @@
-"""Live Phase 2 tests: policy editing and device admin against the lab ISE, plus (when the CML
-'ise-access' lab is up and scripts/lab_policy.py up has run) the real-switch flow: session, CoA and ANC
-quarantine through the switch.
+"""Live Phase 2 tests: policy editing and device admin, plus (with a real switch and client and the switch
+test policy in place) the real-switch flow: session, CoA and ANC quarantine through the switch.
 
-The switch flow needs ISE_LIVE_SWITCH_MAC=<client MAC> (the CML client's MAC changes when it is wiped).
+The switch flow needs ISE_LIVE_SWITCH_MAC=<client MAC>; ISE_LIVE_SWITCH_IP (the switch's NAS IP) is
+checked when set. See docs/live-tests.md.
 Everything the ISE-only tests create is disabled or unused while it exists and deleted at the end."""
 
 from __future__ import annotations
 
 import asyncio
-import os
 import secrets
 
 import pytest
 
-from tests.live.conftest import Session
+from tests.live.conftest import DOCS, Session, live_env
 
 pytestmark = pytest.mark.live
 
@@ -147,7 +146,8 @@ async def test_dictionary_attributes(ise: Session) -> None:
     assert da["results"]
 
 
-SWITCH_MAC = os.environ.get("ISE_LIVE_SWITCH_MAC")
+SWITCH_MAC = live_env("ISE_LIVE_SWITCH_MAC")
+SWITCH_IP = live_env("ISE_LIVE_SWITCH_IP")
 
 
 async def wait_for_profile(ise: Session, mac: str, profile: str, wait_s: float = 120) -> dict[str, object]:
@@ -162,7 +162,7 @@ async def wait_for_profile(ise: Session, mac: str, profile: str, wait_s: float =
         await asyncio.sleep(5)
 
 
-SKIP_REASON = "set ISE_LIVE_SWITCH_MAC (CML ise-access lab up, lab_policy.py up, client sending traffic)"
+SKIP_REASON = f"ISE_LIVE_SWITCH_MAC not set (switch + client + switch test policy; see {DOCS})"
 
 
 @pytest.mark.skipif(not SWITCH_MAC, reason=SKIP_REASON)
@@ -170,7 +170,8 @@ async def test_switch_session_coa_and_anc(ise: Session) -> None:
     mac = str(SWITCH_MAC)
     found = await ise.call("ise_find_session", {"mac": mac})
     assert found["found"], "the client has no session: make it send traffic (ping 10.10.10.1)"
-    assert found["session"]["nas_ip_address"] == "198.18.128.154"
+    if SWITCH_IP:
+        assert found["session"]["nas_ip_address"] == SWITCH_IP
     # The latest MnT session record can be a CoA/accounting event without policy names, so check the
     # authorization result through the auth history instead.
     await wait_for_profile(ise, mac, "mcp-test-permit", wait_s=10)

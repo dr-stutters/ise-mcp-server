@@ -1,5 +1,5 @@
-"""Live: CSR lifecycle and the EAP-TLS identity objects on the lab ISE. The full chain (CSR -> lab CA on
-CML dc1 -> bind for EAP -> EAP-TLS PASS / 12514 on the ise-access client) was run by hand; see the notes."""
+"""Live: CSR lifecycle and the EAP-TLS identity objects. The EAP certificate check needs ISE_LIVE_CA_NAME
+(the trusted CA that issued ISE's EAP certificate; see docs/live-tests.md)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from tests.live.conftest import Session
+from tests.live.conftest import Session, need_env
 from tests.live.test_live_writes import RUN
 
 pytestmark = pytest.mark.live
@@ -65,20 +65,21 @@ async def test_cert_profile_and_sequence(ise: Session) -> None:
                 )
 
 
-async def test_eap_cert_from_lab_ad_cs(ise: Session) -> None:
-    """After `lab_policy.py certs`: ISE trusts mitchcloud-CA and its EAP certificate is issued by it."""
+async def test_eap_cert_from_ca(ise: Session) -> None:
+    """ISE trusts ISE_LIVE_CA_NAME and its EAP certificate is issued by it."""
+    ca = need_env("ISE_LIVE_CA_NAME", "the trusted CA that issued ISE's EAP certificate")
     certs = await ise.call("ise_list_certificates", {"response_format": "json", "limit": 500})
     trusted = await ise.call(
         "ise_list_certificates", {"kind": "trusted", "response_format": "json", "limit": 500}
     )
-    if not any(r.get("name") == "mitchcloud-CA" for r in trusted["results"]):
-        pytest.skip("mitchcloud-CA not trusted (lab_policy.py certs not run)")
+    if not any(r.get("name") == ca for r in trusted["results"]):
+        pytest.skip(f"ISE_LIVE_CA_NAME={ca} is not a trusted certificate on this ISE")
     eap = [r for r in certs["results"] if "EAP Authentication" in str(r.get("used_by"))]
-    assert eap and eap[0]["issued_by"] == "mitchcloud-CA"
+    assert eap and eap[0]["issued_by"] == ca
     blocked = await ise.call(
         "ise_delete_certificate",
         {
-            "cert_id": next(r["id"] for r in trusted["results"] if r["name"] == "mitchcloud-CA"),
+            "cert_id": next(r["id"] for r in trusted["results"] if r["name"] == ca),
             "kind": "trusted",
         },
     )

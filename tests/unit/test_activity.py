@@ -13,7 +13,7 @@ from ise_mcp._core.testing import call_tool
 from ise_mcp.tools.activity import is_coa_record, parse_until
 from tests.unit.conftest import FAILURE_REASONS_XML, ers_page, make_server, xml
 
-SW_IP = "198.18.128.154"
+SW_IP = "192.0.2.154"
 NAD_ID = "11111111-2222-3333-4444-555555555555"
 
 AUTH_LIST = xml(
