@@ -1,5 +1,5 @@
 # ise-mcp-server roadmap
-_Last updated 2026-10-16: **I30 (pxGrid clients + certs for FMC) delivered in v0.9.0.** **I11 (AD) delivered in v0.8.0** against a real Windows DC, and I8 re-proven with its AD CS. **Next delivered in v0.4.0** (I8–I10). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.8.0 (AD, I11). Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
+_Last updated 2026-10-16: **Wave 4 planned (I35–I48): standalone packaging, de-labbed repo, profiler, device admin, config export/import, four prompts.** **I30 (pxGrid clients + certs for FMC) delivered in v0.9.0.** **I11 (AD) delivered in v0.8.0** against a real Windows DC, and I8 re-proven with its AD CS. **Next delivered in v0.4.0** (I8–I10). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.8.0 (AD, I11). Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
 
 ## Summary
 - v0.2.0 covers the day-to-day ISE work across OpenAPI, ERS and MnT: 72 tools for troubleshooting, policy and device-admin editing, TrustSec reads, ANC and CoA. They are live-tested against ISE 3.5 with a real cat9000v switch and client (CML `ise-access`).
@@ -117,3 +117,61 @@ See the [suite roadmap](https://github.com/dr-stutters/stutters-mcp-core/blob/ma
 | [I32](https://github.com/dr-stutters/ise-mcp-server/issues/73) | Posture (blocked: Windows client VM + Secure Client) | Later |
 | [I33](https://github.com/dr-stutters/ise-mcp-server/issues/74) | Machine + user EAP-TLS via GPO auto-enrolment (blocked: Windows client VM) | Later |
 | [I34](https://github.com/dr-stutters/ise-mcp-server/issues/75) | PassiveID from AD logins (blocked: Windows client VM) | Later |
+
+
+## Wave 4 (planned 2026-10-16): standalone, reusable, deeper
+Scoping answers (2026-10-16):
+- **Goals:** make the server something anyone can deploy, not only this lab; then add ISE depth.
+- **Deployers:** engineers on a laptop (`uvx`, stdio, one ISE) and teams on a shared host (Docker over HTTP, tokens,
+  possibly several ISE deployments). Kubernetes/OAuth are not in this wave (core G1/G5 still apply later).
+- **Standalone:** the package installs with no external requirement. stutters-mcp-core is **bundled into the
+  ISE package by a build workflow**, not pulled from git or PyPI at install time.
+- **Lab tooling** (`scripts/lab_policy.py`, `scripts/seed_lab.py`, lab-specific live tests and fixtures) moves to a
+  private suite-wide repo, **`stutters-mcp-lab`**. Public live tests read env vars only.
+- **Depth:** I31 guest/sponsor (queued), profiler authoring, device admin (TACACS+), and config export, diff and import.
+  I32–I34 stay blocked on the Windows client VM (P11). The owner unblocks prerequisites as the lab comes back.
+- **UX:** a second operator-eyes pass plus four new workflow prompts.
+- **Lab is down:** this wave is planned only. Phase A needs no lab and goes first. Phases B and C need ISE 3.5 back.
+
+### Phase A: standalone and reusable (no lab needed)
+| # | Item | Why (operator value) | External needs | Test plan | Size | Issue |
+|---|---|---|---|---|---|---|
+| I35 | **Bundle core into the package**: a release workflow vendors a pinned stutters-mcp-core tag into the wheel and image (`ise_mcp._core`, imports rewritten at build time), so `pyproject.toml` has no git dependency; a CI check fails when the vendored copy drifts from the pinned tag; `ise_status` reports the bundled core version. The workflow is written so the other servers can copy it (or call it as a reusable workflow from core) | Installing today needs a git dependency and, for Docker, a `CORE_READ_TOKEN`. Neither is acceptable for someone outside the suite | none | Unit + contract suite run against the built wheel in a clean venv (no network after the build); install the wheel with `pip install --no-index`; check the drift check by bumping the tag | M | |
+| I36 | **PyPI + `uvx` quickstart**: publish `ise-mcp-server` with PyPI trusted publishing from `release.yml`; console script `ise-mcp-server` (stdio by default); `ise-mcp-server check` preflight (reachability per surface, ERS port, TLS trust, admin permissions vs tool tiers, ISE version) that runs without an MCP client; copy-paste config for Claude Desktop / Claude Code; a 5-minute README quickstart | "Install and point at my ISE" in one command, with a clear answer when something is missing | PyPI account and the `ise-mcp-server` name; trusted publisher configured | Wheel install in a clean container; `check` against mocked surfaces (each failure mode); a TestPyPI release before the real one | M | |
+| I37 | **Published container image**: multi-arch (amd64/arm64) image on GHCR, built from the I35 wheel; signed (cosign) with an SBOM attached; `docker-compose.yml` pulls the image instead of building; `CORE_READ_TOKEN` removed everywhere | Teams run it on a shared host without cloning or building | GHCR package permissions on the repo | Release workflow on a pre-release tag; `docker run ... check`; compose up with `.env` only; verify the signature and SBOM | S | |
+| I38 | **Shared-host deployment guide and defaults**: read-only by default (write and dangerous tiers opt-in by env), per-user tokens with names in the audit log, several ISE deployments from one host (`ISE_INSTANCES`), TLS via a reverse proxy example (Caddy), least-privilege ISE account setup (from `docs/least-privilege.md`) as a step-by-step guide, upgrade notes | A team deployment that is safe on day one, without reading the source | none | Contract tests for the tier defaults; compose example with two mocked ISE instances; docs reviewed by following them on a clean host | M | |
+| I39 | **De-lab the public repo**: move `scripts/lab_policy.py`, `scripts/seed_lab.py` and lab-only live tests to `stutters-mcp-lab`; public live tests take documented `ISE_LIVE_*` env vars and skip cleanly without them; replace lab names, domains and IPs in fixtures, docs and tool descriptions (e.g. `tools/ad.py` examples use `example.com`); `scrub_check` (core G9) runs in CI | Anyone can run the live suite against their own ISE, and the public repo carries no lab details | Private repo `stutters-mcp-lab` (suite-wide) | `scrub_check` clean in CI; unit suite green; live suite skips with no env, runs with the env set (when the lab is back) | M | |
+
+### Phase B: ISE depth (needs the lab)
+| # | Item | Why (operator value) | External needs | Test plan | Size | Issue |
+|---|---|---|---|---|---|---|
+| [I31](https://github.com/dr-stutters/ise-mcp-server/issues/72) | **Guest + sponsor** (already queued in Wave 3) | Guest is weekly work at most customers | Sponsor account with REST access; guest portal; CML `firefox` node | As in #72 | L | [#72](https://github.com/dr-stutters/ise-mcp-server/issues/72) |
+| I40 | **Profiler authoring** (finishes I14): spike which profiler operations the 3.5 API allows; then custom profiling policies (create/update/delete where writable, otherwise documented as GUI-only), `ise_reprofile_endpoint` (CoA reauth), profiler probe status per PSN, feed-service status, and why an endpoint got its profile (matched policy, certainty factor, attributes seen) | "Why is this printer profiled as a workstation?" and custom IoT profiles are frequent PoC asks | Profiler service on the PSN; DHCP/RADIUS probes reaching ISE from the `ise-access` switch | Unit with recorded endpoint attributes; live: the `ise-access` client profiled by DHCP class-id, a custom policy matches it, reprofile CoA moves it | L | |
+| I41 | **Device admin (TACACS+) depth**: TACACS external servers and sequences, `ise_admin_policy_explain` (admin user + NAD + command → device-admin rule, shell profile and command-set verdict), command-set test without a device, hit counts on device-admin rules, and a TACACS section in `ise_audit_nads` (shared secret set, single-connect) | Device-admin changes lock engineers out of switches; a "would this command be allowed" check before rollout prevents that | TACACS+ re-applied on sw1 (TCP 49 to ISE); Device Admin service enabled | Unit with policy fixtures; live on sw1: explain predictions vs the actual permit/deny for `show run`, `conf t`, `reload` as mcp-alice and mcp-bob | M | |
+| I42 | **Config export + diff**: `ise_export_config(scope)` writes policy sets and rules, authz profiles, dACLs, NADs and NDGs (secrets masked), identity and endpoint groups, custom attributes, SGTs, SGACLs and the egress matrix, command sets and shell profiles as YAML with names instead of ids and stable ordering; `ise_diff_config` compares two exports, or an export with live ISE, by section | A reviewable baseline, "what changed since last week" (ISE has no audit REST API), and PoC → production hand-off | none | Unit: round-trip and stable ordering; live: export, change one rule, diff shows just that rule | L | |
+| I43 | **Config import** (depends on I42): `ise_import_config` plans create/update/skip per object in dependency order (groups → profiles → policy sets → rules), matches by name, takes secrets separately, and previews the whole plan; applying is a dangerous-tier action with a change window, and it stops on first failure with what was applied | Moves a PoC policy to production, or rebuilds a lab, without retyping it | none | Unit with plans for empty and populated targets; live: export the lab, wipe the `mcp-test-*` objects, import, diff is empty | L | |
+
+### Phase C: operator UX and workflow prompts
+| # | Item | Why (operator value) | External needs | Test plan | Size | Issue |
+|---|---|---|---|---|---|---|
+| I44 | **Operator-eyes pass 2 + tool surface**: run operator tasks over the tools added since v0.7.0 (AD, certificates, SXP, pxGrid, endpoint bulk) and fix what breaks; review the ~113-tool surface: `ISE_TOOLSETS` env to load only some areas (e.g. `troubleshoot,policy`) so clients with tool limits stay usable | More tools made the server harder to pick tools from; a laptop user rarely needs all of them | none | Scripted operator tasks live (as v0.7.0); contract test per toolset | M | |
+| I45 | **Prompt `ise_onboard_nad`**: NAD + NDGs with RADIUS/TACACS settings → switch AAA config (preview) via cml/catc → test auth → verify the session → record undo | The most common day-1 task, done the same way every time | cml or catc server for the switch step | Live with sw1 removed from ISE and its AAA config removed; prompt test kit (core C9) | S | |
+| I46 | **Prompt `ise_policy_change_review`** (depends on I42): export before → proposed change (preview) → diff → `ise_policy_explain` on sample logins before and after → a change summary of who gains or loses access | Catches the "this rule now matches everyone" mistake before it is applied | none | Prompt test kit with mocked policy; live with an authz rule reorder | S | |
+| I47 | **Prompt `ise_deployment_health_review`**: `ise_deployment_health`, cert expiry, licence, pxGrid status, AD join and SXP state as one ranked report with next steps | A weekly or pre-change review in one request | none | Prompt test kit on mocks (works while the lab is down); live once it is back | S | |
+| I48 | **Prompt `ise_guest_onboarding`** (depends on I31): sponsor creates guests → credentials → verify the guest session and authz | End-to-end guest flow without the sponsor portal | Sponsor account; guest portal | Live with the CML `firefox` node | S | |
+
+### Order
+1. **Now (no lab):** I35 → I37 → I36 → I39 → I38, and I47 on mocks. Target release v0.10.0 (standalone).
+2. **When the lab is back:** I31, I41, I42 → I43, I40. Target v0.11.0.
+3. **Then:** I44, I45, I46, I48. Target v0.12.0.
+
+### New prerequisites
+| Prerequisite | Needed for | Status |
+|---|---|---|
+| PyPI account, `ise-mcp-server` name, trusted publisher | I36 | ⏳ owner |
+| GHCR package permissions | I37 | ⏳ owner |
+| Private repo `stutters-mcp-lab` | I39 | ⏳ owner |
+| ISE 3.5 lab back up | I31, I40–I46, I48 | ⏳ owner |
+| TACACS+ re-applied on sw1 | I41 | ⏳ when the lab is back |
+| Profiler probes (DHCP/RADIUS) reaching the PSN | I40 | ⏳ when the lab is back |
+| Sponsor account + guest portal | I31, I48 | ⏳ (I31) |
