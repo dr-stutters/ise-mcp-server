@@ -14,6 +14,7 @@ from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
     activity,
+    ad,
     certs,
     dangerous,
     device_admin,
@@ -57,7 +58,10 @@ conditions are 'Dictionary:Attribute operator value' or library condition names
 (ise_list_dictionary_attributes, ise_list_conditions) and are checked before anything is sent. Device
 admin (TACACS+): kind='device-admin' on the policy tools, plus ise_set_command_set /
 ise_set_shell_profile; the node needs the DeviceAdmin service. Quarantine: an authz rule on
-'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Names or ids are accepted wherever a tool
+'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Active Directory: ise_create_ad_join_point
+-> ise_join_ad -> ise_list_ad_groups -> ise_add_ad_groups, then rules on '<join point>:ExternalGroups
+equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_user (a user's groups) for
+AD login failures. Names or ids are accepted wherever a tool
 takes an object. Shared secrets, SNMP communities and passwords are always masked. For anything without
 a tool: ise_search_spec -> ise_get_definition -> ise_api_call(source=openapi|ers|mnt).
 """.strip()
@@ -102,6 +106,7 @@ def create_server(
             device_admin.register,
             sxp.register,
             certs.register,
+            ad.register,
             dangerous.register,
             workflows.register,
         ],

@@ -26,6 +26,7 @@ from ise_mcp.tools._common import (
     ers_name_map,
     normalize_mac,
 )
+from ise_mcp.tools.ad import ad_diagnosis
 from ise_mcp.tools.endpoints import endpoint_row, profile_name
 from ise_mcp.tools.identity import user_row
 from ise_mcp.tools.network import find_nads_for_ip, nad_summary
@@ -33,6 +34,15 @@ from ise_mcp.tools.policy import rules_using_profile
 from ise_mcp.tools.sessions import auth_history, auth_row, failure_info, find_session
 
 USER_STORE_CODES = {"22056", "22040", "22041", "24206", "22063"}
+LOCAL_STORES = {"", "internal users", "internal endpoints", "guest users", "none"}
+
+
+def involves_ad(code: str, identity_store: Any) -> bool:
+    """Whether a failure needs the AD checks: an AD failure code (244xx/247xx, 25048/25058, 91020),
+    a 'not found' that may have searched AD, or a login whose identity store isn't a local one."""
+    if code.startswith(("244", "247")) or code in ("25048", "25058", "91020", "22056"):
+        return True
+    return str(identity_store or "").strip().lower() not in LOCAL_STORES
 
 
 async def _safe(coro: Any) -> Any:
@@ -254,6 +264,30 @@ def register(reg: ToolRegistrar) -> None:
             checks["internal_user"] = await _safe(internal_user_facts(app, str(user)))
         elif user == "INVALID" and username:
             checks["internal_user"] = await _safe(internal_user_facts(app, username))
+        if involves_ad(str(code), failed.get("identity_store")):
+            # MnT records an unknown subject as user 'INVALID': look up the username given instead.
+            ad_name = username if user in (None, "", "INVALID") else user
+            ad = await _safe(ad_diagnosis(app, failed.get("identity_store"), ad_name))
+            if isinstance(ad, dict) and not ad_name:
+                ad["user"] = "MnT records the user as INVALID; pass username=... to look them up in AD"
+            if ad is not None:
+                checks["active_directory"] = ad
+                if code == "15039" and isinstance(ad, dict):
+                    usable = [
+                        g
+                        for jp in ad.get("join_points") or []
+                        if isinstance(jp, dict)
+                        for g in (jp.get("user") or {}).get("groups_usable_in_policy") or []
+                    ]
+                    checks["ad_groups_hint"] = (
+                        f"The user authenticated against AD; their groups usable in policy are {usable}. "
+                        "No authorization rule above the deny matched them: add a rule on "
+                        "'<join point>:ExternalGroups equals <group>' or check the existing ones "
+                        "(ise_policy_explain)."
+                        if usable
+                        else "The user authenticated against AD but none of their groups are added to "
+                        "the join point, so no ExternalGroups rule can match (ise_add_ad_groups)."
+                    )
         if failed.get("authz_profiles"):
             checks["rules_using_profile"] = await _safe(
                 rules_using_profile(app, str(failed["authz_profiles"]).split(",")[0].strip())

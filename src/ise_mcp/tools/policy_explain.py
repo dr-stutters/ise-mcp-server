@@ -30,6 +30,7 @@ from stutters_mcp_core import (
 
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import render_condition
+from ise_mcp.tools.ad import NotJoined, ad_user_facts, all_join_points, strip_domain
 from ise_mcp.tools.network import resolve_nad
 from ise_mcp.tools.policy import PolicyKind, list_policy_sets, resolve_policy_set
 
@@ -62,10 +63,10 @@ FLOW_ATTRIBUTES: dict[str, dict[str, str]] = {
 FLOW_DEFAULTS = {"Network Access:AuthenticationStatus": "AuthenticationPassed", "Session:ANCPolicy": ""}
 
 
-def normalize_device_attrs(attrs: dict[str, str]) -> dict[str, str]:
+def normalize_device_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
     """DEVICE:<group type> values without the root, as ISE stores them in conditions: the NAD tools
     show 'Location#All Locations#Sydney', a condition compares 'All Locations#Sydney'."""
-    out: dict[str, str] = {}
+    out: dict[str, Any] = {}
     for key, value in attrs.items():
         dictionary, sep, attr = key.partition(":")
         if not sep and key.strip().casefold() in ("location", "device type"):
@@ -183,7 +184,7 @@ def _attr_keys(cond: dict[str, Any]) -> list[str]:
     return keys
 
 
-def _lookup(attrs: dict[str, str], keys: list[str]) -> str | None:
+def _lookup(attrs: dict[str, Any], keys: list[str]) -> Any:
     lowered = {k.casefold(): v for k, v in attrs.items()}
     for k in keys:
         if k.casefold() in lowered:
@@ -191,8 +192,26 @@ def _lookup(attrs: dict[str, str], keys: list[str]) -> str | None:
     return None
 
 
+def eval_multi(op: str, actual: Any, expected: str) -> Result:
+    """One attribute comparison; `actual` may be a list (multi-valued attributes such as
+    '<join point>:ExternalGroups': a user is in several groups). ISE matches a positive operator when
+    any value matches, and a negated one (notEquals, notContains, notIn) when no value matches."""
+    if not isinstance(actual, list):
+        return eval_operator(op, str(actual), expected)
+    negative = op in ("notEquals", "notContains", "notIn")
+    positive = {"notEquals": "equals", "notContains": "contains", "notIn": "in"}.get(op, op)
+    results = [eval_operator(positive, str(a), expected) for a in actual]
+    if any(r is True for r in results):
+        hit: Result = True
+    elif any(r is None for r in results):
+        return None
+    else:
+        hit = False
+    return (not hit) if negative else hit
+
+
 def evaluate(
-    cond: Any, attrs: dict[str, str], library: dict[str, Any], seen: set[str] | None = None
+    cond: Any, attrs: dict[str, Any], library: dict[str, Any], seen: set[str] | None = None
 ) -> Result:
     """Evaluate a condition tree against `attrs`. `library` maps a ConditionReference id/name to its
     resolved definition (so references evaluate recursively); a reference not in it is unknown.
@@ -234,11 +253,11 @@ def evaluate(
         actual = _lookup(attrs, _attr_keys(cond))
         if actual is None:
             return finish(None)  # attribute not supplied -> unknown
-        return finish(eval_operator(str(cond.get("operator", "equals")), actual, str(expected)))
+        return finish(eval_multi(str(cond.get("operator", "equals")), actual, str(expected)))
     return finish(None)
 
 
-def unknown_reasons(cond: Any, attrs: dict[str, str], library: dict[str, Any]) -> list[str]:
+def unknown_reasons(cond: Any, attrs: dict[str, Any], library: dict[str, Any]) -> list[str]:
     """Human-readable reasons a condition evaluated to unknown (missing attributes, unresolved
     references, unknown operators), for the honest-limits report."""
     out: list[str] = []
@@ -325,9 +344,10 @@ def register(reg: ToolRegistrar) -> None:
     async def ise_policy_explain(
         ctx: Context,
         attributes: Annotated[
-            dict[str, str] | None,
+            dict[str, str | list[str]] | None,
             Field(
-                description="Request attributes as 'Dictionary:Attribute' -> value, e.g. "
+                description="Request attributes as 'Dictionary:Attribute' -> value (a list for "
+                "multi-valued ones such as '<join point>:ExternalGroups'), e.g. "
                 '{"Radius:NAS-Port-Type": "Ethernet", "DEVICE:Location": "All Locations#mcp-test-lab", '
                 '"Network Access:EapAuthentication": "EAP-TLS"}. A bare attribute name also matches. '
                 "NDG values may include the root ('Location#All Locations#X'). Optional with nad/flow."
@@ -356,6 +376,13 @@ def register(reg: ToolRegistrar) -> None:
                 "ANC policy. Your `attributes` override anything filled in"
             ),
         ] = None,
+        ad_user: Annotated[
+            str | None,
+            Field(
+                description="AD username: looks the user up through every AD join point and fills "
+                "'<join point>:ExternalGroups' with their groups, so AD-group rules evaluate"
+            ),
+        ] = None,
     ) -> ToolResult:
         """Predict which policy set and authorization rule a request would match, client-side (ISE has
         no evaluate API). Walks sets then authorization rules in rank order, evaluating the conditions
@@ -365,11 +392,11 @@ def register(reg: ToolRegistrar) -> None:
         sanity-check a change before you make it; confirm against ise_get_auth_history for a real
         session. Not a substitute for ISE's own evaluation. Quickest form: nad='<switch>' and
         flow='wired-mab' (or wired-dot1x, wireless-*) plus any attributes you know (identity group,
-        EAP type, endpoint profile)."""
+        EAP type, endpoint profile); for AD users add ad_user='<username>'."""
         app: IseApp = get_client(ctx)
         given = dict(attributes or {})
         nad_note = None
-        filled: dict[str, str] = {}
+        filled: dict[str, Any] = {}
         if flow:
             filled.update(FLOW_ATTRIBUTES[flow])
             filled.update(FLOW_DEFAULTS)
@@ -377,6 +404,29 @@ def register(reg: ToolRegistrar) -> None:
             nad_obj = await resolve_nad(app, nad, fuzzy=True)
             nad_note = nad_obj.get("resolved_from")
             filled.update(nad_attributes(nad_obj))
+        ad_note: list[str] = []
+        if ad_user:
+            try:
+                points = await all_join_points(app)
+            except UpstreamError as e:
+                points = []
+                ad_note.append(f"Could not read the AD join points (ERS): {str(e)[:150]}")
+            if not points and not ad_note:
+                ad_note.append("No AD join point is configured: ad_user was ignored")
+            for jp in points:
+                try:
+                    facts = await ad_user_facts(app, jp, strip_domain(ad_user))
+                except (NotJoined, UpstreamError) as e:
+                    ad_note.append(f"{jp.get('name')}: {str(e)[:150]}")
+                    continue
+                if facts.get("found"):
+                    # Only groups added to the join point reach policy (ISE's ExternalGroups); the
+                    # user's other groups would let contains/startsWith rules match wrongly.
+                    filled[f"{jp.get('name')}:ExternalGroups"] = list(
+                        facts.get("groups_usable_in_policy") or []
+                    )
+                else:
+                    ad_note.append(f"{jp.get('name')}: {facts.get('detail')}")
         if flow and kind == "device-admin":
             raise InvalidRequest("flow is for network-access (RADIUS) requests; omit it for device-admin")
         full = {g.strip().casefold() for g in given}
@@ -510,12 +560,14 @@ def register(reg: ToolRegistrar) -> None:
                 "verdict": verdict,
                 "note": note,
                 "nad_resolved": nad_note,
+                "ad_user": ad_note or None,
                 "assumed_attributes": {k: v or "(none)" for k, v in assumed.items()} or None,
                 "policy_set": chosen.get("name"),
                 "set_selection": set_trace or "evaluated only the given policy_set",
                 "authorization": rule_trace,
                 "limits": "Conditions using posture, profiler logical profiles, time/date, identity-store "
-                "group lookups or attributes you didn't supply evaluate to 'unknown'. Global and local "
+                "group lookups (except AD groups via ad_user) or attributes you didn't supply evaluate to "
+                "'unknown'. Global and local "
                 "authorization exceptions are evaluated first (section='global-exception'/'exception'). "
                 "This is a client-side prediction, not ISE's own evaluation.",
             }

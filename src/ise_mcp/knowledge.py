@@ -65,9 +65,18 @@ STEP_CODES: dict[str, str] = {
     "24212": "Found User in Internal Users identity store",
     "24216": "The user is not found in the internal users identity store",
     "24217": "The host is not found in the internal endpoints identity store",
+    "24313": "Search for matching accounts at join point",
+    "24318": "No matching account found in forest",
+    "24319": "Single matching account found in forest",
+    "24323": "Identity resolution detected single matching account",
+    "24325": "Resolving identity (Active Directory)",
+    "24343": "RPC Logon request succeeded (Active Directory)",
     "24344": "RPC Logon request failed (Active Directory)",
+    "24355": "LDAP fetch succeeded (Active Directory)",
     "24402": "User authentication against Active Directory succeeded",
+    "24416": "User's groups retrieval from Active Directory succeeded",
     "24430": "Authenticating user against Active Directory",
+    "24432": "Looking up user in Active Directory",
     "24715": "ISE has not confirmed locally previous successful machine authentication for user in AD",
     "5200": "Authentication succeeded",
     "5400": "Authentication failed",
@@ -118,13 +127,89 @@ FAILURE_HINTS: dict[str, dict[str, str]] = {
         "check": "For users: ise_get_internal_user / AD join point. For MAB: the endpoint must exist "
         "(ise_endpoint_360) or the rule's 'If user not found' should be CONTINUE.",
     },
+    # Active Directory (codes checked against the ISE 3.5 MnT catalog and live failures on a joined
+    # node; ise_why_auth_failed adds the join status and the user's groups for these).
     "24408": {
-        "likely": "Active Directory rejected the password.",
-        "check": "Have the user reset their AD password; check account lockout.",
+        "likely": "Active Directory rejected the password (wrong password).",
+        "check": "Have the user re-enter or reset their AD password; repeated failures can lock the account.",
+    },
+    "24406": {
+        "likely": "Active Directory says the credentials are invalid.",
+        "check": "Check the username/domain and password; ise_test_ad_user shows whether AD knows the user.",
+    },
+    "24409": {
+        "likely": "The user's AD account is disabled.",
+        "check": "Enable the account in Active Directory (Users and Computers, or Enable-ADAccount).",
+    },
+    "24414": {
+        "likely": "The user's AD account has expired.",
+        "check": "Extend the account expiry in Active Directory.",
     },
     "24415": {
-        "likely": "User authentication against Active Directory failed: the AD join point is unreachable.",
-        "check": "Check ISE's join to AD (ise_list_identity_sources) and DNS/time sync.",
+        "likely": "The user's AD account is locked out (too many wrong passwords).",
+        "check": "Unlock it in AD (Unlock-ADAccount) and find the device still sending the old password.",
+    },
+    "24407": {
+        "likely": "AD requires the user to change their password at next logon; 802.1X can't do that.",
+        "check": "Have the user change the password elsewhere, or clear 'must change password' in AD.",
+    },
+    "24410": {
+        "likely": "The user is outside their AD logon hours.",
+        "check": "Check the account's Logon Hours in Active Directory.",
+    },
+    "24412": {
+        "likely": "The user is not in Active Directory (or not in the join point's domains/scope).",
+        "check": "ise_test_ad_user with the username; check spelling, the domain suffix and the join "
+        "point's allowed domains.",
+    },
+    "24413": {
+        "likely": "The user's domain (prefix or UPN suffix) isn't one the join point knows.",
+        "check": "Check the identity format (DOMAIN\\user or user@domain) and the trusted domains "
+        "(ise_get_ad_join_point).",
+    },
+    "24419": {
+        "likely": "ISE could not read the user's attributes from Active Directory.",
+        "check": "Check the DC is reachable and the join is healthy (ise_get_ad_join_point).",
+    },
+    "24417": {
+        "likely": "ISE could not read the user's groups from Active Directory.",
+        "check": "Check the DC is reachable and the join is healthy (ise_get_ad_join_point).",
+    },
+    "24428": {
+        "likely": "ISE could not talk to the DC (LRPC, LDAP or Kerberos error).",
+        "check": "Check DNS SRV records, ports 88/389/445/3268 and NTP sync; ise_get_ad_join_point.",
+    },
+    "24429": {
+        "likely": "ISE could not connect to Active Directory.",
+        "check": "Check DNS, routing/firewall to the DC and time sync; ise_get_ad_join_point.",
+    },
+    "24446": {
+        "likely": "The domain controller is unreachable.",
+        "check": "Check DNS SRV records and ports 88/389/445/3268 to the DC; ise_get_ad_join_point.",
+    },
+    "24447": {
+        "likely": "ISE's computer account in AD is disabled, deleted or reset.",
+        "check": "Re-join the node (ise_leave_ad then ise_join_ad).",
+    },
+    "24493": {
+        "likely": "ISE's machine credentials no longer work against AD.",
+        "check": "Re-join the node (ise_join_ad); check the computer account in AD.",
+    },
+    "24465": {
+        "likely": "ISE is not joined to the AD domain.",
+        "check": "ise_get_ad_join_point; join with ise_join_ad.",
+    },
+    "25058": {
+        "likely": "ISE is not joined to the AD domain.",
+        "check": "ise_get_ad_join_point; join with ise_join_ad.",
+    },
+    "24494": {
+        "likely": "No DNS server can resolve the AD domain's SRV records.",
+        "check": "Point ISE's name server at the domain's DNS (ISE CLI 'ip name-server').",
+    },
+    "24708": {
+        "likely": "The user wasn't found, and some AD domains could not be searched.",
+        "check": "ise_get_ad_join_point (unusable domains) and ise_test_ad_user.",
     },
     "15024": {
         "likely": "PAP is not allowed by the policy set's Allowed Protocols.",
@@ -153,10 +238,6 @@ FAILURE_HINTS: dict[str, dict[str, str]] = {
     "22041": {
         "likely": "The internal user account is disabled.",
         "check": "Enable it (ise_update_internal_user).",
-    },
-    "24419": {
-        "likely": "The user's AD account is locked or disabled.",
-        "check": "Unlock/enable the account in Active Directory.",
     },
 }
 

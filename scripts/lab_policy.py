@@ -3,6 +3,8 @@ the way a model would (preview, then confirm).
 
     uv run python scripts/lab_policy.py up      # NAD + NDG, dACLs, profiles, policy sets, ANC, TACACS+
     uv run python scripts/lab_policy.py down    # remove everything 'up' created (reverse order)
+    uv run python scripts/lab_policy.py ad      # AD join point + join + groups + AD rules (after 'up')
+    uv run python scripts/lab_policy.py ad-down # leave the domain and remove the AD objects
 
 What 'up' creates (all named mcp-test-*; idempotent: existing objects are left alone):
 - NDG Location#All Locations#mcp-test-lab; NAD mcp-test-sw1 198.18.128.154 (RADIUS + TACACS+ key ***REDACTED***,
@@ -17,6 +19,13 @@ What 'up' creates (all named mcp-test-*; idempotent: existing objects are left a
 - identity group mcp-test-netops, user mcp-test-netops1 (password from MCP_LAB_USER_PASSWORD, default
   ***REDACTED***), command set mcp-test-show-only, shell profile mcp_test_priv15, device-admin policy
   set mcp-test-devadmin with rule mcp-test-netops
+'ad' (needs the lab DC, ~/MCP-Suite/scripts/build-dc.py; secrets from LAB_* env vars or LAB_SECRETS_FILE,
+default ~/MCP-Suite/lab-secrets.env): join point MITCHCLOUD for LAB_AD_DOMAIN, node joined with
+LAB_WIN_ADMIN_USER / LAB_WIN_ADMIN_PASSWORD (only if not joined yet), groups mcp-employees / mcp-contractors /
+mcp-netadmins / mcp-netreadonly, certificate profile mcp_test_certprof and identity sequence
+mcp_test_eaptls_seq (Internal Users, MITCHCLOUD) on authn rule mcp-test-dot1x, and authz rules
+mcp-test-ad-employees (-> SGT Employees) and mcp-test-ad-contractors (-> SGT Contractors).
+ISE's name server must point at the DC (ISE CLI: ip name-server <LAB_AD_DC_IP>).
 The Device Admin service is NOT turned on here (dangerous; ise_update_node_services enable=['DeviceAdmin']).
 """
 
@@ -195,6 +204,103 @@ DOWN: list[tuple[str, dict[str, Any]]] = [
 ]
 
 
+JOIN_POINT = "MITCHCLOUD"
+AD_GROUPS = ["mcp-employees", "mcp-contractors", "mcp-netadmins", "mcp-netreadonly"]
+
+
+def lab_secrets() -> dict[str, str]:
+    """LAB_* values from the environment, else from LAB_SECRETS_FILE (never printed)."""
+    out: dict[str, str] = {}
+    path = os.path.expanduser(os.environ.get("LAB_SECRETS_FILE", "~/MCP-Suite/lab-secrets.env"))
+    if os.path.exists(path):
+        for line in open(path):  # noqa: SIM115 - tiny file
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    out.update({k: v for k, v in os.environ.items() if k.startswith("LAB_")})
+    return out
+
+
+def ad_steps(sec: dict[str, str]) -> list[tuple[str, dict[str, Any]]]:
+    domain = sec.get("LAB_AD_DOMAIN", "mitchcloud.lab")
+    return [
+        ("ise_create_ad_join_point", {"name": JOIN_POINT, "domain": domain, "description": "mcp lab AD"}),
+        ("ise_add_ad_groups", {"join_point": JOIN_POINT, "groups": AD_GROUPS}),
+        ("ise_set_cert_auth_profile", {"name": "mcp_test_certprof", "description": "mcp-test"}),
+        (
+            "ise_set_identity_sequence",
+            {
+                "name": "mcp_test_eaptls_seq",
+                "stores": ["Internal Users", JOIN_POINT],
+                "cert_profile": "mcp_test_certprof",
+                "description": "mcp-test",
+            },
+        ),
+        (
+            "ise_update_policy_rule",
+            {
+                "policy_set": "mcp-test-wired",
+                "rule": "mcp-test-dot1x",
+                "section": "authentication",
+                "identity_source": "mcp_test_eaptls_seq",
+            },
+        ),
+        (
+            "ise_create_authz_rule",
+            {
+                "policy_set": "mcp-test-wired",
+                "name": "mcp-test-ad-employees",
+                "conditions": ["Wired_802.1X", f"{JOIN_POINT}:ExternalGroups equals mcp-employees"],
+                "profiles": ["mcp-test-permit"],
+                "sgt": "Employees",
+                "rank": 1,
+            },
+        ),
+        (
+            "ise_create_authz_rule",
+            {
+                "policy_set": "mcp-test-wired",
+                "name": "mcp-test-ad-contractors",
+                "conditions": ["Wired_802.1X", f"{JOIN_POINT}:ExternalGroups equals mcp-contractors"],
+                "profiles": ["mcp-test-permit"],
+                "sgt": "Contractors",
+                "rank": 2,
+            },
+        ),
+    ]
+
+
+async def join(c: Client, sec: dict[str, str]) -> None:  # type: ignore[type-arg]
+    r = await c.call_tool("ise_get_ad_join_point", {"join_point": JOIN_POINT}, raise_on_error=False)
+    if not r.is_error and isinstance(r.structured_content, dict) and r.structured_content["join"]["joined"]:
+        print(f"- ise_join_ad: skipped ({JOIN_POINT} already joined)")
+        return
+    user, pw = sec.get("LAB_WIN_ADMIN_USER", "Administrator"), sec.get("LAB_WIN_ADMIN_PASSWORD")
+    if not pw:
+        print("- ise_join_ad: skipped (LAB_WIN_ADMIN_PASSWORD not set)")
+        return
+    await run(c, "ise_join_ad", {"join_point": JOIN_POINT, "username": user.split("\\")[-1], "password": pw})
+
+
+async def ad_down(c: Client, sec: dict[str, str]) -> None:  # type: ignore[type-arg]
+    for name in ("mcp-test-ad-employees", "mcp-test-ad-contractors"):
+        await run(c, "ise_delete_policy_rule", {"policy_set": "mcp-test-wired", "rule": name})
+    await run(
+        c,
+        "ise_set_identity_sequence",
+        {
+            "name": "mcp_test_eaptls_seq",
+            "stores": ["Internal Users"],
+            "cert_profile": "mcp_test_certprof",
+            "description": "mcp-test",
+        },
+    )
+    user, pw = sec.get("LAB_WIN_ADMIN_USER", "Administrator"), sec.get("LAB_WIN_ADMIN_PASSWORD", "")
+    await run(c, "ise_leave_ad", {"join_point": JOIN_POINT, "username": user.split("\\")[-1], "password": pw})
+    await run(c, "ise_delete_object", {"kind": "ad_join_point", "target": JOIN_POINT})
+
+
 async def run(c: Client, tool: str, args: dict[str, Any]) -> None:  # type: ignore[type-arg]
     r = await c.call_tool(tool, args, raise_on_error=False)
     data = r.structured_content
@@ -210,11 +316,23 @@ async def run(c: Client, tool: str, args: dict[str, Any]) -> None:  # type: igno
 
 
 async def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("up", "down"):
+    if len(sys.argv) != 2 or sys.argv[1] not in ("up", "down", "ad", "ad-down"):
         sys.exit(__doc__)
+    stage = sys.argv[1]
     settings = live_settings(Settings, "ISE_", mcp_enable_writes=True, mcp_enable_dangerous=True)
     async with Client(create_server(settings), timeout=300) as c:
-        for tool, args in UP if sys.argv[1] == "up" else DOWN:
+        if stage == "ad":
+            sec = lab_secrets()
+            steps = ad_steps(sec)
+            await run(c, *steps[0])
+            await join(c, sec)
+            for tool, args in steps[1:]:
+                await run(c, tool, args)
+            return
+        if stage == "ad-down":
+            await ad_down(c, lab_secrets())
+            return
+        for tool, args in UP if stage == "up" else DOWN:
             await run(c, tool, args)
 
 

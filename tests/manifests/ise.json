@@ -88,6 +88,10 @@
   },
   "server": "ise-mcp-server",
   "tools": {
+    "ise_add_ad_groups": {
+      "tier": "write",
+      "title": "Add AD groups to a join point"
+    },
     "ise_api_call": {
       "tier": "dangerous",
       "title": "Raw Cisco ISE API call"
@@ -119,6 +123,10 @@
     "ise_coa_reauth": {
       "tier": "dangerous",
       "title": "CoA: reauthenticate a session"
+    },
+    "ise_create_ad_join_point": {
+      "tier": "write",
+      "title": "Create an AD join point"
     },
     "ise_create_anc_policy": {
       "tier": "write",
@@ -208,6 +216,10 @@
       "tier": "write",
       "title": "Generate a CSR"
     },
+    "ise_get_ad_join_point": {
+      "tier": "read",
+      "title": "Get an AD join point (config + join status)"
+    },
     "ise_get_auth_history": {
       "tier": "read",
       "title": "Authentication history for a MAC"
@@ -260,9 +272,21 @@
       "tier": "write",
       "title": "Import a trusted (CA) certificate"
     },
+    "ise_join_ad": {
+      "tier": "dangerous",
+      "title": "Join ISE nodes to Active Directory"
+    },
+    "ise_leave_ad": {
+      "tier": "dangerous",
+      "title": "Leave Active Directory"
+    },
     "ise_list_active_sessions": {
       "tier": "read",
       "title": "List active sessions"
+    },
+    "ise_list_ad_groups": {
+      "tier": "read",
+      "title": "Search an AD domain's groups"
     },
     "ise_list_allowed_protocols": {
       "tier": "read",
@@ -455,6 +479,10 @@
     "ise_status": {
       "tier": "read",
       "title": "Cisco ISE status"
+    },
+    "ise_test_ad_user": {
+      "tier": "read",
+      "title": "Test an AD user (lookup + groups)"
     },
     "ise_update_authz_profile": {
       "tier": "write",

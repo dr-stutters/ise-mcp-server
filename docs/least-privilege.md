@@ -34,6 +34,13 @@ restricts *the server's own* ISE account. Use both.
 | All OpenAPI read menus/data (Read Only Admin) | Read | `ise_list_policy_sets`, `ise_get_policy_set`, `ise_list_endpoints`, `ise_list_certificates`, `ise_get_license_status`, `ise_deployment_health`, `ise_list_sxp_*`, `ise_get_egress_matrix` |
 | Monitoring (MnT) | Read | `ise_list_active_sessions`, `ise_find_session`, `ise_get_auth_history`, `ise_why_auth_failed`, `ise_get_auth_list`, `ise_recent_auth_failures`, `ise_list_failure_reasons` |
 
+**AD lookups need ERS Admin.** ERS implements the Active Directory queries (group search, a user's groups,
+the join status) as PUT operations on the join point, even though they change nothing, so an ERS Operator
+(GET-only) account can't run `ise_list_ad_groups` or `ise_test_ad_user`; `ise_get_ad_join_point` then shows
+the join status as unknown, and so does the AD section of `ise_why_auth_failed`. Give the read account
+ERS Admin as well if the AD tools matter more than a strict GET-only role. Joining and leaving the domain
+(`ise_join_ad` / `ise_leave_ad`) is dangerous tier and takes a domain account passed per call.
+
 **What it deliberately does not allow** (these tools, all write/dangerous, are not in the read tier and
 are hidden from an MCP `ro` caller anyway): any `ise_create_*` / `ise_set_*` / `ise_update_*` /
 `ise_delete_*`, CoA (`ise_coa_*`), ANC apply/clear, node-service and certificate changes, `ise_api_call`.
