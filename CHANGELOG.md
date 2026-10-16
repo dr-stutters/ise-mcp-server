@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.0 (2026-10-16)
+
+### Added
+- **pxGrid client management + certificates for consumers (I30, #71).** Read: `ise_list_pxgrid_clients`
+  (state pending / enabled / disabled / created, and the product that registered it: FMC `iseagent-*` /
+  `firesightisetest-*`, Catalyst Center), `ise_get_pxgrid_client`, `ise_pxgrid_status` (persona per node; the
+  pxGrid certificate's issuer chain through ISE's trusted store, hostname vs node FQDN, both EKUs, and what
+  8910 presents via a TLS handshake; pending clients; problems a consumer would hit). Write:
+  `ise_approve_pxgrid_client`, `ise_decline_pxgrid_client` (ISE has no REST Decline: the pending registration
+  is removed), `ise_delete_pxgrid_client` (refuses ISE's own `~ise-*` clients), `ise_set_pxgrid_settings`
+  (auto-approve cert-based / allow password-based; write-only on ISE 3.5), `ise_issue_pxgrid_client_cert`
+  (two steps: key + CSR generated in the server and held in memory for 2 h, bound to the caller; then the
+  signed certificate is checked and the bundle - certificate, private key (optionally encrypted), CA chain,
+  pxGrid server CA - is returned once). The server never connects to pxGrid as a client (ADR-003).
+- `scripts/lab_policy.py pxgrid`: pxGrid settings; ISE's pxGrid certificate from the lab CA (CN = node FQDN,
+  template `mcpPxGrid`); FMC's pxGrid client certificate written to `~/MCP-Suite/lab-ca/fmc-pxgrid.*` (key
+  mode 600).
+- `cryptography` is a direct dependency.
+
+
 ## 0.8.0 (2026-10-16)
 
 ### Added

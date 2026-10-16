@@ -6,6 +6,7 @@ the way a model would (preview, then confirm).
     uv run python scripts/lab_policy.py ad      # AD join point + join + groups + AD rules (after 'up')
     uv run python scripts/lab_policy.py ad-down # leave the domain and remove the AD objects
     uv run python scripts/lab_policy.py certs   # trust the lab CA, EAP cert signed by it, EAP-TLS rule
+    uv run python scripts/lab_policy.py pxgrid  # pxGrid settings + cert from the lab CA, FMC client cert
 
 What 'up' creates (all named mcp-test-*; idempotent: existing objects are left alone):
 - NDG Location#All Locations#mcp-test-lab; NAD mcp-test-sw1 198.18.128.154 (RADIUS + TACACS+ key ***REDACTED***,
@@ -32,6 +33,12 @@ it: EAP CSR (CN = node FQDN) -> signed with the WebServer template by LAB_CSR_SI
 ~/MCP-Suite/scripts/dc-sign-csr.py over WinRM) -> bound for EAP; authz rule mcp-test-eaptls-mitchcloud
 (802.1X + EAP-TLS + certificate issuer CN = the CA -> SGT Production_Users). Client certificates (User
 template) are issued per user: dc-sign-csr.py <csr> --template User --as mcp-alice.
+'pxgrid' (after 'certs'; needs the DC's mcpPxGrid template, build-dc.py step 6d): pxGrid settings auto-approve
+cert-based accounts + allow password accounts; unless already done, a pxGrid CSR (CN = node FQDN) per pxGrid
+node -> signed with mcpPxGrid (server + client auth EKU) -> bound for pxGrid; then the FMC pxGrid client
+certificate (CN LAB_FMC_FQDN, default fmc.mitchcloud.lab) via ise_issue_pxgrid_client_cert, written to
+~/MCP-Suite/lab-ca/fmc-pxgrid.{pem,key} (key mode 600) + fmc-pxgrid-chain.pem + ise-pxgrid-server-ca.pem.
+LAB_FORCE_PXGRID_CERT=1 re-issues the ISE pxGrid cert; LAB_FORCE_FMC_PXGRID=1 the FMC client cert.
 ISE's name server must point at the DC (ISE CLI: ip name-server <LAB_AD_DC_IP>).
 The Device Admin service is NOT turned on here (dangerous; ise_update_node_services enable=['DeviceAdmin']).
 """
@@ -39,6 +46,7 @@ The Device Admin service is NOT turned on here (dangerous; ise_update_node_servi
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 from typing import Any
@@ -336,11 +344,18 @@ def read_ca(ca: str) -> str | None:
         return fh.read()
 
 
-def sign(csr: str) -> tuple[str, str]:
+PXGRID_SIGNER = os.environ.get(
+    "LAB_PXGRID_SIGNER",
+    "uv run -q --no-project --with pypsrp python ~/MCP-Suite/scripts/dc-sign-csr.py --template mcpPxGrid",
+)
+LAB_CA_DIR = os.path.expanduser("~/MCP-Suite/lab-ca")
+
+
+def sign(csr: str, signer: str = SIGNER) -> tuple[str, str]:
     import shlex  # noqa: PLC0415
     import subprocess  # noqa: PLC0415
 
-    cmd = [os.path.expanduser(part) for part in shlex.split(SIGNER)]
+    cmd = [os.path.expanduser(part) for part in shlex.split(signer)]
     try:
         r = subprocess.run(cmd, input=csr, capture_output=True, text=True, check=False, timeout=300)  # noqa: S603
     except subprocess.TimeoutExpired:
@@ -444,6 +459,126 @@ async def certs(c: Client, sec: dict[str, str]) -> None:  # type: ignore[type-ar
     )
 
 
+def write_private(path: str, text: str, mode: int = 0o600) -> None:
+    """Atomic write with `mode` from the start (the key is never world-readable, even briefly)."""
+    tmp = f"{path}.tmp-{os.getpid()}"
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(tmp)  # a stale tmp file could carry looser permissions
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    os.fchmod(fd, mode)  # umask may have narrowed it; set it before anything is written
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+def cert_ok(path: str, issuer_cn: str, days: int = 30) -> bool:
+    import datetime as dt  # noqa: PLC0415
+
+    from cryptography import x509  # noqa: PLC0415
+
+    if not os.path.exists(path) or not os.path.exists(path.removesuffix(".pem") + ".key"):
+        return False
+    from cryptography.hazmat.primitives import serialization  # noqa: PLC0415
+
+    with open(path, "rb") as fh:
+        cert = x509.load_pem_x509_certificate(fh.read())
+    with open(path.removesuffix(".pem") + ".key", "rb") as fh:
+        key = serialization.load_pem_private_key(fh.read(), None)
+    spki = serialization.PublicFormat.SubjectPublicKeyInfo
+    der = serialization.Encoding.DER
+    if key.public_key().public_bytes(der, spki) != cert.public_key().public_bytes(der, spki):
+        return False
+    left = cert.not_valid_after_utc - dt.datetime.now(dt.UTC)
+    return f"CN={issuer_cn}" in cert.issuer.rfc4514_string() and left.days > days
+
+
+async def pxgrid(c: Client, sec: dict[str, str]) -> None:  # type: ignore[type-arg]
+    import asyncio as aio  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    ca = sec.get("LAB_AD_DOMAIN", "mitchcloud.lab").split(".")[0] + "-CA"
+    await run(
+        c, "ise_set_pxgrid_settings", {"auto_approve_cert_accounts": True, "allow_password_accounts": True}
+    )
+    status = await call(c, "ise_pxgrid_status", {})
+    for report in status.get("certificates") or []:
+        host, fqdn = report["node"], report["fqdn"]
+        bound = report.get("bound") or {}
+        done = bound.get("root") == ca and str(bound.get("issued_to", "")).lower() == fqdn.lower()
+        if done and os.environ.get("LAB_FORCE_PXGRID_CERT") != "1":
+            print(f"- pxGrid certificate on {host}: skipped (already {fqdn} from {ca})")
+            continue
+        out = await confirm(
+            c,
+            "ise_generate_csr",
+            {
+                "usage": "PXGRID",
+                "common_name": fqdn,
+                "san_dns": [fqdn],
+                "organization": "mcp lab",
+                "org_unit": "pxGrid",  # the EAP cert has the same CN + O: ISE refuses a duplicate subject
+                "nodes": [host],
+            },
+        )
+        csr_id = out["result"]["response"][0]["id"]
+        csr = (await call(c, "ise_export_csr", {"csr": csr_id, "node": host}))["csr_pem"]
+        signed, err = await aio.to_thread(sign, csr, PXGRID_SIGNER)
+        if "BEGIN CERTIFICATE" not in signed:
+            print(f"- pxGrid certificate on {host}: FAILED to sign ({err.strip()[-300:]})")
+            await run(c, "ise_delete_csr", {"csr": csr_id, "node": host})
+            continue
+        await confirm(
+            c,
+            "ise_bind_certificate",
+            {
+                "csr": csr_id,
+                "certificate_pem": signed,
+                "use_for": ["pxgrid"],
+                "name": f"mcp-pxgrid-{ca.lower()}-{time.strftime('%Y%m%d%H%M')}",
+                "node": host,
+            },
+        )
+        print(f"- pxGrid certificate on {host}: signed by {ca} and bound for pxGrid; waiting for 8910")
+        for _ in range(30):  # pxGrid restarts on the node after a bind
+            await aio.sleep(10)
+            rep = await call(c, "ise_pxgrid_status", {})
+            lst = next((r.get("listener") for r in rep["certificates"] if r["node"] == host), {}) or {}
+            if lst.get("hostname_matches_fqdn") and lst.get("matches_bound"):
+                print(f"  8910 on {host} presents the new certificate")
+                break
+        else:
+            print(f"  8910 on {host} does not present the new certificate yet (check ise_pxgrid_status)")
+
+    fqdn = sec.get("LAB_FMC_FQDN", "fmc.mitchcloud.lab")
+    cert_path = os.path.join(LAB_CA_DIR, "fmc-pxgrid.pem")
+    if cert_ok(cert_path, ca) and os.environ.get("LAB_FORCE_FMC_PXGRID") != "1":
+        print(f"- FMC pxGrid client certificate: skipped ({cert_path} valid, from {ca})")
+        return
+    step1 = await confirm(c, "ise_issue_pxgrid_client_cert", {"common_name": fqdn})
+    req = step1["result"]
+    signed, err = await aio.to_thread(sign, req["csr_pem"], PXGRID_SIGNER)
+    if "BEGIN CERTIFICATE" not in signed:
+        print(f"- FMC pxGrid client certificate: FAILED to sign ({err.strip()[-300:]})")
+        return
+    bundle = (
+        await confirm(
+            c,
+            "ise_issue_pxgrid_client_cert",
+            {"common_name": fqdn, "request_id": req["request_id"], "certificate_pem": signed},
+        )
+    )["result"]
+    os.makedirs(LAB_CA_DIR, exist_ok=True)
+    write_private(os.path.join(LAB_CA_DIR, "fmc-pxgrid.key"), bundle["private_key_pem"])
+    write_private(cert_path, bundle["certificate_pem"], 0o644)
+    write_private(os.path.join(LAB_CA_DIR, "fmc-pxgrid-chain.pem"), bundle["chain_pem"], 0o644)
+    if bundle.get("server_ca_pem"):
+        write_private(os.path.join(LAB_CA_DIR, "ise-pxgrid-server-ca.pem"), bundle["server_ca_pem"], 0o644)
+    print(
+        f"- FMC pxGrid client certificate CN={fqdn}: {cert_path} (+ .key mode 600, -chain.pem, "
+        "ise-pxgrid-server-ca.pem)"
+    )
+
+
 async def run(c: Client, tool: str, args: dict[str, Any]) -> None:  # type: ignore[type-arg]
     r = await c.call_tool(tool, args, raise_on_error=False)
     data = r.structured_content
@@ -459,7 +594,7 @@ async def run(c: Client, tool: str, args: dict[str, Any]) -> None:  # type: igno
 
 
 async def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("up", "down", "ad", "ad-down", "certs"):
+    if len(sys.argv) != 2 or sys.argv[1] not in ("up", "down", "ad", "ad-down", "certs", "pxgrid"):
         sys.exit(__doc__)
     stage = sys.argv[1]
     settings = live_settings(Settings, "ISE_", mcp_enable_writes=True, mcp_enable_dangerous=True)
@@ -474,6 +609,9 @@ async def main() -> None:
             return
         if stage == "certs":
             await certs(c, lab_secrets())
+            return
+        if stage == "pxgrid":
+            await pxgrid(c, lab_secrets())
             return
         if stage == "ad-down":
             await ad_down(c, lab_secrets())

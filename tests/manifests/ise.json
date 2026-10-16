@@ -100,6 +100,10 @@
       "tier": "dangerous",
       "title": "Apply ANC policy to an endpoint"
     },
+    "ise_approve_pxgrid_client": {
+      "tier": "write",
+      "title": "Approve a pxGrid client"
+    },
     "ise_audit_nads": {
       "tier": "read",
       "title": "Audit network devices"
@@ -164,6 +168,10 @@
       "tier": "write",
       "title": "Create policy set"
     },
+    "ise_decline_pxgrid_client": {
+      "tier": "write",
+      "title": "Decline a pending pxGrid client"
+    },
     "ise_delete_certificate": {
       "tier": "dangerous",
       "title": "Delete a certificate"
@@ -187,6 +195,10 @@
     "ise_delete_policy_set": {
       "tier": "dangerous",
       "title": "Delete a policy set"
+    },
+    "ise_delete_pxgrid_client": {
+      "tier": "write",
+      "title": "Delete a pxGrid client"
     },
     "ise_delete_trustsec_object": {
       "tier": "write",
@@ -264,6 +276,10 @@
       "tier": "read",
       "title": "Get a policy set with its rules"
     },
+    "ise_get_pxgrid_client": {
+      "tier": "read",
+      "title": "Get a pxGrid client"
+    },
     "ise_get_task": {
       "tier": "read",
       "title": "Get an ISE task's status"
@@ -271,6 +287,10 @@
     "ise_import_trusted_cert": {
       "tier": "write",
       "title": "Import a trusted (CA) certificate"
+    },
+    "ise_issue_pxgrid_client_cert": {
+      "tier": "write",
+      "title": "Issue a pxGrid client certificate"
     },
     "ise_join_ad": {
       "tier": "dangerous",
@@ -392,6 +412,10 @@
       "tier": "read",
       "title": "List profiler profiles"
     },
+    "ise_list_pxgrid_clients": {
+      "tier": "read",
+      "title": "List pxGrid clients"
+    },
     "ise_list_sgacls": {
       "tier": "read",
       "title": "List SGACLs"
@@ -419,6 +443,10 @@
     "ise_push_trustsec_matrix": {
       "tier": "dangerous",
       "title": "Push TrustSec policy to devices (CoA)"
+    },
+    "ise_pxgrid_status": {
+      "tier": "read",
+      "title": "pxGrid service status"
     },
     "ise_recent_auth_failures": {
       "tier": "read",
@@ -463,6 +491,10 @@
     "ise_set_ip_sgt": {
       "tier": "write",
       "title": "Create or update a static IP-SGT mapping"
+    },
+    "ise_set_pxgrid_settings": {
+      "tier": "write",
+      "title": "Set the pxGrid approval settings"
     },
     "ise_set_sgt": {
       "tier": "write",
@@ -513,5 +545,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.8.0"
+  "version": "0.9.0"
 }

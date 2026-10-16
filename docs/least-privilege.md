@@ -41,6 +41,11 @@ the join status as unknown, and so does the AD section of `ise_why_auth_failed`.
 ERS Admin as well if the AD tools matter more than a strict GET-only role. Joining and leaving the domain
 (`ise_join_ad` / `ise_leave_ad`) is dangerous tier and takes a domain account passed per call.
 
+**pxGrid.** `ise_list_pxgrid_clients`, `ise_get_pxgrid_client` and `ise_pxgrid_status` are ERS/OpenAPI GETs
+(ERS Operator + Read Only Admin). Approving, declining or deleting clients and `ise_set_pxgrid_settings` are
+ERS PUT/DELETE (ERS Admin, write tier). `ise_issue_pxgrid_client_cert` changes nothing on ISE (it reads the
+trusted store), but it mints a client credential, so it is write tier too.
+
 **What it deliberately does not allow** (these tools, all write/dangerous, are not in the read tier and
 are hidden from an MCP `ro` caller anyway): any `ise_create_*` / `ise_set_*` / `ise_update_*` /
 `ise_delete_*`, CoA (`ise_coa_*`), ANC apply/clear, node-service and certificate changes, `ise_api_call`.
