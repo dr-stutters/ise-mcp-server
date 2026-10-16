@@ -105,3 +105,15 @@ Left to `ise_api_call` (with `ise_search_spec` / `ise_get_definition`) or out of
 - **Library-condition CRUD, global exceptions, MFA rules, hit-count reset, and allowed-protocols writes**: rare, and the GUI is clearer.
 - **TACACS+ live logs**: ISE has no REST API for them, and receiving ISE syslog is out of scope (ADR-003). I12 was dropped.
 - **Event ingestion of any kind** (pxGrid subscriptions, syslog receivers, background pollers, event buffers, relays): out of scope suite-wide ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)). A long-term record belongs in a log platform with its own MCP server.
+
+
+## Wave 3 (planned 2026-10-16)
+See the [suite roadmap](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md#wave-3-planned-2026-10-16).
+
+| # | Item | Milestone |
+|---|---|---|
+| [I30](https://github.com/dr-stutters/ise-mcp-server/issues/71) | pxGrid client management + certs for FMC | Next |
+| [I31](https://github.com/dr-stutters/ise-mcp-server/issues/72) | Guest + sponsor (AD sponsors, portals, guest accounts) | Next |
+| [I32](https://github.com/dr-stutters/ise-mcp-server/issues/73) | Posture (blocked: Windows client VM + Secure Client) | Later |
+| [I33](https://github.com/dr-stutters/ise-mcp-server/issues/74) | Machine + user EAP-TLS via GPO auto-enrolment (blocked: Windows client VM) | Later |
+| [I34](https://github.com/dr-stutters/ise-mcp-server/issues/75) | PassiveID from AD logins (blocked: Windows client VM) | Later |
