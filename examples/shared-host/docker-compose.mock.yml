@@ -1,0 +1,35 @@
+# Test override: two mocked ISE deployments ("default" and "dr") and a throwaway token, no real ISE needed.
+#   docker compose -f docker-compose.yml -f docker-compose.mock.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.mock.yml exec ise-mcp-server ise-mcp-server check
+#   curl -k https://localhost:8443/health
+# The mocks speak plain HTTP, so check warns about it; never use these values for a real deployment.
+services:
+  ise-mcp-server:
+    environment:
+      ISE_URL: http://ise-a:8080
+      ISE_USERNAME: mcp-ro
+      ISE_PASSWORD: mock-password
+      ISE_ERS_PORT: "8080"
+      ISE_INSTANCES: dr
+      ISE_DR_URL: http://ise-b:8080
+      ISE_DR_USERNAME: mcp-ro
+      ISE_DR_PASSWORD: mock-password
+      ISE_DR_ERS_PORT: "8080"
+      # token "mock-alice-token" (sha256 below): for this demo only
+      MCP_AUTH_TOKENS: alice:sha256:049308f729cc1bfad7f268a823b2dbe01c91fc414963c1357de2d5fa036599cb
+    depends_on:
+      - ise-a
+      - ise-b
+  caddy:
+    ports: !override
+      - "${MCP_HTTPS_PORT:-8443}:443"
+  ise-a:
+    image: python:3.12-slim
+    command: ["python", "/mock/appliance.py", "/mock/routes.json", "8080", "ise-a"]
+    volumes:
+      - ./mock:/mock:ro
+  ise-b:
+    image: python:3.12-slim
+    command: ["python", "/mock/appliance.py", "/mock/routes.json", "8080", "ise-b"]
+    volumes:
+      - ./mock:/mock:ro
