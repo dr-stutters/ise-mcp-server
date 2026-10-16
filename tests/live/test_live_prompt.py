@@ -1,23 +1,25 @@
-"""Live: the ise_troubleshoot_endpoint_access prompt's ISE steps on a real client (CML ise-access).
-Set ISE_LIVE_SWITCH_MAC to the client's MAC (52:54:00:61:3D:9E in the recipe lab)."""
+"""Live: the ise_troubleshoot_endpoint_access prompt's ISE steps on a real client behind a switch.
+Set ISE_LIVE_SWITCH_MAC to the client's MAC; ISE_LIVE_SWITCH_NAME (optional) is the switch name passed to
+the prompts. See docs/live-tests.md."""
 
 from __future__ import annotations
 
-import os
 import re
 
 import pytest
 
-from tests.live.conftest import Session
+from tests.live.conftest import DOCS, Session, live_env
 
 pytestmark = pytest.mark.live
-MAC = os.environ.get("ISE_LIVE_SWITCH_MAC", "")
+MAC = live_env("ISE_LIVE_SWITCH_MAC")
+SWITCH = live_env("ISE_LIVE_SWITCH_NAME") or "access-switch"
+REASON = f"ISE_LIVE_SWITCH_MAC not set (needs a switch and client; see {DOCS})"
 
 
-@pytest.mark.skipif(not MAC, reason="ISE_LIVE_SWITCH_MAC not set (needs the CML ise-access lab)")
+@pytest.mark.skipif(not MAC, reason=REASON)
 async def test_troubleshoot_prompt_steps(ise: Session) -> None:
     rendered = await ise.client.get_prompt(
-        "ise_troubleshoot_endpoint_access", {"mac": MAC, "switch": "mcp-cml-ise/sw1", "minutes": "60"}
+        "ise_troubleshoot_endpoint_access", {"mac": MAC, "switch": SWITCH, "minutes": "60"}
     )
     text = rendered.messages[0].content.text  # type: ignore[union-attr]
     tools = {t.name for t in await ise.client.list_tools()}
@@ -32,7 +34,7 @@ async def test_troubleshoot_prompt_steps(ise: Session) -> None:
         assert nad["name"]
 
 
-@pytest.mark.skipif(not MAC, reason="ISE_LIVE_SWITCH_MAC not set (needs the CML ise-access lab)")
+@pytest.mark.skipif(not MAC, reason=REASON)
 async def test_quarantine_prompt_ise_half(ise: Session) -> None:
     """The ise_quarantine_host steps on the real client: ANC on, quarantine profile/SGT in the session,
     ANC off. The switch-side checks (quarantine dACL + SGT 255 in 'show access-session') are manual."""
@@ -42,7 +44,7 @@ async def test_quarantine_prompt_ise_half(ise: Session) -> None:
             "reason": "mcp-test live",
             "mac": MAC,
             "anc_policy": "mcp-test-quarantine",
-            "switch": "mcp-cml-ise/sw1",
+            "switch": SWITCH,
         },
     )
     text = rendered.messages[0].content.text  # type: ignore[union-attr]

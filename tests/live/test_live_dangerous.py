@@ -1,5 +1,5 @@
-"""Live dangerous-tier tests (the lab is throwaway). CoA goes to the seeded RADIUS client (this host),
-which doesn't answer CoA, so the tests accept an unacknowledged CoA."""
+"""Live dangerous-tier tests (run them only against a throwaway ISE). CoA goes to the seeded RADIUS client
+(this host), which doesn't answer CoA, so the tests accept an unacknowledged CoA."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tests.live.conftest import Session
+from tests.live.conftest import SEED_HINT, Session
 from tests.live.test_live_writes import RUN
 
 pytestmark = pytest.mark.live
@@ -25,7 +25,7 @@ async def seeded_session(ise: Session) -> bool:
 
 async def test_coa_reauth_and_disconnect(ise: Session) -> None:
     if not await seeded_session(ise):
-        pytest.skip("no live session (run scripts/seed_lab.py)")
+        pytest.skip(f"no live session for the seed MAC ({SEED_HINT})")
     res = await ise.apply("ise_coa_reauth", {"mac": SEED_MAC})
     assert isinstance(res["applied"]["result"]["coa_acknowledged"], bool)
     res = await ise.apply("ise_coa_disconnect", {"mac": SEED_MAC})

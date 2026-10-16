@@ -16,6 +16,19 @@
 
 ### Removed
 - The git source for stutters-mcp-core and `CORE_READ_TOKEN` (Dockerfile build secret, compose, workflows).
+- **De-lab (I39, #5):** `scripts/seed_lab.py` and `scripts/lab_policy.py` moved to the suite's private lab repo
+  (stutters-mcp-lab), with the lab-state assertions of the deployment-health live test.
+
+### Live tests
+- Lab-specific inputs come from documented `ISE_LIVE_*` variables (environment or `.env`; see
+  `docs/live-tests.md` and `.env.example`): `ISE_LIVE_SWITCH_IP`, `ISE_LIVE_SWITCH_NAME`,
+  `ISE_LIVE_AD_JOIN_POINT`, `ISE_LIVE_AD_GROUP`, `ISE_LIVE_AD_USER`, `ISE_LIVE_CA_NAME`, `ISE_LIVE_CA_PEM`,
+  `ISE_LIVE_PXGRID_SIGNER` (was `LAB_PXGRID_SIGNER`), `ISE_LIVE_PXGRID_DOMAIN` and `ISE_LIVE_SXP_PEER`, next to
+  the existing `ISE_LIVE_SWITCH_MAC` and `ISE_LIVE_SCALE`. Tests skip with a message naming the variable
+  when it is unset; `docs/live-tests.md` also lists the seeded `mcp-test-*` objects and the switch test policy
+  the tests expect. `test_live_policy_explain` now skips (instead of failing) when ISE is not configured.
+- Lab names and addresses replaced with example values in the AD MnT fixture, unit tests and the
+  `ise_list_ad_groups` description.
 
 ## 0.9.0 (2026-10-16)
 

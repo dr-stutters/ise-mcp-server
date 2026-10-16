@@ -1,23 +1,24 @@
-"""Live: IP-SGT mappings and SXP connections on the lab ISE (needs the SXP service on the node).
-The peer is an unused lab address, so no real device is touched; the switch-side proof (SXP 'On' and
-the binding in 'show cts role-based sgt-map all' on the CML ise-access sw1) is in the notes."""
+"""Live: IP-SGT mappings and SXP connections (needs the SXP service on the node). The peer is
+ISE_LIVE_SXP_PEER, an unused address in your network, so no real device is touched (see
+docs/live-tests.md)."""
 
 from __future__ import annotations
 
 import pytest
 
-from tests.live.conftest import Session
+from tests.live.conftest import Session, live_env, need_env
 
 pytestmark = pytest.mark.live
 
-PEER = "198.18.128.189"
+PEER = live_env("ISE_LIVE_SXP_PEER")
 NET = "10.99.250.0/24"
 
 
 async def test_ip_sgt_and_sxp_lifecycle(ise: Session) -> None:
+    need_env("ISE_LIVE_SXP_PEER", "an unused IP address to use as the SXP peer")
     nodes = await ise.call("ise_list_nodes", {"response_format": "json"})
     if not any("SXP" in (n.get("services") or []) for n in nodes["results"]):
-        pytest.skip("SXP service is not enabled on the lab node")
+        pytest.skip("SXP service is not enabled on any node")
     try:
         await ise.apply("ise_set_sxp_connection", {"peer_ip": PEER, "peer_name": "mcp-test-sxp-peer"})
         conns = await ise.call("ise_list_sxp_connections", {"peer_ip": PEER, "response_format": "json"})
