@@ -7,9 +7,9 @@ import httpx
 import pytest
 import respx
 from fastmcp import Client
-from stutters_mcp_core import InvalidRequest
-from stutters_mcp_core.formatting import MASK
 
+from ise_mcp._core import InvalidRequest
+from ise_mcp._core.formatting import MASK
 from ise_mcp.tools.policy_edit import condition_node
 from ise_mcp.tools.writes import masked_changes
 from tests.unit.conftest import BASE, ers_page, make_server

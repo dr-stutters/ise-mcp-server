@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.auth import AuthProvider
-from stutters_mcp_core import ServerSpec, build_server
 
+from ise_mcp._core import ServerSpec, build_server
 from ise_mcp.client import IseApp
 from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources

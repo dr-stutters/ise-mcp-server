@@ -13,8 +13,7 @@ import logging
 import re
 from typing import Any
 
-from stutters_mcp_core.spec import SpecSource
-
+from ise_mcp._core.spec import SpecSource
 from ise_mcp.client import IseApp
 
 log = logging.getLogger(__name__)

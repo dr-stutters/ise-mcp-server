@@ -4,8 +4,8 @@ should match the actual matched rule. Needs the mcp-test-wired policy set (lab_p
 from __future__ import annotations
 
 import pytest
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core.testing import call_tool
 from ise_mcp.config import Settings
 from ise_mcp.server import create_server
 

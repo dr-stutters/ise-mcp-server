@@ -11,7 +11,8 @@ from urllib.parse import quote
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     Confirm,
     InvalidRequest,
     NotFound,
@@ -22,7 +23,6 @@ from stutters_mcp_core import (
     get_client,
     preview_or_apply,
 )
-
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_list, list_result
 from ise_mcp.tools.writes import deep_merge, ers_post, ers_put, fingerprint

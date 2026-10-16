@@ -9,7 +9,8 @@ from urllib.parse import quote
 
 from fastmcp import Context
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     Confirm,
     InvalidRequest,
     NotFound,
@@ -20,7 +21,6 @@ from stutters_mcp_core import (
     get_client,
     preview_or_apply,
 )
-
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import anc_assignments, normalize_mac, openapi_all
 from ise_mcp.tools._safety import PORT_ACTIONS, port_coa_guard, protect_blockers

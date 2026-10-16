@@ -10,8 +10,8 @@ from urllib.parse import quote
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import NotFound, ToolRegistrar, UpstreamError, get_client, object_result
 
+from ise_mcp._core import NotFound, ToolRegistrar, UpstreamError, get_client, object_result
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import gather_limited, openapi_all
 from ise_mcp.tools.system import _cert_row, _parse_date, _response

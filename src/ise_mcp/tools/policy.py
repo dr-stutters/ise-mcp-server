@@ -8,7 +8,8 @@ from typing import Annotated, Any, Literal
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     NotFound,
     ResponseFormat,
     ToolRegistrar,
@@ -16,8 +17,7 @@ from stutters_mcp_core import (
     get_client,
     object_result,
 )
-from stutters_mcp_core.http import page_of
-
+from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import (
     ers_list,

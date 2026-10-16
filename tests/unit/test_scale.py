@@ -8,8 +8,8 @@ import time
 import httpx
 import respx
 from fastmcp import Client
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core.testing import call_tool
 from ise_mcp.specs import ers_doc_from_data_model
 from tests.unit.conftest import ers_page, make_server
 

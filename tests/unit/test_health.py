@@ -4,8 +4,8 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import respx
-from stutters_mcp_core.testing import call_tool
 
+from ise_mcp._core.testing import call_tool
 from tests.unit.conftest import ers_page, make_server
 
 

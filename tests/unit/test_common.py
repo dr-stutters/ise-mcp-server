@@ -1,6 +1,6 @@
 import pytest
-from stutters_mcp_core import InvalidRequest
 
+from ise_mcp._core import InvalidRequest
 from ise_mcp.knowledge import decode_steps
 from ise_mcp.tools._common import normalize_mac, render_condition, summarize_rule
 from ise_mcp.tools.sessions import parse_other_attrs

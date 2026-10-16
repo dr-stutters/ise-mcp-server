@@ -13,9 +13,9 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import ResponseFormat, ToolRegistrar, get_client
-from stutters_mcp_core.http import page_of
 
+from ise_mcp._core import ResponseFormat, ToolRegistrar, get_client
+from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_list, list_result, openapi_all
 

@@ -19,7 +19,8 @@ from typing import Annotated, Any, Literal
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
-from stutters_mcp_core import (
+
+from ise_mcp._core import (
     InvalidRequest,
     NotFound,
     ToolRegistrar,
@@ -27,7 +28,6 @@ from stutters_mcp_core import (
     get_client,
     object_result,
 )
-
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import render_condition
 from ise_mcp.tools.ad import NotJoined, ad_user_facts, all_join_points, strip_domain
