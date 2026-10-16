@@ -63,3 +63,23 @@ async def test_cert_profile_and_sequence(ise: Session) -> None:
                     "ise_api_call",
                     {"source": "ers", "method": "DELETE", "path": f"/ers/config/{resource}/{item['id']}"},
                 )
+
+
+async def test_eap_cert_from_lab_ad_cs(ise: Session) -> None:
+    """After `lab_policy.py certs`: ISE trusts mitchcloud-CA and its EAP certificate is issued by it."""
+    certs = await ise.call("ise_list_certificates", {"response_format": "json", "limit": 500})
+    trusted = await ise.call(
+        "ise_list_certificates", {"kind": "trusted", "response_format": "json", "limit": 500}
+    )
+    if not any(r.get("name") == "mitchcloud-CA" for r in trusted["results"]):
+        pytest.skip("mitchcloud-CA not trusted (lab_policy.py certs not run)")
+    eap = [r for r in certs["results"] if "EAP Authentication" in str(r.get("used_by"))]
+    assert eap and eap[0]["issued_by"] == "mitchcloud-CA"
+    blocked = await ise.call(
+        "ise_delete_certificate",
+        {
+            "cert_id": next(r["id"] for r in trusted["results"] if r["name"] == "mitchcloud-CA"),
+            "kind": "trusted",
+        },
+    )
+    assert blocked["status"] == "blocked"

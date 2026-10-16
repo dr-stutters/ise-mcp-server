@@ -5,6 +5,7 @@ the way a model would (preview, then confirm).
     uv run python scripts/lab_policy.py down    # remove everything 'up' created (reverse order)
     uv run python scripts/lab_policy.py ad      # AD join point + join + groups + AD rules (after 'up')
     uv run python scripts/lab_policy.py ad-down # leave the domain and remove the AD objects
+    uv run python scripts/lab_policy.py certs   # trust the lab CA, EAP cert signed by it, EAP-TLS rule
 
 What 'up' creates (all named mcp-test-*; idempotent: existing objects are left alone):
 - NDG Location#All Locations#mcp-test-lab; NAD mcp-test-sw1 198.18.128.154 (RADIUS + TACACS+ key ***REDACTED***,
@@ -25,6 +26,12 @@ LAB_WIN_ADMIN_USER / LAB_WIN_ADMIN_PASSWORD (only if not joined yet), groups mcp
 mcp-netadmins / mcp-netreadonly, certificate profile mcp_test_certprof and identity sequence
 mcp_test_eaptls_seq (Internal Users, MITCHCLOUD) on authn rule mcp-test-dot1x, and authz rules
 mcp-test-ad-employees (-> SGT Employees) and mcp-test-ad-contractors (-> SGT Contractors).
+'certs' (needs the DC and its CA root in ~/MCP-Suite/lab-ca/<LAB_AD_DOMAIN first label>-CA.pem, written by
+build-dc.py): trusted cert mitchcloud-CA (client + ISE auth); unless the EAP certificate is already issued by
+it: EAP CSR (CN = node FQDN) -> signed with the WebServer template by LAB_CSR_SIGNER (default
+~/MCP-Suite/scripts/dc-sign-csr.py over WinRM) -> bound for EAP; authz rule mcp-test-eaptls-mitchcloud
+(802.1X + EAP-TLS + certificate issuer CN = the CA -> SGT Production_Users). Client certificates (User
+template) are issued per user: dc-sign-csr.py <csr> --template User --as mcp-alice.
 ISE's name server must point at the DC (ISE CLI: ip name-server <LAB_AD_DC_IP>).
 The Device Admin service is NOT turned on here (dangerous; ise_update_node_services enable=['DeviceAdmin']).
 """
@@ -301,6 +308,142 @@ async def ad_down(c: Client, sec: dict[str, str]) -> None:  # type: ignore[type-
     await run(c, "ise_delete_object", {"kind": "ad_join_point", "target": JOIN_POINT})
 
 
+SIGNER = os.environ.get(
+    "LAB_CSR_SIGNER",
+    "uv run -q --no-project --with pypsrp python ~/MCP-Suite/scripts/dc-sign-csr.py --template WebServer",
+)
+
+
+async def call(c: Client, tool: str, args: dict[str, Any]) -> Any:  # type: ignore[type-arg]
+    r = await c.call_tool(tool, args, raise_on_error=False)
+    if r.is_error:
+        raise RuntimeError(f"{tool}: {r.content[0].text[:300] if r.content else 'error'}")
+    return r.structured_content
+
+
+async def confirm(c: Client, tool: str, args: dict[str, Any]) -> Any:  # type: ignore[type-arg]
+    preview = await call(c, tool, args)
+    if preview.get("status") != "preview":
+        raise RuntimeError(f"{tool}: {'; '.join(preview.get('blockers') or [])[:300]}")
+    return await call(c, tool, {**args, "confirm": preview["confirm"]})
+
+
+def read_ca(ca: str) -> str | None:
+    path = os.path.expanduser(f"~/MCP-Suite/lab-ca/{ca}.pem")
+    if not os.path.exists(path):
+        return None
+    with open(path) as fh:
+        return fh.read()
+
+
+def sign(csr: str) -> tuple[str, str]:
+    import shlex  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    cmd = [os.path.expanduser(part) for part in shlex.split(SIGNER)]
+    try:
+        r = subprocess.run(cmd, input=csr, capture_output=True, text=True, check=False, timeout=300)  # noqa: S603
+    except subprocess.TimeoutExpired:
+        return "", "signer timed out after 300 s"
+    if r.returncode != 0:
+        return "", f"signer exit {r.returncode}: {r.stderr}"
+    return r.stdout, r.stderr
+
+
+async def bind(c: Client, csr_id: str, pem: str, ca: str, host: str) -> None:  # type: ignore[type-arg]
+    import time  # noqa: PLC0415
+
+    await confirm(
+        c,
+        "ise_bind_certificate",
+        {
+            "csr": csr_id,
+            "certificate_pem": pem,
+            "use_for": ["eap"],
+            "name": f"mcp-eap-{ca.lower()}-{time.strftime('%Y%m%d%H%M')}",
+            "node": host,
+        },
+    )
+
+
+async def certs(c: Client, sec: dict[str, str]) -> None:  # type: ignore[type-arg]
+    import asyncio as aio  # noqa: PLC0415
+
+    ca = sec.get("LAB_AD_DOMAIN", "mitchcloud.lab").split(".")[0] + "-CA"
+    ca_pem = await aio.to_thread(read_ca, ca)
+    if ca_pem is None:
+        print(f"- certs: skipped (~/MCP-Suite/lab-ca/{ca}.pem missing: run build-dc.py first)")
+        return
+    force = os.environ.get("LAB_FORCE_EAP_CERT") == "1"
+    await run(
+        c,
+        "ise_import_trusted_cert",
+        {
+            "name": ca,
+            "certificate_pem": ca_pem,
+            "trust_for": ["client_auth", "ise_auth"],
+            "description": "lab AD CS root",
+        },
+    )
+    nodes = (await call(c, "ise_list_nodes", {"response_format": "json"}))["results"]
+    system = await call(c, "ise_list_certificates", {"response_format": "json", "limit": 500})
+    for node in nodes:
+        host, fqdn = node["hostname"], node.get("fqdn") or node["hostname"]
+        eap = [
+            r
+            for r in system["results"]
+            if r.get("node") == host and "EAP Authentication" in str(r.get("used_by"))
+        ]
+        if eap and eap[0].get("issued_by") == ca and not force:
+            print(f"- EAP certificate on {host}: skipped (already issued by {ca}: {eap[0].get('name')})")
+            continue
+        out = await confirm(
+            c,
+            "ise_generate_csr",
+            {
+                "usage": "EAP-AUTH",
+                "common_name": fqdn,
+                "san_dns": [fqdn],
+                "organization": "mcp lab",
+                "nodes": [host],
+            },
+        )
+        try:
+            csr_id = out["result"]["response"][0]["id"]
+        except (KeyError, IndexError, TypeError):
+            print(f"- EAP certificate on {host}: FAILED (unexpected CSR response {str(out)[:200]})")
+            continue
+        csr = (await call(c, "ise_export_csr", {"csr": csr_id, "node": host}))["csr_pem"]
+        signed, err = await aio.to_thread(sign, csr)
+        if "BEGIN CERTIFICATE" not in signed:
+            print(f"- EAP certificate on {host}: FAILED to sign ({err.strip()[-300:]})")
+            await run(c, "ise_delete_csr", {"csr": csr_id, "node": host})
+            continue
+        try:
+            await bind(c, csr_id, signed, ca, host)
+        except RuntimeError as e:
+            print(f"- EAP certificate on {host}: FAILED to bind ({e}); removing the CSR")
+            await run(c, "ise_delete_csr", {"csr": csr_id, "node": host})
+            continue
+        print(f"- EAP certificate on {host}: signed by {ca} and bound for EAP")
+    await run(
+        c,
+        "ise_create_authz_rule",
+        {
+            "policy_set": "mcp-test-wired",
+            "name": "mcp-test-eaptls-mitchcloud",
+            "conditions": [
+                "Wired_802.1X",
+                "Network Access:EapAuthentication equals EAP-TLS",
+                f"CERTIFICATE:Issuer - Common Name equals {ca}",
+            ],
+            "profiles": ["mcp-test-permit"],
+            "sgt": "Production_Users",
+            "rank": 1,
+        },
+    )
+
+
 async def run(c: Client, tool: str, args: dict[str, Any]) -> None:  # type: ignore[type-arg]
     r = await c.call_tool(tool, args, raise_on_error=False)
     data = r.structured_content
@@ -316,7 +459,7 @@ async def run(c: Client, tool: str, args: dict[str, Any]) -> None:  # type: igno
 
 
 async def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in ("up", "down", "ad", "ad-down"):
+    if len(sys.argv) != 2 or sys.argv[1] not in ("up", "down", "ad", "ad-down", "certs"):
         sys.exit(__doc__)
     stage = sys.argv[1]
     settings = live_settings(Settings, "ISE_", mcp_enable_writes=True, mcp_enable_dangerous=True)
@@ -328,6 +471,9 @@ async def main() -> None:
             await join(c, sec)
             for tool, args in steps[1:]:
                 await run(c, tool, args)
+            return
+        if stage == "certs":
+            await certs(c, lab_secrets())
             return
         if stage == "ad-down":
             await ad_down(c, lab_secrets())

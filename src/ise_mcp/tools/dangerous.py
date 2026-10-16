@@ -15,6 +15,7 @@ from stutters_mcp_core import (
     NotFound,
     Plan,
     ToolRegistrar,
+    UpstreamError,
     compact,
     get_client,
     preview_or_apply,
@@ -483,6 +484,31 @@ def register(reg: ToolRegistrar) -> None:
             and str(cert.get("usedBy")).strip() not in ("", "Not in use")
         ):
             blockers.append(f"Certificate is in use for: {cert.get('usedBy')}")
+        warnings: list[str] = []
+        if kind == "trusted" and cert.get("issuedTo"):
+            # ISE refuses (400) to delete a CA that issued a node's system certificate, used or not. The
+            # API gives issuer names only, so this matches by name (a rebuilt CA with the same name matches).
+            issued: list[str] = []
+            nodes = (await app.openapi.get("/api/v1/deployment/node")).get("response") or []
+            for n in nodes:
+                if not isinstance(n, dict) or not n.get("hostname"):
+                    continue
+                host = str(n["hostname"])
+                try:
+                    system = await openapi_all(
+                        app, f"/api/v1/certs/system-certificate/{quote(host, safe='')}"
+                    )
+                except UpstreamError as e:
+                    warnings.append(f"Could not read {host}'s system certificates: {str(e)[:120]}")
+                    continue
+                for sc in system:
+                    if isinstance(sc, dict) and sc.get("issuedBy") == cert.get("issuedTo"):
+                        issued.append(f"{sc.get('friendlyName')} on {host}")
+            if issued:
+                blockers.append(
+                    f"System certificate(s) issued by a CA of this name: {', '.join(issued)}. ISE refuses to "
+                    "delete the CA while they exist; delete those first (kind='system')"
+                )
         details = {
             k: cert.get(k)
             for k in (
@@ -500,13 +526,28 @@ def register(reg: ToolRegistrar) -> None:
             details=compact(details),
             fingerprint=fingerprint(cert),
             blockers=blockers,
-            side_effects=["Authentications relying on this certificate fail"] if kind == "trusted" else [],
+            side_effects=(["Authentications relying on this certificate fail"] if kind == "trusted" else [])
+            + warnings,
         )
+
+        async def apply_delete() -> Any:
+            try:
+                return await app.openapi.delete(path)
+            except UpstreamError as e:
+                if kind == "system" and e.status_code == 422:
+                    raise UpstreamError(
+                        f"{e} ISE gave no reason (seen on ISE 3.5 for an unused CA-signed certificate issued "
+                        "before the node's domain changed); delete it in the GUI: Administration > System > "
+                        "Certificates > System Certificates.",
+                        e.status_code,
+                    ) from e
+                raise
+
         return await preview_or_apply(
             ctx,
             tool="ise_delete_certificate",
             args={"cert_id": cert_id, "kind": kind, "node": node},
             confirm=confirm,
             plan=plan,
-            apply=lambda: app.openapi.delete(path),
+            apply=apply_delete,
         )
