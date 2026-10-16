@@ -326,6 +326,23 @@ step-ca or a public CA. Flow: `ise_generate_csr` -> `ise_export_csr` -> sign at 
 `ise_set_cert_auth_profile` and `ise_set_identity_sequence`, then use the sequence as an authentication
 rule's identity source.
 
+Tested with two CAs:
+- **Windows AD CS (the lab's Enterprise Root `mitchcloud-CA`).** The EAP CSR is signed with the
+  **WebServer** template (subject and SAN from the CSR; EKU server auth). Client certificates come from the
+  **User** template, which builds the subject and UPN SAN from the *requesting* AD account. So the request
+  is submitted as that user: `certreq -submit -config <DC>\<CA>`, never without `-config` over WinRM, or
+  certreq opens the CA picker and hangs. EAP-TLS for `mcp-alice` passed with mutual validation, matched on
+  `CERTIFICATE:Issuer - Common Name equals mitchcloud-CA`.
+- **An OpenSSL CA** (the earlier lab CA, and the one the CML `ise-access` recipe generates on its client).
+  It needs nothing Windows-specific. Keep it for labs without AD.
+
+A certificate authentication profile with an identity store (an AD join point) makes ISE look the
+certificate's user up in AD: AD group rules then work for EAP-TLS, but certificates for users that aren't
+in AD fail. The lab profile therefore has no store.
+
+`ise_delete_certificate` blocks deleting a trusted CA that still issued a system certificate (ISE refuses
+it).
+
 ### Active Directory
 `ise_create_ad_join_point` (the join point name becomes the policy dictionary, e.g. `CORP:ExternalGroups`) ->
 `ise_join_ad` (dangerous; the domain account and password are passed per call and never stored or shown) ->

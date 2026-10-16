@@ -138,6 +138,37 @@ async def test_delete_system_cert_in_use_blocked(mock: respx.MockRouter) -> None
     assert preview["status"] == "blocked"
 
 
+async def test_delete_trusted_ca_that_issued_a_system_cert_blocked(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/certs/trusted-certificate").respond(
+        json={"response": [{"id": "t1", "friendlyName": "old-root", "issuedTo": "Old Root CA"}]}
+    )
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json={"response": [{"hostname": "ise"}]})
+    mock.get("/api/v1/certs/system-certificate/ise").respond(
+        json={
+            "response": [
+                {"id": "s1", "friendlyName": "old-eap", "issuedBy": "Old Root CA", "usedBy": "Not in use"}
+            ]
+        }
+    )
+    preview, _ = await two_step("ise_delete_certificate", {"cert_id": "t1", "kind": "trusted"})
+    assert preview["status"] == "blocked"
+    assert "old-eap on ise" in preview["blockers"][0]
+
+
+async def test_delete_system_cert_422_hint(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/certs/system-certificate/ise").respond(
+        json={"response": [{"id": "s1", "friendlyName": "old-eap", "usedBy": "Not in use"}]}
+    )
+    mock.delete("/api/v1/certs/system-certificate/ise/s1").respond(422, json={"response": {"message": None}})
+    args = {"cert_id": "s1", "kind": "system", "node": "ise"}
+    async with Client(make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)) as c:
+        r1 = await c.call_tool("ise_delete_certificate", args)
+        token = r1.structured_content["confirm"]
+        r2 = await c.call_tool("ise_delete_certificate", {**args, "confirm": token}, raise_on_error=False)
+    assert r2.is_error
+    assert "in the GUI" in r2.content[0].text
+
+
 async def test_delete_nad(mock: respx.MockRouter) -> None:
     mock.get("/ers/config/networkdevice", params={"filter": "name.EQ.sw1"}).respond(
         json=ers_page([{"id": "n1", "name": "sw1"}])
