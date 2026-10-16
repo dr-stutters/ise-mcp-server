@@ -1,0 +1,7 @@
+{
+  "GET /api/v1/deployment/node": {"json": {"response": [{"hostname": "__NAME__", "roles": ["Standalone"], "services": ["Session"], "nodeStatus": "Connected"}]}},
+  "GET /ers/config/op/systemconfig/iseversion": {"json": {"OperationResult": {"resultValue": [{"name": "version", "value": "3.5.0.527"}, {"name": "patch information", "value": "3"}]}}},
+  "GET /admin/API/mnt/Version": {"text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><product name=\"Cisco Identity Services Engine\"><version>3.5.0.527</version><type_of_node>0</type_of_node></product>"},
+  "GET /ers/config/adminuser": {"json": {"SearchResult": {"total": 1, "resources": [{"id": "u1", "name": "mcp-ro"}]}}},
+  "GET /ers/config/adminuser/u1": {"json": {"AdminUser": {"name": "mcp-ro", "adminGroups": "ERS Operator,Read Only Admin"}}}
+}

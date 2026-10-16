@@ -1,12 +1,16 @@
-# ise-mcp-server: docker compose for one ISE deployment (host port 8033).
+# ise-mcp-server: docker compose for one ISE deployment (host port 8033). Shared hosts: docs/deploying.md.
 #
-#   cp .env.example .env    # set ISE_URL/USERNAME/PASSWORD and MCP_AUTH_TOKENS (ise-mcp-server token <name>)
-#   docker compose up -d --build
+#   cp .env.example .env && chmod 600 .env   # ISE_URL/USERNAME/PASSWORD and MCP_AUTH_TOKENS (one token per person)
+#   docker compose up -d            # pulls ghcr.io/dr-stutters/ise-mcp-server (MCP_IMAGE_TAG, default latest)
+#   docker compose up -d --build    # or build from this checkout (MCP_PULL_POLICY=build keeps the local image)
+#
+# Read-only unless .env sets MCP_ENABLE_WRITES=true (and MCP_ENABLE_DANGEROUS=true for CoA, ANC, deletes).
 services:
   ise-mcp-server:
+    image: ghcr.io/dr-stutters/ise-mcp-server:${MCP_IMAGE_TAG:-latest}
+    pull_policy: ${MCP_PULL_POLICY:-always}
     build:
       context: .
-    image: ise-mcp-server:latest
     container_name: ise-mcp-server
     restart: unless-stopped
     env_file: .env
