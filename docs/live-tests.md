@@ -59,7 +59,8 @@ The switch flow tests (`ISE_LIVE_SWITCH_MAC`), `test_live_policy_explain` and th
   `mcp-test-dot1x` (Internal Users);
 - authorization rules `mcp-test-anc-quarantine` (`Session:ANCPolicy equals mcp-test-quarantine` ->
   profile `mcp-test-quarantine`, SGT Quarantined_Systems), `mcp-test-mab-permit` (Wired_MAB -> profile
-  `mcp-test-permit`, SGT Employees), `mcp-test-eaptls` (802.1X + EAP-TLS) and, for the AD check,
+  `mcp-test-permit`, SGT Employees), `mcp-test-eaptls` (802.1X + EAP-TLS; any name
+  starting with `mcp-test-eaptls` counts) and, for the AD check,
   `mcp-test-ad-employees`
   (`<join point>:ExternalGroups equals <ISE_LIVE_AD_GROUP>`);
 - ANC policy `mcp-test-quarantine` (QUARANTINE).
