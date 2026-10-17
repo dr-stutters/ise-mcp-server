@@ -164,6 +164,8 @@ DELETE_KINDS = {
     "ad_join_point": "activedirectory",
     "tacacs_server": "tacacsexternalservers",
     "tacacs_sequence": "tacacsserversequence",
+    "sponsor_group": "sponsorgroup",
+    "guest_type": "guesttype",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -979,6 +981,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "ad_join_point",
                 "tacacs_server",
                 "tacacs_sequence",
+                "sponsor_group",
+                "guest_type",
             ],
             Field(description="What to delete"),
         ],
@@ -987,7 +991,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
         SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server
-        sequence, or AD join point (after ise_leave_ad). Preview-first: shows
+        sequence, AD join point (after ise_leave_ad), sponsor group or guest type (guest accounts:
+        ise_delete_guest_user). Preview-first: shows
         the object and what still references it (e.g. rules using a profile, which blocks the delete).
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
@@ -1028,6 +1033,14 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             if (await join_status(app, current)).get("joined"):
                 blockers.append(f"{name} is still joined to {current.get('domain')}: ise_leave_ad first")
             side.append(f"Policy conditions on {name}:ExternalGroups stop working")
+        if kind in ("sponsor_group", "guest_type") and (
+            current.get("isDefaultGroup") or current.get("isDefaultType")
+        ):
+            blockers.append(f"{name} is one of ISE's default {kind.replace('_', ' ')}s and can't be deleted")
+        if kind == "sponsor_group":
+            side.append("Its members can no longer sponsor guests (existing guest accounts stay)")
+        if kind == "guest_type":
+            side.append("Sponsors can no longer create this type; ISE refuses while guest accounts use it")
         blockers += await references(app, kind, current)
         if kind in ("identity_group", "endpoint_group", "sgt"):
             side.append(

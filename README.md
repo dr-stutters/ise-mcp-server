@@ -150,6 +150,9 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_EXPORT_DIR` | unset | Directory `ise_export_config` writes to and `ise_diff_config` reads from (relative paths resolve there); unset: absolute `*.yaml` paths only. Set it on a shared host |
 | `ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS` | | Comma lists; a CoA/ANC/NAD-delete on any of these is blocked (safety rails, I18) |
 | `ISE_COA_ALLOW_SHARED_PORT` | `false` | Allow `port_bounce`/`port_shutdown` on a switch port with more than one live session (an uplink/trunk) |
+| `ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD` | unset | Sponsor account for the guest-account tools (password also via `_FILE` / `_REF`; never shown). See [Guest access](#guest-access) |
+| `ISE_SPONSOR_PORTAL` | the only sponsor portal | Sponsor portal (name or id) sent as the guest API's `portalId` |
+| `ISE_GUEST_TIMEZONE` | unset | IANA time zone of the guest location; guest dates are in that local time |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
 | `MCP_AUTH_TOKENS` | | `name:sha256:<hex>` entries; required for HTTP (`ise-mcp-server token <name>`) |
@@ -171,6 +174,8 @@ so install from a release wheel rather than `git+https://...`.
    - Writes: **ERS Admin** plus a group that can change policy/network resources, e.g. **Network Device
      Admin** and **Policy Admin**. MnT CoA needs **MnT Admin** (or Super Admin).
 3. For read-only use, keep `MCP_ENABLE_WRITES=false`. The write tools aren't registered at all then.
+4. Guest accounts are managed with a separate **sponsor** account, not this one (the ERS admin gets 401
+   on guest users): see [Guest access](#guest-access).
 
 See [docs/least-privilege.md](docs/least-privilege.md) for the full tier → admin-group mapping, how to
 create the accounts and the read-tier verification test.
@@ -254,11 +259,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-128 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 68 read tools plus `ise_api_call` (GET-only) are registered. Everything
+142 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 74 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (68)
+### Read (74)
 
 | Tool | What it does |
 |---|---|
@@ -279,6 +284,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_dacl` | One downloadable ACL with its full ACE text (one ACE per line), IP version and description. |
 | `ise_get_definition` | Describe a Cisco ISE API operation (parameters, request fields, required fields) or a schema (fields with types and enums). |
 | `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status. |
+| `ise_get_guest_locations` | Guest locations (each carries a time zone in the GUI; guest dates are in that local time) and the guest SSIDs sponsors can pick. |
+| `ise_get_guest_user` | One guest account: status (with what it means), guest type, validity window, location/SSID, sponsor, contact details, visit reason. |
 | `ise_get_internal_user` | One internal user: enabled state, identity group names, names/email, password store, expiry, created/modified dates and custom attributes. |
 | `ise_get_license_status` | Licensing summary: smart-licensing registration state, connection type, evaluation period, and per-tier (Essentials/Advantage/Premier/Device Admin/...) status, compliance and consumption. |
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
@@ -302,6 +309,9 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_endpoint_groups` | List endpoint identity groups (e.g. |
 | `ise_list_endpoints` | List endpoints ISE knows about (seen via RADIUS/profiling or added by hand): MAC, endpoint identity group, whether the group is static, profile, IP and description. |
 | `ise_list_failure_reasons` | Decode ISE authentication failure reasons from the MnT catalog (~800 entries): code, reason, cause and resolution, plus a curated 'likely cause / next step' for common codes. |
+| `ise_list_guest_portals` | Sponsor, sponsored-guest, self-registration and hotspot portals with their key settings: HTTPS port, identity source (sequence) for logins, certificate group, SSIDs, AUP, access code, self-registration, and the test URL. |
+| `ise_list_guest_types` | Guest types (Daily, Weekly, Contractor, custom): default and maximum account duration, whether time counts from first login, day/time limits, simultaneous-login and device limits, the identity group guests land in (what authz rules match), and the sponsor groups allowed to use the type. |
+| `ise_list_guest_users` | Guest accounts the sponsor (ISE_SPONSOR_USERNAME) can manage: status, guest type, valid from/to (location time), location, the sponsor who created each, and contact details. |
 | `ise_list_identity_groups` | List user identity groups (e.g. |
 | `ise_list_identity_sources` | List where ISE looks users up: identity source sequences (with their ordered stores), Active Directory join points (domain, status) and LDAP servers. |
 | `ise_list_internal_users` | List users in the ISE internal user store: username, enabled/disabled, identity groups and email. |
@@ -319,6 +329,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
+| `ise_list_sponsor_groups` | Sponsor groups: member groups (ISE identity groups, or AD groups as '<join point>:<domain>/<path>/<group>'), the guest types and locations their sponsors may use, which guests they manage (own / group / all), whether they may use the guest REST API (rest_access, needed by ISE_SPONSOR_USERNAME) and their other permissions. |
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
@@ -331,7 +342,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (43)
+### Write (51)
 
 | Tool | What it does |
 |---|---|
@@ -344,19 +355,23 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_authz_profile` | Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL, reauth timer, voice domain. |
 | `ise_create_authz_rule` | Add an authorization rule (or local exception) to a policy set: conditions -> result. |
 | `ise_create_group` | Create a user identity group or an endpoint identity group, for policy to match on and for users/endpoints to be placed in. |
+| `ise_create_guest_user` | Create a guest account as the sponsor (ISE_SPONSOR_USERNAME), like the sponsor portal does. |
 | `ise_create_internal_user` | Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given identity groups. |
 | `ise_create_nad` | Add a network access device (switch, WLC, VPN) so ISE accepts its RADIUS and/or TACACS+ requests. |
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
 | `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, or AD join point (after ise_leave_ad). |
+| `ise_delete_guest_user` | Delete a guest account as the sponsor. |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group or guest type (guest accounts: ise_delete_guest_user). |
 | `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
+| `ise_extend_guest_user` | Move a guest account's end date (as the sponsor). |
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
 | `ise_import_trusted_cert` | Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth). |
 | `ise_issue_pxgrid_client_cert` | Issue the certificate an external pxGrid consumer (FMC, a SIEM) authenticates to ISE with. |
+| `ise_reinstate_guest_user` | Reinstate a suspended guest account as the sponsor (logins work again until valid_to). |
 | `ise_release_rejected_endpoint` | Release endpoints from ISE's rejected list (Context Visibility > Rejected Endpoints), e.g. |
 | `ise_set_cert_auth_profile` | A certificate authentication profile tells ISE how to read an EAP-TLS client certificate: which field is the username, and optionally which identity store to look it up in. |
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
@@ -364,16 +379,20 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_dacl` | Create a downloadable ACL, or replace an existing one's ACEs. |
 | `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply and the final catch-all. |
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
+| `ise_set_guest_type` | Create a guest type, or change one: account duration (default and maximum, in days, hours or minutes, optionally from first login), login and device limits, the identity group guests get, and the sponsor groups that may use it. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
 | `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
+| `ise_set_sponsor_group` | Create a sponsor group, or change one: map AD groups (ise_add_ad_groups first, so the join point offers them) or ISE identity groups as sponsors, pick the guest types and locations they may use, what they manage, and REST access. |
 | `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
 | `ise_set_tacacs_server` | Create a TACACS+ external server (a TACACS+ server ISE proxies device-admin requests to, used through a TACACS+ server sequence), or update an existing one: given fields change, others are kept. |
 | `ise_set_tacacs_server_sequence` | Create a TACACS+ server sequence (an ordered list of TACACS+ external servers a device-admin policy set can proxy to), or update one: given fields change, others are kept. |
+| `ise_suspend_guest_user` | Suspend a guest account as the sponsor: logins fail until ise_reinstate_guest_user. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or description. |
+| `ise_update_guest_user` | Change a guest's contact or visit details as the sponsor. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port or name. |
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
@@ -490,6 +509,20 @@ password, 24409 disabled, 24415 locked out, 24412/22056 not found, and 15039 whe
 matched), and `ise_policy_explain(ad_user=...)` fills `<join point>:ExternalGroups` so AD-group rules
 evaluate. ISE must resolve the domain through its name server (CLI `ip name-server`) and reach the DC on
 53/88/389/445/3268 with NTP in sync. `ise_leave_ad`, then `ise_delete_object kind=ad_join_point`, removes it.
+
+### Guest access
+Guest types, sponsor groups, portals and locations are read and written with the admin account
+(`ise_list_guest_types`, `ise_list_sponsor_groups`, `ise_list_guest_portals`, `ise_get_guest_locations`,
+`ise_set_guest_type`, `ise_set_sponsor_group`). Guest accounts (ERS `guestuser`) answer only to a
+**sponsor**: set `ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD` to an internal or AD user in a sponsor
+group with REST access (`ise_set_sponsor_group rest_access=true`; AD groups need `ise_add_ad_groups`
+first). `ise_status` and `ise-mcp-server check` show whether ISE accepts it (the password only as set).
+Then `ise_create_guest_user` -> `ise_list_guest_users` / `ise_get_guest_user` -> `ise_extend_guest_user`,
+`ise_update_guest_user`, `ise_suspend_guest_user` / `ise_reinstate_guest_user`, `ise_delete_guest_user`.
+The guest's password is returned once, on confirm of `ise_create_guest_user` (random unless given), and is
+masked everywhere else. A sponsor sees only the guests its group may manage (own, group or all). Guest
+dates are in the guest location's local time (`ISE_GUEST_TIMEZONE`; unset, new accounts start at "now" in
+UTC-12 so they are never in the future). Portal creation, pages and themes stay in the GUI.
 
 ### TrustSec / SXP
 `ise_set_sxp_connection` takes the device's role (`peer_role`, ISE's "Peer Role"). LISTENER means the

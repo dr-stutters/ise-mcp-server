@@ -24,6 +24,14 @@ restricts *the server's own* ISE account. Use both.
 | read + write (`MCP_ENABLE_WRITES=true`) | `mcp-test-rw` | **ERS Admin**, **Policy Admin**, **Network Device Admin**, **Identity Admin**, **MnT Admin** |
 | + dangerous (`MCP_ENABLE_DANGEROUS=true`) | `mcp-test-admin` | **Super Admin** |
 
+**Guest accounts use a second, non-admin identity.** ERS `guestuser` answers only to a sponsor
+(`ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD`), not to any admin group: a user (internal or AD) in a
+sponsor group with **Access Cisco ISE guest accounts using the programmatic interface**. Scope it like an
+admin account: **own accounts** (or the group's) rather than all, only the guest types and locations it
+needs, **View guests' passwords** off, and no self-registration approval unless used. Guest types,
+sponsor groups and portals are read with the admin account (ERS Operator) and written with ERS Admin.
+Setup: [deploying.md](deploying.md#guest-sponsor-guest-account-tools).
+
 ## 1. Read-only account: `mcp-test-ro` (ERS Operator + Read Only Admin)
 
 **What it allows**
