@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.11.0 (unreleased)
+
+### Added
+- **Config export and diff (I42, #8).** `ise_export_config(scope, path)` exports policy sets with their
+  authentication, authorization and local/global exception rules (network access and device admin),
+  authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and
+  endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, and TACACS+ command
+  sets and shell profiles as YAML. References are names (SGTs and SGACLs in egress cells, endpoint group
+  parents), conditions use the write tools' `Dictionary:Attribute operator value` / library-name syntax,
+  rules keep their rank and everything else is sorted by name, and ids, links, hit counts and timestamps are
+  left out, so two exports of an unchanged ISE are byte-identical apart from `exported_at`. A header carries
+  the format version, ISE version, PAN hostname, export time, server version, sections, counts and a digest.
+  Returned inline or written to a `.yaml` file. `ise_diff_config(before, after="live")` compares two
+  exports, or an export with live ISE, by section: added, removed and changed objects with field-level
+  changes; rules match by policy set + rule name, and a rule whose relative order changed is reported as
+  moved (one inserted above it is not). Format: `docs/config-export.md` (the input for I43 and I46).
+- `ISE_EXPORT_DIR`: confines export files to a directory (relative paths resolve there). Without it, only
+  absolute `*.yaml` paths are accepted, and an existing file is only overwritten when it is an earlier export.
+
+### Changed
+- New runtime dependency: PyYAML (`types-PyYAML` for mypy in the dev group).
+
 ## 0.10.0 (unreleased)
 
 ### Added
