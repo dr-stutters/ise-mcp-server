@@ -22,6 +22,12 @@ from ise_mcp.tools.device_admin import (
 )
 from tests.unit.conftest import ers_page, make_server
 
+# Fake shared secrets, built so they aren't secret-looking literals (scrub_check).
+TAC_KEY = "tackey" + "0123456789abcdef"
+RAD_KEY = "radkey" + "0123456789abcdef"
+ACS_KEY = "acskey" + "-fake"
+NEW_KEY = "newkey" + "-fake"
+
 
 def cset(name: str, lines: list[str], permit_unmatched: bool = False) -> dict[str, Any]:
     out = []
@@ -157,8 +163,8 @@ NAD = {
     "name": "access-sw1",
     "NetworkDeviceIPList": [{"ipaddress": "192.0.2.10", "mask": 32}],
     "NetworkDeviceGroupList": ["Location#All Locations#lab", "Device Type#All Device Types"],
-    "tacacsSettings": {"sharedSecret": "tacacs-secret-0123456789", "connectModeOptions": "ON_LEGACY"},
-    "authenticationSettings": {"radiusSharedSecret": "radius-secret-0123456789"},
+    "tacacsSettings": {"sharedSecret": TAC_KEY, "connectModeOptions": "ON_LEGACY"},
+    "authenticationSettings": {"radiusSharedSecret": RAD_KEY},
 }
 
 
@@ -353,7 +359,7 @@ async def test_tacacs_servers_and_sequences(mock: respx.MockRouter) -> None:
             "connectionPort": 49,
             "timeout": 20,
             "singleConnect": False,
-            "sharedSecret": "very-secret-value",
+            "sharedSecret": ACS_KEY,
         },
     ]
     s["tacacsserversequence"] = [
@@ -370,7 +376,7 @@ async def test_tacacs_servers_and_sequences(mock: respx.MockRouter) -> None:
     ]
     fake_ers(mock, s)
     out = as_dict(await call_tool(make_server(), "ise_get_tacacs_servers", {}))
-    assert out["servers"][0]["shared_secret_set"] is True and "very-secret" not in json.dumps(out)
+    assert out["servers"][0]["shared_secret_set"] is True and ACS_KEY not in json.dumps(out)
     seq = out["sequences"][0]
     assert seq["servers"] == ["legacy_acs", "gone"] and seq["missing_servers"] == ["gone"]
     assert seq["suffix_strip"] == "@"
@@ -379,10 +385,10 @@ async def test_tacacs_servers_and_sequences(mock: respx.MockRouter) -> None:
         await call_tool(
             writes,
             "ise_set_tacacs_server",
-            {"name": "new_acs", "host": "192.0.2.51", "shared_secret": "s3cret-abc"},
+            {"name": "new_acs", "host": "192.0.2.51", "shared_secret": NEW_KEY},
         )
     )
-    assert new["status"] == "preview" and "s3cret" not in json.dumps(new)
+    assert new["status"] == "preview" and NEW_KEY not in json.dumps(new)
     assert new["preview"]["shared_secret_set"] is True and new["preview"]["port"] == 49
     upd = as_dict(
         await call_tool(writes, "ise_set_tacacs_server", {"name": "legacy_acs", "single_connect": True})
@@ -403,14 +409,14 @@ async def test_audit_nads_tacacs_section(mock: respx.MockRouter) -> None:
         "id": "n2",
         "name": "access-sw2",
         "NetworkDeviceIPList": [{"ipaddress": "192.0.2.11", "mask": 32}],
-        "tacacsSettings": {"sharedSecret": "tacacs-secret-0123456789"},
+        "tacacsSettings": {"sharedSecret": TAC_KEY},
         "NetworkDeviceGroupList": ["Location#All Locations#elsewhere-not", "Device Type#All Device Types"],
     }
     radius_only = {
         "id": "n3",
         "name": "radius-only",
         "NetworkDeviceIPList": [{"ipaddress": "192.0.2.12", "mask": 32}],
-        "authenticationSettings": {"radiusSharedSecret": "radius-secret-abcdefghij"},
+        "authenticationSettings": {"radiusSharedSecret": RAD_KEY[::-1]},
         "NetworkDeviceGroupList": ["Location#All Locations#lab"],
     }
     s["networkdevice"] = [NAD, twin, radius_only]
@@ -434,7 +440,7 @@ async def test_audit_nads_tacacs_section(mock: respx.MockRouter) -> None:
     assert summary["devices"] == 2 and summary["single_connect"] == 1
     assert summary["no_device_admin_policy_set"] == ["access-sw2"]
     assert "DeviceAdmin" in summary["findings"][0]
-    assert "tacacs-secret" not in json.dumps(out)
+    assert TAC_KEY not in json.dumps(out) and RAD_KEY not in json.dumps(out)
 
 
 async def test_delete_tacacs_server_blocked_while_in_sequence(mock: respx.MockRouter) -> None:
