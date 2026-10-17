@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 import pytest
 import respx
 from fastmcp import Client
@@ -385,3 +386,59 @@ async def test_authz_rule_accepts_custom_attribute_missing_from_dictionary(mock:
         },
     )
     assert bad["status"] == "blocked"
+
+
+EXT = {"dictionaryName": "CORP", "name": "ExternalGroups", "dataType": "STRING", "allowedValues": []}
+EXT_RULE = {
+    "policy_set": "wired",
+    "name": "Staff",
+    "conditions": ["CORP:ExternalGroups equals corp.lab/Users/staff"],
+    "profiles": ["PermitAccess"],
+}
+
+
+def authz_mocks(mock: respx.MockRouter) -> respx.Route:
+    """policy_mocks with an authorization dictionary route the test can re-program."""
+    policy_mocks(mock)
+    mock.get(f"{NA}/authorization-profiles").respond(json=[{"name": "PermitAccess"}])
+    mock.get(f"{NA}/policy-set/s1/authorization").respond(json={"response": []})
+    return mock.get(f"{NA}/dictionaries/authorization")
+
+
+async def test_unknown_attribute_refetches_a_stale_dictionary(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ise_mcp.tools.policy_edit.DICT_RECHECK_AGE", 0.0)
+    route = authz_mocks(mock)
+    route.side_effect = [
+        httpx.Response(200, json={"response": ATTRS}),
+        httpx.Response(200, json={"response": [*ATTRS, EXT]}),
+    ]
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        out = (await c.call_tool("ise_create_authz_rule", EXT_RULE)).structured_content
+    assert out is not None and out["status"] == "preview", out
+    assert route.call_count == 2
+
+
+async def test_unknown_attribute_trusts_a_seconds_old_dictionary(mock: respx.MockRouter) -> None:
+    route = authz_mocks(mock)
+    route.respond(json={"response": ATTRS})
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        out = (await c.call_tool("ise_create_authz_rule", EXT_RULE)).structured_content
+    assert out is not None and out["status"] == "blocked"
+    assert "Unknown attribute CORP:ExternalGroups" in out["blockers"][0]
+    assert route.call_count == 1
+
+
+async def test_known_attributes_never_refetch(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ise_mcp.tools.policy_edit.DICT_RECHECK_AGE", 0.0)
+    route = authz_mocks(mock)
+    route.respond(json={"response": ATTRS})
+    args = {**EXT_RULE, "conditions": ["Radius:NAS-Port-Type equals Wifi"]}
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        out = (await c.call_tool("ise_create_authz_rule", args)).structured_content
+    assert out is not None and out["status"] == "blocked"
+    assert "allowed: Ethernet, Virtual" in out["blockers"][0]
+    assert route.call_count == 1
