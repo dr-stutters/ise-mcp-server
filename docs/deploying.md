@@ -43,6 +43,34 @@ Give the server its own ISE admin account, sized to the tiers you enable. Full m
    `role` fails when an enabled tier isn't allowed and warns when the account holds more than the server
    needs (a Super Admin behind a read-only server). `ise_deployment_health` reports the same at run time.
 
+### Guest sponsor (guest-account tools)
+
+ISE's guest API (ERS `guestuser`) refuses the ERS admin (401): guest accounts are created, extended,
+suspended and deleted as a **sponsor**, the way the sponsor portal does it. Guest types, sponsor groups
+and portals need no sponsor; they use the account above.
+
+1. Pick the sponsor identity: an ISE internal user or an AD user (the sponsor portal's identity source
+   sequence, `Sponsor_Portal_Sequence` by default, includes the AD join points). For AD, add its group to
+   the join point (`ise_add_ad_groups`).
+2. Map it into a sponsor group with REST access: **Work Centers > Guest Access > Portals & Components >
+   Sponsor Groups**, member groups = that identity/AD group, tick **Access Cisco ISE guest accounts using
+   the programmatic interface (Guest REST API)**, pick the guest types and locations, and the narrowest
+   manage scope that works (**own accounts** for a bot). Or `ise_set_sponsor_group ... rest_access=true`.
+   Leave **View guests' passwords** off: the server never shows a guest password after creating it.
+3. Give the server the sponsor: `ISE_SPONSOR_USERNAME` (e.g. `guest-bot`) and the password kept out of
+   `.env` as a Docker secret (`ISE_SPONSOR_PASSWORD_FILE`) or a reference (`ISE_SPONSOR_PASSWORD_REF`), like
+   `ISE_PASSWORD` above. Optional: `ISE_SPONSOR_PORTAL` (the sponsor portal's name or id, only when there
+   are several) and `ISE_GUEST_TIMEZONE` (the guest location's IANA time zone, e.g. `Europe/London`).
+
+4. `ise-mcp-server check` adds a `sponsor` row (skip when unset, fail when ISE refuses it) and
+   `ise_status` a `guest_sponsor` block; neither shows the password. The guest-account write tools also
+   need `MCP_ENABLE_WRITES=true`.
+
+The guest API takes the **sponsor** portal's id (`portalId`), not a guest portal's. Guest start and end
+dates are in the guest location's local time; ISE does not expose that zone over REST, hence
+`ISE_GUEST_TIMEZONE`. When it is unset, new accounts start at "now" in UTC-12 (never in the future
+anywhere, since ISE accepts past starts) and may end up to a day early.
+
 ## 3. Per-user tokens (names in the audit log)
 
 Give each person their own token; the token's name is the caller identity in previews, the audit log and

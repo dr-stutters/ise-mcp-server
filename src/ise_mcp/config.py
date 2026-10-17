@@ -2,8 +2,9 @@
 
 from pathlib import Path
 from typing import ClassVar
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 
 from ise_mcp._core import BaseServerSettings, server_config
 
@@ -11,7 +12,11 @@ from ise_mcp._core import BaseServerSettings, server_config
 class Settings(BaseServerSettings):
     model_config = server_config("ISE_")
     # A second ISE (ISE_INSTANCES=prod) may run ERS on another port: never inherit it (core G10).
-    per_instance_fields: ClassVar[frozenset[str]] = frozenset({"ers_port"})
+    # Sponsor accounts and portals belong to one deployment too (the sponsor password is a secret, so it
+    # is never inherited anyway).
+    per_instance_fields: ClassVar[frozenset[str]] = frozenset(
+        {"ers_port", "sponsor_username", "sponsor_portal", "guest_timezone"}
+    )
 
     # ERS listens on 9060 on older releases and on 443 on newer ones (ISE 3.1+ can serve both).
     ers_port: int = Field(default=443, ge=1, le=65535, description="ERS API port (ISE_ERS_PORT)")
@@ -52,3 +57,34 @@ class Settings(BaseServerSettings):
     coa_allow_shared_port: bool = Field(
         default=False, description="Allow port_bounce/shutdown on a shared port (ISE_COA_ALLOW_SHARED_PORT)"
     )
+
+    # --- guest accounts (I31) -------------------------------------------------------------------
+    # ERS guestuser calls run as a *sponsor* (a user in a sponsor group with "Access ISE guest accounts
+    # using the programmatic interface"), never as the ERS admin. Without these the guest-account tools
+    # explain what to set; guest types, sponsor groups and portals still work with the admin account.
+    sponsor_username: str | None = Field(
+        default=None, description="Sponsor account for guest-account tools (ISE_SPONSOR_USERNAME)"
+    )
+    sponsor_password: SecretStr | None = Field(
+        default=None, description="Sponsor password (ISE_SPONSOR_PASSWORD, _FILE or _REF)"
+    )
+    sponsor_portal: str | None = Field(
+        default=None,
+        description="Sponsor portal name or id sent as portalId (ISE_SPONSOR_PORTAL); default: the only "
+        "sponsor portal, else 'Sponsor Portal (default)'",
+    )
+    # ISE reads guest start/end dates in the guest location's local time and has no API for that zone.
+    guest_timezone: str | None = Field(
+        default=None,
+        description="IANA time zone of the guest location, e.g. Europe/London (ISE_GUEST_TIMEZONE)",
+    )
+
+    @field_validator("guest_timezone")
+    @classmethod
+    def _check_zone(cls, v: str | None) -> str | None:
+        if v:
+            try:
+                ZoneInfo(v)
+            except (ZoneInfoNotFoundError, ValueError) as e:
+                raise ValueError(f"ISE_GUEST_TIMEZONE {v!r} is not an IANA time zone") from e
+        return v or None

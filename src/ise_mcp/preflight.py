@@ -6,9 +6,9 @@ groups vs the enabled tiers (docs/least-privilege.md) and the ISE version vs the
 
 from __future__ import annotations
 
-from ise_mcp._core import UpstreamError
+from ise_mcp._core import AuthError, UpstreamError
 from ise_mcp._core.preflight import Outcome, Preflight
-from ise_mcp.client import IseApp
+from ise_mcp.client import SPONSOR_AUTH_HINT, IseApp
 from ise_mcp.config import Settings
 from ise_mcp.xmlutil import parse_xml
 
@@ -74,6 +74,35 @@ async def admin_groups(app: IseApp) -> list[str] | None:
     return [g.strip() for g in str(groups).split(",") if g.strip()]
 
 
+async def sponsor_check(app: IseApp, pf: Preflight) -> None:
+    """The guest sponsor account (I31): set or not, and whether ERS accepts it for guestuser."""
+    if app.sponsor is None:
+        pf.skip(
+            "sponsor",
+            "ISE_SPONSOR_USERNAME/PASSWORD not set: guest-account tools are unavailable (guest types, "
+            "sponsor groups and portals use the admin account)",
+        )
+        return
+    try:
+        await app.sponsor.request(
+            "GET",
+            "/ers/config/guestuser",
+            params={"size": 1},
+            timeout=app.settings.probe_timeout,
+            retry=False,
+        )
+    except AuthError:
+        pf.fail(
+            "sponsor",
+            f"ISE refused sponsor {app.sponsor_username!r} for the guest API",
+            hint=SPONSOR_AUTH_HINT,
+        )
+    except UpstreamError as e:
+        pf.warn("sponsor", f"guest API check for sponsor {app.sponsor_username!r} failed: {e}")
+    else:
+        pf.ok("sponsor", f"sponsor {app.sponsor_username!r} can use the guest API")
+
+
 async def preflight(settings: Settings, pf: Preflight) -> None:
     app = IseApp(settings)
     try:
@@ -108,5 +137,7 @@ async def preflight(settings: Settings, pf: Preflight) -> None:
                 role=", ".join(groups),
             )
         pf.version(ers_version or mnt_version, tested=TESTED, minimum=MINIMUM)
+        if ers_version is not None or ers_row.outcome is Outcome.OK:
+            await sponsor_check(app, pf)
     finally:
         await app.aclose()

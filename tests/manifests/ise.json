@@ -156,6 +156,10 @@
       "tier": "write",
       "title": "Create identity or endpoint group"
     },
+    "ise_create_guest_user": {
+      "tier": "write",
+      "title": "Create a guest account"
+    },
     "ise_create_internal_user": {
       "tier": "write",
       "title": "Create internal user"
@@ -183,6 +187,10 @@
     "ise_delete_csr": {
       "tier": "write",
       "title": "Delete a CSR"
+    },
+    "ise_delete_guest_user": {
+      "tier": "write",
+      "title": "Delete a guest account"
     },
     "ise_delete_nad": {
       "tier": "dangerous",
@@ -240,6 +248,10 @@
       "tier": "read",
       "title": "Export a CSR (PEM)"
     },
+    "ise_extend_guest_user": {
+      "tier": "write",
+      "title": "Extend a guest account"
+    },
     "ise_find_session": {
       "tier": "read",
       "title": "Find a session"
@@ -279,6 +291,14 @@
     "ise_get_egress_matrix": {
       "tier": "read",
       "title": "TrustSec egress matrix"
+    },
+    "ise_get_guest_locations": {
+      "tier": "read",
+      "title": "Guest locations and SSIDs"
+    },
+    "ise_get_guest_user": {
+      "tier": "read",
+      "title": "Get a guest account"
     },
     "ise_get_internal_user": {
       "tier": "read",
@@ -392,6 +412,18 @@
       "tier": "read",
       "title": "Search failure reasons"
     },
+    "ise_list_guest_portals": {
+      "tier": "read",
+      "title": "List guest and sponsor portals"
+    },
+    "ise_list_guest_types": {
+      "tier": "read",
+      "title": "List guest types"
+    },
+    "ise_list_guest_users": {
+      "tier": "read",
+      "title": "List guest accounts"
+    },
     "ise_list_identity_groups": {
       "tier": "read",
       "title": "List user identity groups"
@@ -460,6 +492,10 @@
       "tier": "read",
       "title": "List TACACS+ shell profiles"
     },
+    "ise_list_sponsor_groups": {
+      "tier": "read",
+      "title": "List sponsor groups"
+    },
     "ise_list_sxp_bindings": {
       "tier": "read",
       "title": "List SXP bindings"
@@ -487,6 +523,10 @@
     "ise_recent_auth_failures": {
       "tier": "read",
       "title": "Recent authentication failures"
+    },
+    "ise_reinstate_guest_user": {
+      "tier": "write",
+      "title": "Reinstate a suspended guest account"
     },
     "ise_release_rejected_endpoint": {
       "tier": "write",
@@ -524,6 +564,10 @@
       "tier": "write",
       "title": "Create or update an endpoint"
     },
+    "ise_set_guest_type": {
+      "tier": "write",
+      "title": "Create or update a guest type"
+    },
     "ise_set_identity_sequence": {
       "tier": "write",
       "title": "Create or update an identity source sequence"
@@ -548,6 +592,10 @@
       "tier": "write",
       "title": "Create or update a TACACS+ shell profile"
     },
+    "ise_set_sponsor_group": {
+      "tier": "write",
+      "title": "Create or update a sponsor group"
+    },
     "ise_set_sxp_connection": {
       "tier": "write",
       "title": "Create or update an SXP connection"
@@ -564,6 +612,10 @@
       "tier": "read",
       "title": "Cisco ISE status"
     },
+    "ise_suspend_guest_user": {
+      "tier": "write",
+      "title": "Suspend a guest account"
+    },
     "ise_test_ad_user": {
       "tier": "read",
       "title": "Test an AD user (lookup + groups)"
@@ -575,6 +627,10 @@
     "ise_update_authz_profile": {
       "tier": "write",
       "title": "Update authorization profile"
+    },
+    "ise_update_guest_user": {
+      "tier": "write",
+      "title": "Update a guest account's details"
     },
     "ise_update_internal_user": {
       "tier": "write",

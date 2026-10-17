@@ -35,6 +35,8 @@ are placeholders; use your lab's.
 | `ISE_LIVE_DADM_NAD` | `test_live_device_admin` | A NAD with a TACACS+ secret whose device sends VTY login, exec and level-15 command authorization to this ISE (`aaa authorization commands 15 ... group <tacacs> local`) | `access-sw1` |
 | `ISE_LIVE_DADM_HOST` | `test_live_device_admin` | That device's SSH address, reachable from the test host (`ssh` and `sshpass` installed) | `192.0.2.10` |
 | `ISE_LIVE_REPROFILE_MAC` | `test_live_profiler` (reprofile) | MAC of a real endpoint with a live session through a switch that answers CoA; it gets one CoA reauth. `test_live_profiler` otherwise creates and deletes only `mcp-prof-*` custom profiling rules | `52:54:00:12:34:56` |
+| `ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD` | `test_live_guest` | A sponsor in a sponsor group with guest REST API access that may use `Daily (default)` and at least one location; the tests create, extend, suspend, reinstate and delete `mcp-guest-live-*` accounts, and create and delete `mcp-guest-type-live` / `mcp-guest-sg-live` | `guest-bot` |
+| `ISE_LIVE_SPONSOR_GROUP` | `test_live_guest` | Optional: that sponsor's group; checked to have REST access | `guest-sponsors` |
 | `ISE_LIVE_SCALE` | `test_live_scale` | `1` to run the scale test (creates and deletes many endpoints; a few minutes) | `1` |
 | `ISE_RO_USERNAME` / `ISE_RO_PASSWORD` | `test_least_privilege` | The read-only admin account; see [least-privilege.md](least-privilege.md) | |
 

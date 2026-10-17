@@ -28,7 +28,6 @@
   the first failure with what was applied and what wasn't attempted; re-running plans from the new state.
 - `ISE_EXPORT_DIR`: confines export files to a directory (relative paths resolve there). Without it, only
   absolute `*.yaml` paths are accepted, and an existing file is only overwritten when it is an earlier export.
-
 - **Device admin (TACACS+) depth (I41, #7).** `ise_admin_policy_explain(user, nad, command)`: the
   device-admin policy set, authentication rule (identity source), authorization rule with its hit count,
   shell profile and the verdict for each command, client-side (internal users' identity groups are looked
@@ -54,6 +53,23 @@
   certainty factor is), and `ise_reprofile_endpoint` (dangerous tier: CoA reauth through the PSN that owns the
   session, sharing `ise_coa_reauth`'s routing and protect lists). Live tests in `tests/live/test_live_profiler.py`
   (`ISE_LIVE_REPROFILE_MAC` for the CoA).
+- **Guest + sponsor (I31, #16).** Reads with the admin account: `ise_list_guest_types` (durations, login
+  and device limits, identity group, sponsor groups), `ise_list_sponsor_groups` (member identity/AD groups,
+  guest types, locations, own/group/all scope, REST access, permissions), `ise_list_guest_portals` (sponsor,
+  sponsored-guest, self-registration and hotspot portals with key settings) and `ise_get_guest_locations`
+  (locations and SSIDs). Writes: `ise_set_sponsor_group` (map AD groups added to a join point, or identity
+  groups, as sponsors) and `ise_set_guest_type` (create or update), and `ise_delete_object` kinds
+  `sponsor_group` / `guest_type` (ISE's defaults are blocked). Guest accounts run as a **sponsor**
+  (`ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD`, `_FILE` / `_REF`; the ERS admin gets 401):
+  `ise_list_guest_users`, `ise_get_guest_user` (status, validity, sponsor), `ise_create_guest_user`,
+  `ise_update_guest_user`, `ise_extend_guest_user` (blocked past the guest type's maximum),
+  `ise_suspend_guest_user` / `ise_reinstate_guest_user` and `ise_delete_guest_user`, all preview-first. The
+  guest password is returned once on confirm of the create (random by default, fitting ISE's default guest
+  password policy) and never shown otherwise. `ISE_SPONSOR_PORTAL` picks the sponsor portal sent as
+  `portalId`; `ISE_GUEST_TIMEZONE` is the guest location's zone for start/end dates. `ise_status` gains a
+  `guest_sponsor` block and `ise-mcp-server check` a `sponsor` row (password never shown). Setup:
+  `docs/deploying.md` (Guest sponsor) and `docs/least-privilege.md`. Live-tested on ISE 3.5 with an AD
+  sponsor; portal creation and customisation stay in the GUI.
 
 ### Changed
 - New runtime dependency: PyYAML (`types-PyYAML` for mypy in the dev group).

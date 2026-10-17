@@ -22,6 +22,7 @@ from ise_mcp.tools import (
     device_admin,
     endpoint_bulk,
     endpoints,
+    guest,
     health,
     identity,
     network,
@@ -69,9 +70,13 @@ equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_u
 AD login failures. pxGrid (appliance to appliance; this server never subscribes): ise_pxgrid_status
 (persona, certificate chain + hostname as consumers see them, pending clients) -> ise_list_pxgrid_clients ->
 ise_approve_pxgrid_client; ise_set_pxgrid_settings (auto-approve); ise_issue_pxgrid_client_cert (key + CSR,
-then the signed bundle) for a consumer such as FMC. Names or ids are accepted wherever a tool
-takes an object. Shared secrets, SNMP communities and passwords are always masked (the one exception:
-ise_issue_pxgrid_client_cert returns the consumer's new private key once, on confirm). For anything without
+then the signed bundle) for a consumer such as FMC. Guest access: ise_list_guest_types /
+ise_list_sponsor_groups / ise_list_guest_portals (admin); guest accounts (ise_create_guest_user,
+ise_extend_guest_user, ise_suspend_guest_user, ...) run as the sponsor set in ISE_SPONSOR_USERNAME
+(ise_status shows guest_sponsor). Names or ids are accepted wherever a tool
+takes an object. Shared secrets, SNMP communities and passwords are always masked (the exceptions:
+ise_issue_pxgrid_client_cert returns the consumer's new private key once, and ise_create_guest_user the
+guest's password once, on confirm). For anything without
 a tool: ise_search_spec -> ise_get_definition -> ise_api_call(source=openapi|ers|mnt).
 """.strip()
 
@@ -116,6 +121,7 @@ def create_server(
             sxp.register,
             certs.register,
             ad.register,
+            guest.register,
             pxgrid.register,
             dangerous.register,
             workflows.register,

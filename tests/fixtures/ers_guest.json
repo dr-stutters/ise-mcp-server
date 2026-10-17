@@ -1,0 +1,104 @@
+{
+  "guestuser": {
+    "GuestUser": {
+      "id": "422837cf-4a84-4c1a-8fc2-513fb9cd02e1",
+      "name": "mcp-guest-alice",
+      "guestType": "Daily (default)",
+      "status": "AWAITING_INITIAL_LOGIN",
+      "sponsorUserName": "mcp-guest-sponsor",
+      "sponsorUserId": "0b69e300-9063-4d7b-82be-ae0a0bf67797",
+      "personBeingVisited": "bob@example.com",
+      "reasonForVisit": "Workshop",
+      "guestInfo": {
+        "userName": "mcp-guest-alice",
+        "firstName": "Alice",
+        "lastName": "Guest",
+        "company": "Example Ltd",
+        "emailAddress": "alice@example.com",
+        "creationTime": "10/16/2026 23:12",
+        "enabled": false,
+        "notificationLanguage": "English",
+        "password": "should-never-leak-1"
+      },
+      "guestAccessInfo": {
+        "validDays": 1,
+        "fromDate": "10/17/2026 06:12",
+        "toDate": "10/18/2026 06:12",
+        "location": "San Jose"
+      },
+      "customFields": {},
+      "link": {"rel": "self", "href": "https://ise.test/ers/config/guestuser/422837cf-4a84-4c1a-8fc2-513fb9cd02e1"}
+    }
+  },
+  "guesttype_daily": {
+    "GuestType": {
+      "id": "6883a248-0410-41bb-8653-5f7b0c304b4b",
+      "name": "Daily (default)",
+      "description": "Default settings allow network access for just 1-5 days.",
+      "isDefaultType": true,
+      "accessTime": {
+        "fromFirstLogin": false,
+        "maxAccountDuration": 5,
+        "durationTimeUnit": "DAYS",
+        "defaultDuration": 1,
+        "allowAccessOnSpecificDaysTimes": false,
+        "dayTimeLimits": [{"startTime": "09:00", "endTime": "17:00", "days": ["Monday"]}]
+      },
+      "loginOptions": {
+        "limitSimultaneousLogins": true,
+        "maxSimultaneousLogins": 3,
+        "failureAction": "Disconnect_Oldest_Connection",
+        "maxRegisteredDevices": 5,
+        "identityGroupId": "aa178bd0-8bff-11e6-996c-525400b48521",
+        "allowGuestPortalBypass": false
+      },
+      "expirationNotification": {"enableNotification": false},
+      "sponsorGroups": ["ALL_ACCOUNTS (default)", "mcp-guest-sponsors"],
+      "allowDynamicIdentityGroups": false,
+      "dynamicGroups": []
+    }
+  },
+  "sponsorgroup": {
+    "SponsorGroup": {
+      "id": "645c582e-3dc1-42fa-bb0c-44ffb191edc8",
+      "name": "mcp-guest-sponsors",
+      "description": "test sponsors",
+      "isEnabled": true,
+      "isDefaultGroup": false,
+      "memberGroups": ["CORP:corp.example.com/MCP-Lab/mcp-guest-sponsors"],
+      "guestTypes": ["Daily (default)"],
+      "locations": ["San Jose"],
+      "autoNotification": false,
+      "createPermissions": {"canImportMultipleAccounts": false, "importBatchSizeLimit": 200},
+      "managePermission": "OWNACCOUNTS",
+      "otherPermissions": {
+        "canUpdateGuestContactInfo": true,
+        "canViewGuestPasswords": false,
+        "canExtendGuestAccounts": true,
+        "canDeleteGuestAccounts": true,
+        "canSuspendGuestAccounts": true,
+        "canReinstateSuspendedAccounts": true,
+        "limitApprovalToSponsorsGuests": true,
+        "canAccessViaRest": true
+      }
+    }
+  },
+  "sponsorportal": {
+    "SponsorPortal": {
+      "id": "1f789a00-ad9d-4ec0-9a47-ce4909a65db2",
+      "name": "Sponsor Portal (default)",
+      "portalType": "SPONSOR",
+      "portalTestUrl": "https://ise.test:8445/sponsorportal/PortalSetup.action?portal=1f789a00",
+      "settings": {
+        "portalSettings": {
+          "httpsPort": 8445,
+          "certificateGroupTag": "Default Portal Certificate Group",
+          "authenticationMethod": "92faba60-8c01-11e6-996c-525400b48521",
+          "availableSsids": []
+        },
+        "loginPageSettings": {"includeAup": false},
+        "aupSettings": {"includeAup": true}
+      }
+    }
+  }
+}
