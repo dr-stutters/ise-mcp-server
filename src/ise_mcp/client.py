@@ -31,6 +31,12 @@ SURFACES = ("openapi", "ers", "mnt")
 ERS_NAME_PATH = {"authorizationprofile"}
 SAFE_MNT_PATH = re.compile(r"^[A-Za-z0-9_\-/.:@%+]+$")
 SAFE_RESOURCE = re.compile(r"^[a-z]+$")
+SPONSOR_AUTH_HINT = (
+    "ISE refused the sponsor account for the guest API: check the password, that the user (internal or "
+    "AD, through the sponsor portal's identity source sequence) is a member of a sponsor group, and that "
+    "the group has 'Access Cisco ISE guest accounts using the programmatic interface (Guest REST API)' "
+    "(Work Centers > Guest Access > Portals & Components > Sponsor Groups)."
+)
 
 # ISE's policy API intermittently returns HTTP 500 with a Hibernate/JDBC message under concurrency
 # ("could not prepare statement", "two open Sessions", JDBC/transaction errors). The request never ran,
@@ -133,12 +139,25 @@ class IseApp:
             settings.url, headers={"Accept": "application/xml"}, error_detail=mnt_error_detail, **common
         )
         self.ers_pager = PageNumber(items="SearchResult.resources", total="SearchResult.total", max_size=100)
+        # Guest accounts (ERS guestuser) are managed as a sponsor, not as the ERS admin (I31).
+        self.sponsor_username = settings.sponsor_username or None
+        self.sponsor: IseApiClient | None = None
+        if self.sponsor_username and settings.sponsor_password:
+            sponsor_auth = BasicAuth(self.sponsor_username, settings.sponsor_password.get_secret_value())
+            self.sponsor = IseApiClient(
+                self.ers_url,
+                headers=ERS_JSON,
+                error_detail=ers_error_detail,
+                **{**common, "auth": sponsor_auth},
+            )
         self._csrf: str | None = None
+        self._sponsor_csrf: str | None = None
         self._failure_reasons: dict[str, dict[str, Any]] | None = None
         self._version: str | None = None
 
     async def aclose(self) -> None:
-        await asyncio.gather(self.openapi.aclose(), self.ers.aclose(), self.mnt.aclose())
+        clients = [self.openapi, self.ers, self.mnt] + ([self.sponsor] if self.sponsor else [])
+        await asyncio.gather(*(c.aclose() for c in clients))
 
     # --- ERS ---------------------------------------------------------------------------------
 
@@ -155,33 +174,85 @@ class IseApp:
         """An ERS call that transparently handles CSRF protection: when ISE answers a write with 403
         and mentions CSRF, fetch a token (X-CSRF-Token: fetch) and retry once. `timeout` overrides the
         HTTP timeout for slow writes (e.g. SXP objects take 30-60 s on ISE 3.5)."""
-        headers = {"X-CSRF-Token": self._csrf} if self._csrf and method.upper() != "GET" else None
-        try:
-            out = await self.ers.request(
-                method, path, params=params, json=json, headers=headers, expect=expect, timeout=timeout
-            )
-        except AuthError as e:
-            if method.upper() == "GET" or "csrf" not in str(e).lower():
-                raise
-            await self._fetch_csrf()
-            out = await self.ers.request(
-                method,
-                path,
-                params=params,
-                json=json,
-                headers={"X-CSRF-Token": self._csrf or ""},
-                expect=expect,
-                timeout=timeout,
-            )
+        out = await self._csrf_call(
+            self.ers, "_csrf", method, path, params=params, json=json, expect=expect, timeout=timeout
+        )
         if method.upper() != "GET":
             # Any ERS write can rename or remove objects that the cached name->id maps hold.
             self.__dict__.pop("_name_maps", None)
         return out
 
-    async def _fetch_csrf(self) -> None:
-        resp = await self.ers.request(
+    def require_sponsor(self) -> IseApiClient:
+        if self.sponsor is None:
+            raise AuthError(
+                "Guest accounts are managed as a sponsor, not as the ERS admin: set ISE_SPONSOR_USERNAME "
+                "and ISE_SPONSOR_PASSWORD to a user in a sponsor group with 'Access Cisco ISE guest "
+                "accounts using the programmatic interface' (see docs/deploying.md, Guest sponsor)."
+            )
+        return self.sponsor
+
+    async def sponsor_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        expect: Any = "json",
+    ) -> Any:
+        """An ERS call (guestuser) made with the sponsor account, CSRF handled like ers_request."""
+        client = self.require_sponsor()
+        try:
+            return await self._csrf_call(
+                client, "_sponsor_csrf", method, path, params=params, json=json, expect=expect, timeout=None
+            )
+        except AuthError as e:
+            raise self.sponsor_refused(e) from None
+
+    def sponsor_refused(self, e: AuthError) -> AuthError:
+        """Core's 401 text names ISE_USERNAME/PASSWORD; a sponsor call needs the sponsor's hint."""
+        return AuthError(
+            f"ISE refused sponsor {self.sponsor_username!r} (HTTP {e.status_code}). {SPONSOR_AUTH_HINT}",
+            e.status_code,
+        )
+
+    async def _csrf_call(
+        self,
+        client: ApiClient,
+        token_attr: str,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None,
+        json: Any,
+        expect: Any,
+        timeout: float | None,  # noqa: ASYNC109 - per-request HTTP timeout
+    ) -> Any:
+        token = getattr(self, token_attr)
+        headers = {"X-CSRF-Token": token} if token and method.upper() != "GET" else None
+        try:
+            return await client.request(
+                method, path, params=params, json=json, headers=headers, expect=expect, timeout=timeout
+            )
+        except AuthError as e:
+            if method.upper() == "GET" or "csrf" not in str(e).lower():
+                raise
+            await self._fetch_csrf(client, token_attr)
+            return await client.request(
+                method,
+                path,
+                params=params,
+                json=json,
+                headers={"X-CSRF-Token": getattr(self, token_attr) or ""},
+                expect=expect,
+                timeout=timeout,
+            )
+
+    async def _fetch_csrf(self, client: ApiClient | None = None, token_attr: str = "_csrf") -> None:
+        resource = "guestuser" if token_attr == "_sponsor_csrf" else "networkdevice"
+        resp = await (client or self.ers).request(
             "GET",
-            "/ers/config/networkdevice/versioninfo",
+            f"/ers/config/{resource}/versioninfo",
             headers={"X-CSRF-Token": "fetch"},
             expect="response",
         )
@@ -191,7 +262,7 @@ class IseApp:
                 "ISE refused the ERS write with a CSRF error and did not issue a CSRF token. Check the "
                 "ERS settings (Administration > Settings > API Settings)."
             )
-        self._csrf = token
+        setattr(self, token_attr, token)
 
     @staticmethod
     def _res(resource: str) -> str:
@@ -420,9 +491,41 @@ class IseApp:
             out["nodes"] = nodes
             out["deployment"] = self.deployment_summary(nodes)
         out["surfaces"] = surfaces
+        out["guest_sponsor"] = await self.sponsor_status()
         down = [s for s, r in surfaces.items() if not r["ok"]]
         if down:
             out["warning"] = f"Surface(s) not answering: {', '.join(down)}; tools using them will fail."
+        return out
+
+    async def sponsor_status(self) -> dict[str, Any]:
+        """Whether the guest-account tools can run: the sponsor account (password never shown) and
+        whether ERS accepts it for guestuser."""
+        if self.sponsor is None:
+            return {
+                "configured": False,
+                "detail": "Guest-account tools need ISE_SPONSOR_USERNAME / ISE_SPONSOR_PASSWORD "
+                "(guest types, sponsor groups and portals work without them)",
+            }
+        out: dict[str, Any] = {
+            "configured": True,
+            "username": self.sponsor_username,
+            "password_set": True,
+            "portal": self.settings.sponsor_portal or "auto (the only sponsor portal)",
+        }
+        try:
+            await self.sponsor.request(
+                "GET",
+                "/ers/config/guestuser",
+                params={"size": 1},
+                timeout=self.settings.probe_timeout,
+                retry=False,
+            )
+            out["ok"] = True
+        except UpstreamError as e:
+            out["ok"] = False
+            out["error"] = str(e)[:300]
+            if isinstance(e, AuthError):
+                out["hint"] = SPONSOR_AUTH_HINT
         return out
 
     async def version(self) -> str:
