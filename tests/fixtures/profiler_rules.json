@@ -1,0 +1,39 @@
+[
+ {
+  "profilingType": "CUSTOM",
+  "name": "mcp-prof-captured",
+  "status": false,
+  "rulePriority": 2,
+  "condition": {
+   "conditionType": "ConditionAndBlock",
+   "children": [
+    {
+     "conditionType": "ConditionAttributes",
+     "dictionaryName": "MAC",
+     "attributeName": "oui",
+     "operator": "contains",
+     "attributeValue": "mcp-prof-no-such-vendor"
+    },
+    {
+     "conditionType": "ConditionAttributes",
+     "dictionaryName": "DHCP",
+     "attributeName": "dhcpClassIdentifier",
+     "operator": "contains",
+     "attributeValue": "mcp-prof"
+    }
+   ]
+  },
+  "profileLabel": {
+   "MFCInfoHardwareManufacturer": null,
+   "MFCInfoEndpointType": [
+    "mcp-prof-test"
+   ],
+   "MFCInfoHardwareModel": null,
+   "MFCInfoOperatingSystem": [
+    "mcp-prof-os"
+   ]
+  },
+  "policyId": "18ff772f-0dd5-4bb7-93f6-aae5b42d9ad8",
+  "matchedEndpoints": null
+ }
+]

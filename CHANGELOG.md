@@ -43,6 +43,17 @@
   TACACS+ column (secret set, single-connect mode, the device-admin policy set the device's logins select,
   short/reused TACACS+ secrets, only-Default or no matching set) and warns when no node runs DeviceAdmin.
   Live test `test_live_device_admin` compares the predictions with real SSH logins (`ISE_LIVE_DADM_*`).
+- **Profiler authoring (I40, #6; finishes the profiler part of I14).** Spike of what ISE 3.5 exposes in
+  `docs/profiler.md`: classic profiling policies are read-only over ERS (name, parent), and their certainty
+  factors and the profiler feed service are GUI-only; the 3.3+ custom profiling rules are writable over OpenAPI.
+  New: `ise_list_profiling_rules`, `ise_set_profiling_rule` / `ise_delete_profiling_rule` (write tier,
+  preview-first; conditions checked against the profiler dictionary; labels endpoint type / manufacturer /
+  model / OS), `ise_profiler_status` (Profiler service per node, probes per PSN, profiler sessions, cloud
+  profiler, feed service said GUI-only), `ise_explain_profile` (matched policy and parent chain, static
+  assignment, labels and the custom rules that set them, profile at the last authentication, and where the
+  certainty factor is), and `ise_reprofile_endpoint` (dangerous tier: CoA reauth through the PSN that owns the
+  session, sharing `ise_coa_reauth`'s routing and protect lists). Live tests in `tests/live/test_live_profiler.py`
+  (`ISE_LIVE_REPROFILE_MAC` for the CoA).
 
 ### Changed
 - New runtime dependency: PyYAML (`types-PyYAML` for mypy in the dev group).
