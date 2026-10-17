@@ -140,12 +140,12 @@ docker-compose.mock.yml exec ise-mcp-server ise-mcp-server check` checks both, a
 ## 6. Upgrades
 
 - Images: `ghcr.io/dr-stutters/ise-mcp-server:<version>` (and `:latest`); release candidates are `:<version>-rcN`
-  and `:rc`, never `:latest`. Pin a version on a shared host (`MCP_IMAGE_TAG=0.10.0`), read the
+  and `:rc`, never `:latest`. Pin a version on a shared host (`MCP_IMAGE_TAG=0.11.0`), read the
   [CHANGELOG](../CHANGELOG.md), then `docker compose pull && docker compose up -d`.
 - Verify what you run (keyless cosign signature from the release workflow, plus a signed SBOM):
 
   ```bash
-  cosign verify ghcr.io/dr-stutters/ise-mcp-server:0.10.0 \
+  cosign verify ghcr.io/dr-stutters/ise-mcp-server:0.11.0 \
     --certificate-identity-regexp '^https://github.com/dr-stutters/stutters-mcp-core/.github/workflows/publish-image.yml@' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-github-workflow-repository dr-stutters/ise-mcp-server

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0 (unreleased)
+## 0.11.0 (2026-10-17)
 
 ### Added
 - **Config export and diff (I42, #8).** `ise_export_config(scope, path)` exports policy sets with their
@@ -77,7 +77,7 @@
   rule's hit count.
 
 
-## 0.10.0 (unreleased)
+## 0.10.0 (2026-10-17)
 
 ### Added
 - **`ise-mcp-server check` preflight (I36, #2; core C21).** Runs without an MCP client: one row per surface
