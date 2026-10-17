@@ -32,6 +32,8 @@ are placeholders; use your lab's.
 | `ISE_LIVE_PXGRID_SIGNER` | `test_live_pxgrid` | Command that reads a CSR on stdin and prints the signed certificate (PEM) from that CA, with server + client auth EKUs | `/path/to/sign-csr --template pxgrid` |
 | `ISE_LIVE_PXGRID_DOMAIN` | `test_live_pxgrid` | DNS domain for the test client certificate's CN (`mcp-test-pxgrid-<run>.<domain>`) | `example.com` |
 | `ISE_LIVE_SXP_PEER` | `test_live_sxp` | An unused IP address to create (and delete) an SXP connection to; nothing is contacted | `192.0.2.99` |
+| `ISE_LIVE_DADM_NAD` | `test_live_device_admin` | A NAD with a TACACS+ secret whose device sends VTY login, exec and level-15 command authorization to this ISE (`aaa authorization commands 15 ... group <tacacs> local`) | `access-sw1` |
+| `ISE_LIVE_DADM_HOST` | `test_live_device_admin` | That device's SSH address, reachable from the test host (`ssh` and `sshpass` installed) | `192.0.2.10` |
 | `ISE_LIVE_SCALE` | `test_live_scale` | `1` to run the scale test (creates and deletes many endpoints; a few minutes) | `1` |
 | `ISE_RO_USERNAME` / `ISE_RO_PASSWORD` | `test_least_privilege` | The read-only admin account; see [least-privilege.md](least-privilege.md) | |
 
@@ -48,6 +50,17 @@ expect, on ISE:
   `02:00:5E:00:00:02` (22040) and an unknown user from `02:00:5E:00:00:03` (22056).
 
 Any RADIUS test client (for example `radtest` / `radclient`) can produce the traffic.
+
+## Device admin test
+
+`test_live_device_admin` needs the DeviceAdmin service on ISE and the `ISE_LIVE_DADM_*` device. It creates
+its own `mcp-dadm-*` identity groups, internal users (random password), command sets, a priv-15 shell
+profile and a device-admin policy set at rank 0 that matches only `mcp-dadm-*` users on that NAD (other
+admins are unaffected), logs in over SSH as each user, runs level-15 commands, compares the device's
+answer with `ise_admin_policy_explain` and `ise_test_command_set`, checks the rules' hit counts, and deletes
+everything. A denied command prints nothing in an SSH exec session, so only commands that always print are
+used; `reload cancel` stands in for `reload` and nothing disruptive runs unless it is predicted denied. It
+also creates and deletes a TACACS+ external server (TEST-NET address, never contacted) and a sequence.
 
 ## Switch test policy
 

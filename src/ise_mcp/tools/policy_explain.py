@@ -125,6 +125,19 @@ async def _global_exceptions(app: IseApp, kind: str) -> list[dict[str, Any]]:
     )
 
 
+async def authz_order(app: IseApp, kind: str, ps_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """A set's authorization entries in ISE's evaluation order: global exceptions, then the set's local
+    exceptions, then its rules, each as (section, entry)."""
+    global_exc = await _global_exceptions(app, kind)
+    exceptions = await _authz_entries(app, kind, ps_id, "exception")
+    rules = await _authz_entries(app, kind, ps_id, "authorization")
+    return (
+        [("global-exception", e) for e in global_exc]
+        + [("exception", e) for e in exceptions]
+        + [("authz", e) for e in rules]
+    )
+
+
 # Operators this evaluator understands. Everything is compared as a string unless the operator is
 # numeric. ISE operator keys are camelCase in the OpenAPI condition model.
 Result = bool | None  # True = matches, False = doesn't, None = unknown (can't tell)
@@ -339,6 +352,75 @@ def _result_word(r: Result) -> str:
     return {True: "match", False: "no-match", None: "unknown"}[r]
 
 
+def sorted_sets(sets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(sets, key=lambda p: (p.get("rank") is None, p.get("rank") or 0))
+
+
+def walk_sets(
+    sets: list[dict[str, Any]], attributes: dict[str, Any], library: dict[str, Any], include_disabled: bool
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], bool]:
+    """Policy-set selection in rank order: (the first set that matches, the trace, whether an unknown
+    set outranks it). The default set matches anything."""
+    trace: list[dict[str, Any]] = []
+    uncertain = False
+    for ps in sorted_sets(sets):
+        if not include_disabled and str(ps.get("state")) == "disabled":
+            continue
+        r = True if ps.get("default") else evaluate(ps.get("condition"), attributes, library)
+        row: dict[str, Any] = {
+            "rank": ps.get("rank"),
+            "name": ps.get("name"),
+            "condition": "DEFAULT" if ps.get("default") else render_condition(ps.get("condition")),
+            "result": _result_word(r),
+        }
+        reasons = [] if ps.get("default") else unknown_reasons(ps.get("condition"), attributes, library)
+        if r is None and reasons:
+            row["unknown_because"] = reasons
+        trace.append(row)
+        if r is True:
+            return ps, trace, uncertain
+        if r is None:
+            uncertain = True  # an unknown set outranks the one we pick next
+    return None, trace, uncertain
+
+
+def walk_rules(
+    ordered: list[tuple[str, dict[str, Any]]],
+    attributes: dict[str, Any],
+    library: dict[str, Any],
+    include_disabled: bool,
+    results: dict[str, str],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], bool]:
+    """Rules as (section, entry) in evaluation order: (the first matching row, the trace, whether an
+    unknown rule outranks it). `results` maps output keys to the entry's result fields, e.g.
+    {"profile": "profile"}; each row also carries the rule's hit count."""
+    trace: list[dict[str, Any]] = []
+    uncertain = False
+    for section, entry in ordered:
+        rule = entry.get("rule") or {}
+        if not include_disabled and str(rule.get("state")) == "disabled":
+            continue
+        r = True if rule.get("default") else evaluate(rule.get("condition"), attributes, library)
+        row: dict[str, Any] = {
+            "section": section,
+            "rank": rule.get("rank"),
+            "name": rule.get("name"),
+            "condition": "DEFAULT" if rule.get("default") else render_condition(rule.get("condition")),
+            "result": _result_word(r),
+            **{key: entry.get(field) for key, field in results.items()},
+            "hits": rule.get("hitCounts"),
+        }
+        reasons = [] if rule.get("default") else unknown_reasons(rule.get("condition"), attributes, library)
+        if r is None and reasons:
+            row["unknown_because"] = reasons
+        trace.append(row)
+        if r is True:
+            return row, trace, uncertain
+        if r is None:
+            uncertain = True  # this rule might match at runtime, ahead of our pick
+    return None, trace, uncertain
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Explain which policy rule a request would hit")
     async def ise_policy_explain(
@@ -441,7 +523,6 @@ def register(reg: ToolRegistrar) -> None:
             raise InvalidRequest("Give attributes, or nad and/or flow to fill them in")
         library = await build_library(app, kind)
         sets = await list_policy_sets(app, kind)
-        sets = sorted(sets, key=lambda p: (p.get("rank") is None, p.get("rank") or 0))
         await resolve_references(app, kind, [p.get("condition") for p in sets], library)
 
         set_trace: list[dict[str, Any]] = []
@@ -450,27 +531,7 @@ def register(reg: ToolRegistrar) -> None:
         if policy_set:
             chosen = await resolve_policy_set(app, kind, policy_set)
         else:
-            for ps in sets:
-                if not include_disabled and str(ps.get("state")) == "disabled":
-                    continue
-                r = True if ps.get("default") else evaluate(ps.get("condition"), attributes, library)
-                row = {
-                    "rank": ps.get("rank"),
-                    "name": ps.get("name"),
-                    "condition": "DEFAULT" if ps.get("default") else render_condition(ps.get("condition")),
-                    "result": _result_word(r),
-                }
-                reasons = (
-                    [] if ps.get("default") else unknown_reasons(ps.get("condition"), attributes, library)
-                )
-                if r is None and reasons:
-                    row["unknown_because"] = reasons
-                set_trace.append(row)
-                if r is True:
-                    chosen = ps
-                    break
-                if r is None:
-                    uncertain_before = True  # an unknown set outranks the one we pick next
+            chosen, set_trace, uncertain_before = walk_sets(sets, attributes, library, include_disabled)
         if chosen is None:
             if uncertain_before:
                 return object_result(
@@ -489,49 +550,18 @@ def register(reg: ToolRegistrar) -> None:
                 }
             )
 
-        # ISE evaluates global exceptions first, then this set's local exceptions, then its rules.
-        global_exc = await _global_exceptions(app, kind)
-        exceptions = await _authz_entries(app, kind, str(chosen["id"]), "exception")
-        rules = await _authz_entries(app, kind, str(chosen["id"]), "authorization")
+        ordered = await authz_order(app, kind, str(chosen["id"]))
         await resolve_references(
-            app,
-            kind,
-            [(e.get("rule") or {}).get("condition") for e in global_exc + exceptions + rules],
+            app, kind, [(e.get("rule") or {}).get("condition") for _, e in ordered], library
+        )
+        matched, rule_trace, uncertain = walk_rules(
+            ordered,
+            attributes,
             library,
+            include_disabled,
+            {"profile": "profile", "security_group": "securityGroup"},
         )
-        rule_trace: list[dict[str, Any]] = []
-        matched: dict[str, Any] | None = None
-        uncertain = uncertain_before
-        ordered = (
-            [("global-exception", e) for e in global_exc]
-            + [("exception", e) for e in exceptions]
-            + [("authz", e) for e in rules]
-        )
-        for section, entry in ordered:
-            rule = entry.get("rule") or {}
-            if not include_disabled and str(rule.get("state")) == "disabled":
-                continue
-            r = True if rule.get("default") else evaluate(rule.get("condition"), attributes, library)
-            row = {
-                "section": section,
-                "rank": rule.get("rank"),
-                "name": rule.get("name"),
-                "condition": "DEFAULT" if rule.get("default") else render_condition(rule.get("condition")),
-                "result": _result_word(r),
-                "profile": entry.get("profile"),
-                "security_group": entry.get("securityGroup"),
-            }
-            reasons = (
-                [] if rule.get("default") else unknown_reasons(rule.get("condition"), attributes, library)
-            )
-            if r is None and reasons:
-                row["unknown_because"] = reasons
-            rule_trace.append(row)
-            if r is True:
-                matched = row
-                break
-            if r is None:
-                uncertain = True  # this rule might match at runtime, ahead of our pick
+        uncertain = uncertain or uncertain_before
 
         verdict = (
             f"Would match '{matched['name']}' -> profile {matched.get('profile')}, SGT "
