@@ -254,11 +254,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-122 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 65 read tools plus `ise_api_call` (GET-only) are registered. Everything
+128 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 68 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (65)
+### Read (68)
 
 | Tool | What it does |
 |---|---|
@@ -267,6 +267,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
+| `ise_explain_profile` | Why an endpoint has its profile: the profiling policy it matched and its parent chain (e.g. |
 | `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
@@ -312,7 +313,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_policy_sets` | List policy sets in evaluation order: rank, name, state, the condition that selects the set, its allowed-protocols service, hit count and id. |
 | `ise_list_posture_policies` | List posture policies (which OS/identity-group a requirement set applies to): name, enabled, OS, agent type, requirement count and enforcement (MANDATORY/OPTIONAL/AUDIT), compliance module. |
 | `ise_list_posture_requirements` | List posture requirements (the checks a policy enforces): name, OS, agent type, the rules it contains, how they are combined (ALL_SUCCEED / ANY_FAIL), and the remediation. |
-| `ise_list_profiler_profiles` | List endpoint profiler profiles (ISE ships ~900, e.g. |
+| `ise_list_profiler_profiles` | List the classic profiling policies (ISE ships ~700, e.g. |
+| `ise_list_profiling_rules` | List the profiler's custom / direct / ML profiling rules (ISE 3.3+ Profiler Policy Management): name, type, enabled, priority, condition, the endpoint labels it sets (endpoint type, manufacturer, model, OS) and how many endpoints it matched. |
 | `ise_list_pxgrid_clients` | The pxGrid 2.0 clients registered with ISE (FMC, Catalyst Center, SIEMs, scripts): name, state (pending / enabled / disabled / created), the product that registered it when the name shows it (FMC uses iseagent-* and firesightisetest-*), description and groups. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
@@ -320,6 +322,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
+| `ise_profiler_status` | Profiler health and setup: which nodes run the Profiler service, each PSN's probes (enabled with their settings, and disabled), live profiler session count, custom profiling rule count, cloud profiler / telemetry state, and the feed service (GUI-only, said so). |
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
@@ -328,7 +331,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (41)
+### Write (43)
 
 | Tool | What it does |
 |---|---|
@@ -348,6 +351,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, or AD join point (after ise_leave_ad). |
+| `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
@@ -362,6 +366,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
+| `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
@@ -374,7 +379,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (16)
+### Dangerous (17)
 
 | Tool | What it does |
 |---|---|
@@ -393,6 +398,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_join_ad` | Join one or all ISE nodes to the join point's AD domain (creates the computer account). |
 | `ise_leave_ad` | Take one or all ISE nodes out of the AD domain: AD-backed logins through this join point stop working there at once. |
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
+| `ise_reprofile_endpoint` | Make ISE re-evaluate an endpoint's profile now: sends a CoA reauthenticate through the PSN that owns its session, so the NAD re-authenticates, fresh RADIUS / device-sensor attributes reach the profiler, and the authorization result applies the current profile. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
 ### Prompts (3)
@@ -490,6 +496,17 @@ evaluate. ISE must resolve the domain through its name server (CLI `ip name-serv
 device learns bindings from ISE. The node needs the SXP service (`ise_update_node_services`). Static
 mappings (`ise_set_ip_sgt`) sent to an SXP domain reach listeners at once. `ise_deploy_ip_sgt` pushes them
 over SSH instead, and `ise_push_trustsec_matrix` makes TrustSec devices refresh the egress policy.
+
+### Profiler
+
+"Why is this printer profiled as a workstation?" -> `ise_explain_profile` (matched policy and parent chain,
+static assignment, the endpoint labels and the custom rules that set them, the profile at the last
+authentication). `ise_profiler_status` shows each PSN's probes. Classify devices over the API with custom
+profiling rules (`ise_set_profiling_rule` / `ise_delete_profiling_rule`: conditions on profiler attributes
+such as `DHCP:dhcpClassIdentifier contains HP`, setting endpoint type / manufacturer / model / OS), then match
+`EndPoints:MFCInfoEndpointType` in an authorization rule; `ise_reprofile_endpoint` (dangerous tier) applies a
+new profile now with a CoA reauth. Classic profiling policies, certainty factors and the feed service are
+GUI-only: [docs/profiler.md](docs/profiler.md) has what ISE 3.5 exposes.
 
 ## Testing
 

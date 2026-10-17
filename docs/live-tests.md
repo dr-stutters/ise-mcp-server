@@ -34,6 +34,7 @@ are placeholders; use your lab's.
 | `ISE_LIVE_SXP_PEER` | `test_live_sxp` | An unused IP address to create (and delete) an SXP connection to; nothing is contacted | `192.0.2.99` |
 | `ISE_LIVE_DADM_NAD` | `test_live_device_admin` | A NAD with a TACACS+ secret whose device sends VTY login, exec and level-15 command authorization to this ISE (`aaa authorization commands 15 ... group <tacacs> local`) | `access-sw1` |
 | `ISE_LIVE_DADM_HOST` | `test_live_device_admin` | That device's SSH address, reachable from the test host (`ssh` and `sshpass` installed) | `192.0.2.10` |
+| `ISE_LIVE_REPROFILE_MAC` | `test_live_profiler` (reprofile) | MAC of a real endpoint with a live session through a switch that answers CoA; it gets one CoA reauth. `test_live_profiler` otherwise creates and deletes only `mcp-prof-*` custom profiling rules | `52:54:00:12:34:56` |
 | `ISE_LIVE_SCALE` | `test_live_scale` | `1` to run the scale test (creates and deletes many endpoints; a few minutes) | `1` |
 | `ISE_RO_USERNAME` / `ISE_RO_PASSWORD` | `test_least_privilege` | The read-only admin account; see [least-privilege.md](least-privilege.md) | |
 
