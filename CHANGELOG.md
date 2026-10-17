@@ -16,6 +16,16 @@
   exports, or an export with live ISE, by section: added, removed and changed objects with field-level
   changes; rules match by policy set + rule name, and a rule whose relative order changed is reported as
   moved (one inserted above it is not). Format: `docs/config-export.md` (the input for I43 and I46).
+- **Config import (I43, #9).** `ise_import_config(source, scope, only, secrets, prune)` (dangerous tier) applies
+  an export to an ISE. It plans one step per object that differs, matched by name: create, update (only the
+  fields the export gives; rule results are authoritative), or with `prune` delete. Steps run in dependency
+  order (device and identity groups, custom attributes, SGTs, SGACLs, egress cells, dACLs, authorization
+  profiles, command sets, shell profiles, NADs, then policy sets and their rules by rank; deletes last, in
+  reverse), with names resolved to ids as each step runs. NAD secrets come in `secrets` by NAD name; a new NAD
+  without them blocks the plan. Conditions and rule references are checked against the target first. `only`
+  (name globs) limits both the import and prune. The preview is the whole plan with field changes, its blast
+  radius is the step count, and the core rails (change window, two-person, dry run) apply. Applying stops at
+  the first failure with what was applied and what wasn't attempted; re-running plans from the new state.
 - `ISE_EXPORT_DIR`: confines export files to a directory (relative paths resolve there). Without it, only
   absolute `*.yaml` paths are accepted, and an existing file is only overwritten when it is an earlier export.
 

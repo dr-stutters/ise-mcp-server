@@ -249,7 +249,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-116 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+117 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 62 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -364,7 +364,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (15)
+### Dangerous (16)
 
 | Tool | What it does |
 |---|---|
@@ -379,6 +379,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
 | `ise_delete_policy_set` | Delete a whole policy set with all its rules. |
 | `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
+| `ise_import_config` | Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans one step per object, matched by name, in dependency order (device and identity groups, custom attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets and shell profiles, NADs, then policy sets and their rules in rank order). |
 | `ise_join_ad` | Join one or all ISE nodes to the join point's AD domain (creates the computer account). |
 | `ise_leave_ad` | Take one or all ISE nodes out of the AD domain: AD-backed logins through this join point stop working there at once. |
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
@@ -398,7 +399,7 @@ tools only when they are enabled. `ise_quarantine_host` applies ANC (dangerous t
 `fmc_block=true`, contains the IP on the FTDs through fmc-mcp-server (`fmc_contain_host`). It ends with
 the exact undo steps. Without the dangerous tier it gives GUI steps.
 
-### Config export and diff
+### Config export, diff and import
 
 `ise_export_config` writes policy sets and rules, authorization profiles, dACLs, NADs and NDGs (secrets
 masked), identity and endpoint groups, custom attributes, SGTs, SGACLs, the egress matrix, command sets and
@@ -406,7 +407,13 @@ shell profiles as YAML: names instead of ids, rules in rank order and everything
 ids, links, hit counts and timestamps left out, so an unchanged ISE exports the same bytes every time (apart
 from `exported_at`). Save one as a baseline (`path=`, inside `ISE_EXPORT_DIR` when set) and later run
 `ise_diff_config(before=...)` against live ISE, or against another export: added, removed, changed (field by
-field) and moved rules, by section. Format and rules: [docs/config-export.md](docs/config-export.md).
+field) and moved rules, by section.
+
+`ise_import_config` (dangerous tier) applies an export to an ISE: one create/update step per object that
+differs, matched by name, in dependency order (groups → TrustSec → dACLs → profiles → TACACS+ → NADs →
+policy sets and rules), with NAD secrets passed separately, `only` name globs, and optional `prune`. The
+preview is the whole plan; applying stops at the first failure and says what was done. Format and rules:
+[docs/config-export.md](docs/config-export.md).
 
 ### Certificates and EAP-TLS
 The certificate tools exchange PEM text, so any CA can sign: Windows AD CS (`win_sign_csr`), OpenSSL,

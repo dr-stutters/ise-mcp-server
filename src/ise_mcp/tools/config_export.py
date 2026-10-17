@@ -298,6 +298,12 @@ class Export:
         self.max_objects = max_objects
         self.incomplete: dict[str, str] = {}
         self.skipped: dict[str, str] = {}
+        # The objects as ISE returned them (with ids and real secrets), for ise_import_config.
+        self.raw: dict[str, list[dict[str, Any]]] = {}  # section -> ERS objects
+        self.raw_sets: dict[str, list[dict[str, Any]]] = {}  # kind -> policy sets
+        self.raw_rules: dict[str, list[dict[str, Any]]] = {}  # OpenAPI rule-table path -> rules
+        self.sgt_names: dict[str, str] = {}  # id -> name, read for the egress matrix
+        self.acl_names: dict[str, str] = {}
 
     async def ers_all(self, section: str, resource: str) -> list[dict[str, Any]]:
         """Every object of an ERS collection with full details (paged, bounded concurrency)."""
@@ -306,7 +312,9 @@ class Export:
         )
         if not page.complete:
             self.incomplete[section] = f"first {len(page.items)} of {page.total or 'more'} (max_objects)"
-        return [i for i in page.items if isinstance(i, dict)]
+        items = [i for i in page.items if isinstance(i, dict)]
+        self.raw[section] = items
+        return items
 
     async def policy_sets(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -317,6 +325,7 @@ class Export:
                 # Device admin is off (no DeviceAdmin service) or the API is not licensed.
                 self.skipped[f"policy_sets.{kind}"] = str(e)[:200]
                 continue
+            self.raw_sets[kind] = sets
             rules = await gather_limited(sets, partial(self._rules, kind), limit=4)
             rows = []
             for ps, sections in zip(sets, rules, strict=True):
@@ -344,7 +353,9 @@ class Export:
         except NotFound:
             return []
         data = data.get("response", data) if isinstance(data, dict) else data
-        rules = [norm_rule(r) for r in data or [] if isinstance(r, dict)]
+        raw = [r for r in data or [] if isinstance(r, dict)]
+        self.raw_rules[path] = raw
+        rules = [norm_rule(r) for r in raw]
         return sorted(rules, key=lambda r: (r.get("rank") is None, r.get("rank") or 0, _name_key(r)))
 
     async def section(self, name: str) -> Any:
@@ -376,7 +387,8 @@ class Export:
     async def _custom_attributes(self) -> list[dict[str, Any]]:
         data = await self.app.openapi.get("/api/v1/endpoint-custom-attribute")
         data = data.get("response", data) if isinstance(data, dict) else data
-        return by_name([clean(a) for a in data or [] if isinstance(a, dict)])
+        self.raw["custom_attributes"] = [a for a in data or [] if isinstance(a, dict)]
+        return by_name([clean(a) for a in self.raw["custom_attributes"]])
 
     async def _matrix(self) -> list[dict[str, Any]]:
         cells = await self.ers_all("egress_matrix", "egressmatrixcell")
@@ -386,6 +398,7 @@ class Export:
         acl_page = await ers_list(self.app, "sgacl", limit=10_000, offset=0)
         sgts = {str(s["id"]): str(s.get("name")) for s in sgt_page.items if "id" in s}
         acls = {str(a["id"]): str(a.get("name")) for a in acl_page.items if "id" in a}
+        self.sgt_names, self.acl_names = sgts, acls
         return norm_matrix(cells, sgts, acls)
 
 
@@ -415,10 +428,12 @@ async def export_config(
     *,
     max_objects: int = DEFAULT_MAX_OBJECTS,
     now: dt.datetime | None = None,
+    run: Export | None = None,
 ) -> dict[str, Any]:
     """The export as a dict (header + sections). Sections are fetched one after another so a large
-    deployment sees one section's per-item GETs at a time (each bounded by ISE_DETAIL_CONCURRENCY)."""
-    run = Export(app, max_objects)
+    deployment sees one section's per-item GETs at a time (each bounded by ISE_DETAIL_CONCURRENCY).
+    Pass `run` to keep the raw objects it read (ise_import_config plans against them)."""
+    run = run or Export(app, max_objects)
     data: dict[str, Any] = {}
     for s in sections:
         try:
