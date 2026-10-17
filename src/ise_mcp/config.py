@@ -1,8 +1,9 @@
 """Runtime settings: ISE_* for the appliance, MCP_* for this server (see stutters-mcp-core)."""
 
+from pathlib import Path
 from typing import ClassVar
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ise_mcp._core import BaseServerSettings, server_config
 
@@ -24,6 +25,19 @@ class Settings(BaseServerSettings):
     detail_concurrency: int = Field(
         default=5, ge=1, le=20, description="Concurrent per-item ERS GETs (ISE_DETAIL_CONCURRENCY)"
     )
+
+    # ise_export_config / ise_diff_config (I42): when set, export files are written and read only inside
+    # this directory (relative paths resolve against it). Unset: absolute *.yaml paths only.
+    export_dir: Path | None = Field(
+        default=None, description="Directory for config export files (ISE_EXPORT_DIR)"
+    )
+
+    @field_validator("export_dir", mode="before")
+    @classmethod
+    def _empty_dir_is_none(cls, v: object) -> object:
+        if isinstance(v, str):
+            return Path(v.strip()).expanduser() if v.strip() else None
+        return v
 
     # --- product safety rails (I18, on top of core G7) ------------------------------------------
     # Protected endpoints/users/devices a disruptive action (CoA, ANC, NAD delete) is blocked on.
