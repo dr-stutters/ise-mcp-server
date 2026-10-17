@@ -1,9 +1,9 @@
-# Config export and diff
+# Config export, diff and import
 
 `ise_export_config` writes ISE policy and objects as YAML. `ise_diff_config` compares two exports, or
 an export with live ISE. ISE has no REST API for its configuration change audit, so a saved export is how
 you answer "what changed since last week?". It is also the input for a review before a change and for
-`ise_import_config` (I43, planned).
+`ise_import_config` (I43, below).
 
 ```text
 ise_export_config(path="baseline.yaml")          # save a baseline
@@ -194,3 +194,88 @@ and so on, at `ISE_DETAIL_CONCURRENCY` requests at a time under `ISE_RATE_LIMIT`
 Sections run one after another. A section stops at `max_objects` (default 5000) and the header says so under
 `incomplete`. With thousands of NADs, export `nads` on its own (`scope=["nads"]`, `path=...`), or leave it out
 of the routine baseline.
+
+## Import (`ise_import_config`)
+
+`ise_import_config(source, scope, only, secrets, prune)` applies an export to the ISE the server points at:
+the same ISE (restore a baseline), another one (move a PoC policy to production), or a lab being rebuilt. It
+is a **dangerous-tier** tool (`MCP_ENABLE_DANGEROUS`) and preview-first like every write. The preview is the
+whole plan, and the confirm applies it.
+
+```text
+ise_import_config(source="poc.yaml", only=["Branch-*"], secrets={"branch-sw1": {"radius": "..."}})
+  -> preview: summary (create / update / delete / unchanged), every step with its field changes
+ise_import_config(..., confirm="pv_...")       # applies the steps in order
+ise_diff_config(before="poc.yaml")             # empty, for the imported objects
+```
+
+### What the plan does
+
+- **Matched by name**, the same keys as the diff. Rules match by policy set, table and rule name.
+- **One step per object that differs:** `create` when the target lacks it, `update` when a field differs,
+  `delete` only with `prune=true`. Objects that are already the same count as `unchanged`.
+- **Dependency order:** NDGs (parents first), identity and endpoint groups (parents first), custom
+  attributes, SGTs, SGACLs, egress cells, dACLs, authorization profiles, command sets, shell profiles, NADs,
+  then policy sets and their rules in rank order. Deletes run last, in reverse order: rules before their
+  set, a NAD before its device group, a profile before its dACL.
+- **References are resolved when each step runs**, so a step can use an object an earlier step created: egress
+  cell SGTs and SGACLs, endpoint group parents and policy set ids. Rule results (profiles, SGT, command sets,
+  shell profile) and `daclName` are names in ISE's API anyway.
+- **Fields:**
+  - For objects and policy sets, the export is authoritative for the fields it gives. A field the export
+    leaves out keeps the target's value, so a hand-written file doesn't have to spell out ISE's defaults. An
+    update sends the current object with the export's fields merged over it.
+  - A condition is always replaced as a whole.
+  - Rules are authoritative: a rule exported without a `securityGroup` loses its SGT on the target.
+  - Because an export leaves out empty values, clearing a field (an object's description, say) doesn't carry
+    over. `ise_diff_config` still shows it.
+- **Policy sets:**
+  - A new policy set gets ISE's Default rules, and their results are set from the export.
+  - The Default policy set and Default rules are only ever updated, never created or deleted.
+- **Secrets:** exports mask them, so NAD secrets come in `secrets`, by NAD name:
+  `{"sw1": {"radius": "...", "tacacs": "...", "snmp_ro": "..."}}`. Other keys are `radius_second`,
+  `key_encryption_key`, `message_authenticator_key`, or any dotted field path. An existing NAD keeps its secrets
+  unless new ones are given (they are compared with the current ones first). A new NAD needs every secret its
+  export shows as set, or the plan is blocked. Secrets never appear in the preview or the audit log.
+
+### Blockers (nothing is applied)
+
+- A new NAD without its secrets; `secrets` naming a NAD that is not in the import.
+- A condition that doesn't parse, an attribute the target's dictionaries don't have, or a value outside the
+  attribute's allowed values (same checks as `ise_create_authz_rule`).
+- A rule result naming an authorization profile, SGT, command set or shell profile that is neither on the
+  target nor created by this import.
+- A custom attribute whose type differs (ISE can't change it); a policy kind the target can't read (device
+  admin off); `prune` with a partial export (it would delete what the export missed).
+- Nothing to do (the target already matches).
+
+Things the import does not create must already exist on the target: library conditions, identity sources and
+sequences, allowed-protocols services, AD join points and their groups, portals.
+
+### `only` and `prune`
+
+- `only` takes name globs (case-insensitive) and limits the import to matching objects:
+  - rules match by their own name or their policy set's;
+  - egress cells match by either SGT;
+  - device groups match by the full path or the last segment.
+- `prune=true` deletes target objects in the imported sections, within `only`, that the export lacks. Default
+  policy sets, Default rules and the ANY -> ANY cell are never deleted.
+- Use both together for a scoped mirror, e.g. `only=["Branch-*"], prune=true`. To remove a set of objects,
+  import an export that has the sections but none of the objects.
+
+### Applying
+
+- Steps run one at a time, and the import stops at the first failure.
+- The error names the failed step and ISE's reason, lists what was applied before it, and counts the steps
+  not attempted. Nothing is rolled back. Fix the cause and run the import again: it plans from the target's
+  new state, so steps already done show as unchanged.
+- The confirm token is tied to the planned steps and their field changes. If any of those objects change after
+  the preview, the confirm is refused; preview again.
+- The core safety rails apply as for every write:
+  - `MCP_CHANGE_WINDOW`: a confirm outside the window is refused.
+  - `MCP_MAX_BLAST_RADIUS` / `MCP_BLAST_RADIUS_OVERRIDES`: the blast radius is the number of steps.
+  - `MCP_TWO_PERSON_TOOLS` (e.g. `@dangerous` or `ise_import_config`).
+  - `MCP_DRY_RUN`.
+- Policy changes take effect at the next authentication; no CoA is sent.
+- TrustSec settings on the target still apply. For example, with multiple SGACLs per cell turned off, ISE
+  refuses a cell with an SGACL plus a catch-all other than `NONE`.
