@@ -132,6 +132,13 @@ async def references(app: IseApp, kind: str, obj: dict[str, Any]) -> list[str]:
             n := await ers_count("networkdevice", f"{field}.EQ.{name}")
         ):
             return [f"{n} network device(s) are in this group"]
+    if kind == "tacacs_server":
+        page = await app.ers_pager.fetch_page(app.ers, "/ers/config/tacacsserversequence", limit=500)
+        for item in page.items:
+            seq = await app.ers_get("tacacsserversequence", str(item["id"]))
+            listed = [x.strip().lower() for x in str(seq.get("serverList") or "").split(",")]
+            if name.lower() in listed:
+                return [f"Listed in TACACS+ server sequence {seq.get('name')}"]
     if kind == "sgt":
         out = []
         for filt in (f"sgtSrcName.EQ.{name}", f"sgtDstName.EQ.{name}"):
@@ -155,6 +162,8 @@ DELETE_KINDS = {
     "command_set": "tacacscommandsets",
     "shell_profile": "tacacsprofile",
     "ad_join_point": "activedirectory",
+    "tacacs_server": "tacacsexternalservers",
+    "tacacs_sequence": "tacacsserversequence",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -968,6 +977,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "command_set",
                 "shell_profile",
                 "ad_join_point",
+                "tacacs_server",
+                "tacacs_sequence",
             ],
             Field(description="What to delete"),
         ],
@@ -975,8 +986,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
-        SGACL, device group, ANC policy, TACACS+ command set / shell profile, or AD join point (after
-        ise_leave_ad). Preview-first: shows
+        SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server
+        sequence, or AD join point (after ise_leave_ad). Preview-first: shows
         the object and what still references it (e.g. rules using a profile, which blocks the delete).
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)

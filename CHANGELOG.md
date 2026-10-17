@@ -29,8 +29,26 @@
 - `ISE_EXPORT_DIR`: confines export files to a directory (relative paths resolve there). Without it, only
   absolute `*.yaml` paths are accepted, and an existing file is only overwritten when it is an earlier export.
 
+- **Device admin (TACACS+) depth (I41, #7).** `ise_admin_policy_explain(user, nad, command)`: the
+  device-admin policy set, authentication rule (identity source), authorization rule with its hit count,
+  shell profile and the verdict for each command, client-side (internal users' identity groups are looked
+  up; unknown conditions make it UNCERTAIN). `ise_test_command_set`: permit/deny and the deciding line for
+  command lines against named command sets, a device-admin rule's sets, or a draft set. Matching follows
+  ISE and was checked on ISE 3.5 with an IOS-XE switch: command names are case-insensitive wildcards,
+  argument regexes compare by position and are anchored and case-insensitive, extra arguments are ignored,
+  a matching DENY_ALWAYS wins in its set and across sets, otherwise the first match, otherwise "permit
+  unmatched". TACACS+ external servers and server sequences: `ise_get_tacacs_servers`,
+  `ise_set_tacacs_server`, `ise_set_tacacs_server_sequence`, and `ise_delete_object` kinds
+  `tacacs_server` / `tacacs_sequence` (blocked while a sequence lists the server). `ise_audit_nads` gains a
+  TACACS+ column (secret set, single-connect mode, the device-admin policy set the device's logins select,
+  short/reused TACACS+ secrets, only-Default or no matching set) and warns when no node runs DeviceAdmin.
+  Live test `test_live_device_admin` compares the predictions with real SSH logins (`ISE_LIVE_DADM_*`).
+
 ### Changed
 - New runtime dependency: PyYAML (`types-PyYAML` for mypy in the dev group).
+- `ise_policy_explain`'s set and rule walk is shared (`walk_sets` / `walk_rules`); its rows now carry the
+  rule's hit count.
+
 
 ## 0.10.0 (unreleased)
 
