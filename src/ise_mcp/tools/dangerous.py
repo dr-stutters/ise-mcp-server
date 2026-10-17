@@ -75,6 +75,40 @@ async def session_or_blocker(app: IseApp, mac: str) -> tuple[dict[str, Any] | No
     return session, []
 
 
+SESSION_DETAILS = (
+    "user_name",
+    "nas_ip_address",
+    "nas_port_id",
+    "network_device_name",
+    "acs_server",
+    "framed_ip_address",
+)
+
+
+async def reauth_target(app: IseApp, mac: str) -> tuple[dict[str, Any] | None, list[str], dict[str, Any]]:
+    """The live session a CoA reauth for `mac` would go through, the blockers (no session, no PSN,
+    protect lists), and the session details a preview shows."""
+    session, blockers = await session_or_blocker(app, mac)
+    s = session or {}
+    blockers += protect_blockers(
+        app.settings,
+        mac=mac,
+        user=str(s.get("user_name") or "") or None,
+        nad=str(s.get("network_device_name") or "") or None,
+        nad_ips=[str(s.get("nas_ip_address") or s.get("device_ip_address") or "")],
+    )
+    return session, blockers, compact({k: s.get(k) for k in SESSION_DETAILS})
+
+
+async def send_reauth(
+    app: IseApp, session: dict[str, Any] | None, mac: str, reauth_type: str
+) -> dict[str, Any]:
+    """CoA reauthenticate through the PSN that owns the session (MnT's acs_server)."""
+    psn = str((session or {}).get("acs_server", ""))
+    data = await app.mnt_get(f"CoA/Reauth/{q(psn)}/{q(mac)}/{REAUTH_TYPES[reauth_type]}", missing_ok=False)
+    return coa_result(data)
+
+
 async def anc_rules(app: IseApp, policy: str) -> list[str]:
     """'PolicySet / Rule' for network-access authorization rules/exceptions whose condition mentions
     Session:ANCPolicy with this policy name (library conditions are matched by text only)."""
@@ -105,30 +139,10 @@ def register(reg: ToolRegistrar) -> None:
         endpoint on some devices. Preview-first: shows the session, NAD and PSN it goes through."""
         app: IseApp = get_client(ctx)
         mac_n = normalize_mac(mac)
-        session, blockers = await session_or_blocker(app, mac_n)
-        psn = str((session or {}).get("acs_server", ""))
-        details = {
-            k: (session or {}).get(k)
-            for k in (
-                "user_name",
-                "nas_ip_address",
-                "nas_port_id",
-                "network_device_name",
-                "acs_server",
-                "framed_ip_address",
-            )
-        }
-        s0 = session or {}
-        blockers += protect_blockers(
-            app.settings,
-            mac=mac_n,
-            user=str(s0.get("user_name") or "") or None,
-            nad=str(s0.get("network_device_name") or "") or None,
-            nad_ips=[str(s0.get("nas_ip_address") or s0.get("device_ip_address") or "")],
-        )
+        session, blockers, details = await reauth_target(app, mac_n)
         plan = Plan(
             f"CoA reauth ({reauth_type}) for {mac_n}",
-            details=compact(details),
+            details=details,
             blockers=blockers,
             fingerprint=session_fingerprint(session),
             side_effects=["The endpoint re-authenticates; brief interruption possible"],
@@ -136,10 +150,7 @@ def register(reg: ToolRegistrar) -> None:
         )
 
         async def apply() -> Any:
-            data = await app.mnt_get(
-                f"CoA/Reauth/{q(psn)}/{q(mac_n)}/{REAUTH_TYPES[reauth_type]}", missing_ok=False
-            )
-            return coa_result(data)
+            return await send_reauth(app, session, mac_n, reauth_type)
 
         return await preview_or_apply(
             ctx,

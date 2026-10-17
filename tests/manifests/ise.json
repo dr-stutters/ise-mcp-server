@@ -200,6 +200,10 @@
       "tier": "dangerous",
       "title": "Delete a policy set"
     },
+    "ise_delete_profiling_rule": {
+      "tier": "write",
+      "title": "Delete a custom profiling rule"
+    },
     "ise_delete_pxgrid_client": {
       "tier": "write",
       "title": "Delete a pxGrid client"
@@ -223,6 +227,10 @@
     "ise_endpoint_360": {
       "tier": "read",
       "title": "Endpoint 360"
+    },
+    "ise_explain_profile": {
+      "tier": "read",
+      "title": "Explain an endpoint's profile"
     },
     "ise_export_config": {
       "tier": "read",
@@ -432,6 +440,10 @@
       "tier": "read",
       "title": "List profiler profiles"
     },
+    "ise_list_profiling_rules": {
+      "tier": "read",
+      "title": "List custom profiling rules"
+    },
     "ise_list_pxgrid_clients": {
       "tier": "read",
       "title": "List pxGrid clients"
@@ -460,6 +472,10 @@
       "tier": "read",
       "title": "Explain which policy rule a request would hit"
     },
+    "ise_profiler_status": {
+      "tier": "read",
+      "title": "Profiler status per PSN"
+    },
     "ise_push_trustsec_matrix": {
       "tier": "dangerous",
       "title": "Push TrustSec policy to devices (CoA)"
@@ -475,6 +491,10 @@
     "ise_release_rejected_endpoint": {
       "tier": "write",
       "title": "Release rejected endpoints"
+    },
+    "ise_reprofile_endpoint": {
+      "tier": "dangerous",
+      "title": "Reprofile an endpoint (CoA)"
     },
     "ise_search_spec": {
       "tier": "read",
@@ -511,6 +531,10 @@
     "ise_set_ip_sgt": {
       "tier": "write",
       "title": "Create or update a static IP-SGT mapping"
+    },
+    "ise_set_profiling_rule": {
+      "tier": "write",
+      "title": "Create or update a custom profiling rule"
     },
     "ise_set_pxgrid_settings": {
       "tier": "write",
