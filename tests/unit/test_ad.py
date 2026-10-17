@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 import respx
 from fastmcp import Client
 
@@ -13,6 +14,7 @@ from ise_mcp.knowledge import FAILURE_HINTS
 from ise_mcp.tools.policy_edit import check_attribute
 from ise_mcp.tools.policy_explain import eval_multi, evaluate
 from tests.unit.conftest import FAILURE_REASONS_XML, MISSING_SESSION, ers_page, fixture_text, make_server
+from tests.unit.test_policy_edit import ATTRS, EXT, EXT_RULE, authz_mocks
 from tests.unit.test_writes import two_step
 
 JP_ID = "3fb37cb0-c8fb-11f1-b70f-aaac89c8aec5"
@@ -399,3 +401,24 @@ async def test_join_error_never_carries_password(mock: respx.MockRouter) -> None
         r2 = await c.call_tool("ise_join_ad", {**args, "confirm": token}, raise_on_error=False)
     text = json.dumps([getattr(x, "text", "") for x in r2.content]) + json.dumps(r2.structured_content)
     assert "Sup3r-Secret" not in text
+
+
+async def test_join_refreshes_the_policy_dictionaries(mock: respx.MockRouter) -> None:
+    """Right after a join ISE publishes 'CORP:ExternalGroups'; the cached dictionaries must not keep
+    refusing it for the 10-minute cache lifetime."""
+    mock_jp(mock, joined=False)
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
+    mock.put(f"{OP}/joinAllNodes").respond(204)
+    dictionary = authz_mocks(mock)
+    dictionary.side_effect = [
+        httpx.Response(200, json={"response": ATTRS}),
+        httpx.Response(200, json={"response": [*ATTRS, EXT]}),
+    ]
+    join = {"join_point": "CORP", "username": "Administrator", "password": "pw12345"}
+    async with Client(make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)) as c:
+        before = (await c.call_tool("ise_create_authz_rule", EXT_RULE)).structured_content
+        token = (await c.call_tool("ise_join_ad", join)).structured_content["confirm"]
+        await c.call_tool("ise_join_ad", {**join, "confirm": token})
+        after = (await c.call_tool("ise_create_authz_rule", EXT_RULE)).structured_content
+    assert before is not None and before["status"] == "blocked"
+    assert after is not None and after["status"] == "preview", after

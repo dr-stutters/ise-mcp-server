@@ -76,6 +76,9 @@ _EXPR = re.compile(
     re.IGNORECASE,
 )
 DICT_TTL = 600.0
+# An attribute missing from a cached dictionary older than this is looked up again before blocking:
+# '<join point>:ExternalGroups' appears a little after ise_join_ad / ise_create_ad_join_point.
+DICT_RECHECK_AGE = 5.0
 SECTION_PATH = {
     "authentication": "authentication",
     "authorization": "authorization",
@@ -130,14 +133,16 @@ async def condition_library(app: IseApp, kind: str) -> dict[str, dict[str, Any]]
     return {str(c.get("name")).lower(): c for c in data if isinstance(c, dict) and c.get("name")}
 
 
-async def dictionary_attributes(app: IseApp, kind: str, scope: str) -> list[dict[str, Any]]:
+async def dictionary_attributes(
+    app: IseApp, kind: str, scope: str, max_age: float | None = None
+) -> list[dict[str, Any]]:
     """Dictionary attributes usable in policy-set / authentication / authorization conditions. ~300 KB
-    for network access, so cached on the app for 10 minutes."""
+    for network access, so cached on the app for 10 minutes (or `max_age` seconds)."""
     cache: dict[tuple[str, str], tuple[float, list[dict[str, Any]]]] = app.__dict__.setdefault(
         "_dict_cache", {}
     )
     hit = cache.get((kind, scope))
-    if hit and time.monotonic() - hit[0] < DICT_TTL:
+    if hit and time.monotonic() - hit[0] < (DICT_TTL if max_age is None else max_age):
         return hit[1]
     data = _resp(await app.openapi.get(f"/api/v1/policy/{kind}/dictionaries/{scope}")) or []
     attrs = [a for a in data if isinstance(a, dict)]
@@ -201,6 +206,7 @@ async def build_condition(
     if any(n["conditionType"] == "ConditionAttributes" for n in nodes):
         attrs = await dictionary_attributes(app, kind, scope)
         custom: dict[str, str] | None = None
+        unknown: list[dict[str, Any]] = []
         for n in nodes:
             if n["conditionType"] != "ConditionAttributes":
                 continue
@@ -213,7 +219,17 @@ async def build_condition(
                 if hit:
                     n["dictionaryName"], n["attributeName"] = "EndPoints", hit
                     continue
-            blockers += check_attribute(n, attrs)
+            found = check_attribute(n, attrs)
+            if found and found[0].startswith("Unknown attribute"):
+                unknown.append(n)
+            else:
+                blockers += found
+        if unknown:
+            # The cache may predate the attribute (an AD join point publishes ExternalGroups a little
+            # after the join): look again unless the cached copy is only seconds old.
+            fresh = await dictionary_attributes(app, kind, scope, max_age=DICT_RECHECK_AGE)
+            for n in unknown:
+                blockers += check_attribute(n, fresh)
     if len(nodes) == 1:
         return nodes[0], blockers
     block = "ConditionAndBlock" if match == "all" else "ConditionOrBlock"

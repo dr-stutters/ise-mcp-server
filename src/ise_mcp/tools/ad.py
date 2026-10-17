@@ -322,6 +322,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "adScopesNames": "Default_Scope",
             "enableDomainAllowedList": True,
         }
+
+        async def create() -> Any:
+            out = await app.ers_create("activedirectory", {"ERSActiveDirectory": body})
+            app.__dict__.pop("_dict_cache", None)  # ISE adds a '<join point>' dictionary
+            return out
+
         return await preview_or_apply(
             ctx,
             tool="ise_create_ad_join_point",
@@ -333,7 +339,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 blockers=blockers,
                 fingerprint=fingerprint([p.get("id") for p in existing]),
             ),
-            apply=lambda: app.ers_create("activedirectory", {"ERSActiveDirectory": body}),
+            apply=create,
         )
 
     @reg.write(title="Add AD groups to a join point")
@@ -483,10 +489,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
 
         async def apply() -> Any:
             try:
-                return await app.ers_request("PUT", path, json=body, timeout=180)
+                out = await app.ers_request("PUT", path, json=body, timeout=180)
             except UpstreamError as e:
                 # Never let ISE's error text carry the domain password back to the caller.
                 raise UpstreamError(str(e).replace(password, "***"), e.status_code) from None
+            app.__dict__.pop("_dict_cache", None)  # '<join point>:ExternalGroups' (dis)appears
+            return out
 
         return await preview_or_apply(
             ctx,
