@@ -142,6 +142,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_PROBE_TIMEOUT` | `10` | Per-surface timeout used by `ise_status` |
 | `ISE_DETAIL_THRESHOLD` | `100` | ERS list pages above this size skip the per-item detail GETs |
 | `ISE_DETAIL_CONCURRENCY` | `5` | Concurrent per-item ERS GETs |
+| `ISE_EXPORT_DIR` | unset | Directory `ise_export_config` writes to and `ise_diff_config` reads from (relative paths resolve there); unset: absolute `*.yaml` paths only. Set it on a shared host |
 | `ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS` | | Comma lists; a CoA/ANC/NAD-delete on any of these is blocked (safety rails, I18) |
 | `ISE_COA_ALLOW_SHARED_PORT` | `false` | Allow `port_bounce`/`port_shutdown` on a switch port with more than one live session (an uplink/trunk) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
@@ -248,17 +249,19 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-114 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 60 read tools plus `ise_api_call` (GET-only) are registered. Everything
+116 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 62 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (60)
+### Read (62)
 
 | Tool | What it does |
 |---|---|
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
+| `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
+| `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
@@ -394,6 +397,16 @@ connected). `ise_troubleshoot_endpoint_access` ends with a preview-only fix, and
 tools only when they are enabled. `ise_quarantine_host` applies ANC (dangerous tier) and, with
 `fmc_block=true`, contains the IP on the FTDs through fmc-mcp-server (`fmc_contain_host`). It ends with
 the exact undo steps. Without the dangerous tier it gives GUI steps.
+
+### Config export and diff
+
+`ise_export_config` writes policy sets and rules, authorization profiles, dACLs, NADs and NDGs (secrets
+masked), identity and endpoint groups, custom attributes, SGTs, SGACLs, the egress matrix, command sets and
+shell profiles as YAML: names instead of ids, rules in rank order and everything else sorted by name, with
+ids, links, hit counts and timestamps left out, so an unchanged ISE exports the same bytes every time (apart
+from `exported_at`). Save one as a baseline (`path=`, inside `ISE_EXPORT_DIR` when set) and later run
+`ise_diff_config(before=...)` against live ISE, or against another export: added, removed, changed (field by
+field) and moved rules, by section. Format and rules: [docs/config-export.md](docs/config-export.md).
 
 ### Certificates and EAP-TLS
 The certificate tools exchange PEM text, so any CA can sign: Windows AD CS (`win_sign_csr`), OpenSSL,
