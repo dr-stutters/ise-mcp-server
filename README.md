@@ -42,6 +42,11 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   and checked against ISE's dictionaries in the preview ("did you mean ...?").
 - **`ise_audit_nads`**: finds missing, short or reused shared secrets, NADs in default groups only,
   overlapping ranges and default SNMP communities, without ever showing a secret.
+  Devices with TACACS+ also get single-connect mode and the device-admin policy set their logins select.
+- **Device admin checks without a device**: `ise_admin_policy_explain(user, nad, command)` predicts the
+  device-admin policy set, rule, shell profile and command verdict for an admin login;
+  `ise_test_command_set` says whether command lines would be permitted by a rule's command sets (or a
+  draft set) and which line decides, following ISE's matching rules as checked on a real switch.
 - Spec tools cover all three surfaces. They search the OpenAPI groups, a spec synthesised from the ERS SDK data
   model, and the MnT calls. `ise_api_call` can call any of them.
 - Writes are preview-first (confirm token) and off by default. Disruptive actions (CoA, ANC, deleting NADs,
@@ -249,14 +254,15 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-117 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 62 read tools plus `ise_api_call` (GET-only) are registered. Everything
+122 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 65 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (62)
+### Read (65)
 
 | Tool | What it does |
 |---|---|
+| `ise_admin_policy_explain` | Predict what a TACACS+ device-admin login gets, client-side (ISE has no evaluate API and no TACACS+ live-log REST API): which device-admin policy set the NAD and user select, the authentication rule (identity source), the authorization rule (with its hit count), the shell profile (priv-lvl etc.; Deny All Shell Profile means the login fails) and, for each `command`, the command-set verdict and the line that decided it. |
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
@@ -277,6 +283,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
 | `ise_get_policy_set` | One policy set with all of its rules in order: authentication rules (condition -> identity source, if-fail/if-not-found actions), authorization rules (condition -> profiles and SGT) and local exceptions, each with hit counts and ids. |
 | `ise_get_pxgrid_client` | One pxGrid client: state, the product that registered it, description, groups, and what to do next (approve a pending one; a 'created' account never activated). |
+| `ise_get_tacacs_servers` | List TACACS+ external servers (other TACACS+ servers ISE proxies device-admin requests to: host, port, timeout, single-connect, whether a shared secret is set, never its value) and TACACS+ server sequences (the ordered server lists a device-admin policy set can proxy to, with accounting and username prefix/suffix stripping). |
 | `ise_get_task` | Status of an asynchronous ISE task (e.g. |
 | `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN, audit session id), plus total, posture and profiler session counts. |
 | `ise_list_ad_groups` | Search the joined domain for groups (name as ISE writes it, e.g. |
@@ -318,9 +325,10 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
+| `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (39)
+### Write (41)
 
 | Tool | What it does |
 |---|---|
@@ -339,7 +347,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
 | `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile, or AD join point (after ise_leave_ad). |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, or AD join point (after ise_leave_ad). |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
@@ -358,6 +366,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
 | `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
+| `ise_set_tacacs_server` | Create a TACACS+ external server (a TACACS+ server ISE proxies device-admin requests to, used through a TACACS+ server sequence), or update an existing one: given fields change, others are kept. |
+| `ise_set_tacacs_server_sequence` | Create a TACACS+ server sequence (an ordered list of TACACS+ external servers a device-admin policy set can proxy to), or update one: given fields change, others are kept. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or description. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port or name. |
@@ -509,6 +519,9 @@ them those tests skip with a message naming what is missing. The live write test
 - Pull-only (stutters-mcp-core ADR-003): no pxGrid subscriptions, syslog receivers or pollers.
   TACACS+ live logs have no REST API; device-admin rule hit counts
   (`ise_get_policy_set kind=device-admin`) show which rules matched.
+- Command-set checks take full keywords (the device expands `sh run` before it asks ISE) and can't see
+  which privilege levels the device sends to ISE (`aaa authorization commands <level>`; only those
+  commands are authorized by ISE at all).
 - Condition values for `DEVICE:Location`/`Device Type` are written without the root
   (`All Locations#Sydney`); the tools strip `Location#` if it is given.
 - See docs/GAP-ANALYSIS.md for what is and isn't covered, and why.

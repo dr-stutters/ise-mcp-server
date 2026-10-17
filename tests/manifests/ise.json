@@ -1,5 +1,5 @@
 {
-  "core_version": "0.13.0",
+  "core_version": "0.14.0",
   "manifest": 1,
   "prefix": "ise",
   "prompts": {
@@ -91,6 +91,10 @@
     "ise_add_ad_groups": {
       "tier": "write",
       "title": "Add AD groups to a join point"
+    },
+    "ise_admin_policy_explain": {
+      "tier": "read",
+      "title": "Explain a device-admin (TACACS+) login and command"
     },
     "ise_api_call": {
       "tier": "dangerous",
@@ -212,9 +216,17 @@
       "tier": "read",
       "title": "Deployment health check"
     },
+    "ise_diff_config": {
+      "tier": "read",
+      "title": "Diff ISE configuration exports"
+    },
     "ise_endpoint_360": {
       "tier": "read",
       "title": "Endpoint 360"
+    },
+    "ise_export_config": {
+      "tier": "read",
+      "title": "Export ISE configuration as YAML"
     },
     "ise_export_csr": {
       "tier": "read",
@@ -280,9 +292,17 @@
       "tier": "read",
       "title": "Get a pxGrid client"
     },
+    "ise_get_tacacs_servers": {
+      "tier": "read",
+      "title": "List TACACS+ external servers and sequences"
+    },
     "ise_get_task": {
       "tier": "read",
       "title": "Get an ISE task's status"
+    },
+    "ise_import_config": {
+      "tier": "dangerous",
+      "title": "Import ISE configuration from an export"
     },
     "ise_import_trusted_cert": {
       "tier": "write",
@@ -508,6 +528,14 @@
       "tier": "write",
       "title": "Create or update an SXP connection"
     },
+    "ise_set_tacacs_server": {
+      "tier": "write",
+      "title": "Create or update a TACACS+ external server"
+    },
+    "ise_set_tacacs_server_sequence": {
+      "tier": "write",
+      "title": "Create or update a TACACS+ server sequence"
+    },
     "ise_status": {
       "tier": "read",
       "title": "Cisco ISE status"
@@ -515,6 +543,10 @@
     "ise_test_ad_user": {
       "tier": "read",
       "title": "Test an AD user (lookup + groups)"
+    },
+    "ise_test_command_set": {
+      "tier": "read",
+      "title": "Test a command against TACACS+ command sets"
     },
     "ise_update_authz_profile": {
       "tier": "write",

@@ -219,9 +219,16 @@ def register(reg: ToolRegistrar) -> None:
         """Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short
         shared secrets, the same secret reused on many devices, only the default device groups (so
         policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap
-        without keys. Returns one row per device with findings (secret values are never shown)."""
+        without keys. Devices with a TACACS+ secret get a 'tacacs' column: secret set, single-connect
+        mode, and the device-admin policy set their logins would select (a finding when only the default
+        set, or none, matches; 'may_match_first' lists sets whose conditions depend on the user), plus a
+        warning when no node runs the DeviceAdmin service. Returns one row per device with findings
+        (secret values are never shown)."""
+        from ise_mcp.tools.device_admin import tacacs_audit  # noqa: PLC0415 - device_admin imports this module
+
         app: IseApp = get_client(ctx)
         nads, complete = await all_nads(app)
+        tac_rows, tac_general = await tacacs_audit(app, nads)
         secret_users: dict[str, list[str]] = {}
         for nad in nads:
             secret = (nad.get("authenticationSettings") or {}).get("radiusSharedSecret")
@@ -262,19 +269,36 @@ def register(reg: ToolRegistrar) -> None:
                     findings.append(f"SNMP {key} is a well-known default community")
             if auth.get("enableKeyWrap") and not auth.get("keyEncryptionKey"):
                 findings.append("KeyWrap enabled without a key-encryption key")
-            rows.append({"name": name, "ips": nad_ips(nad), "findings": findings or ["ok"]})
+            row: dict[str, Any] = {"name": name, "ips": nad_ips(nad)}
+            if name in tac_rows:
+                tac = dict(tac_rows[name])
+                findings += tac.pop("findings")
+                row["tacacs"] = tac
+            row["findings"] = findings or ["ok"]
+            rows.append(row)
         rows.sort(key=lambda r: r["findings"] == ["ok"])
         extra: dict[str, Any] = {
             "devices": len(nads),
             "with_findings": sum(1 for r in rows if r["findings"] != ["ok"]),
         }
+        if tac_rows:
+            extra["tacacs"] = {
+                "devices": len(tac_rows),
+                "single_connect": sum(1 for t in tac_rows.values() if t["single_connect"] != "off"),
+                "no_device_admin_policy_set": [
+                    n
+                    for n, t in tac_rows.items()
+                    if any("device-admin policy set" in f for f in t["findings"])
+                ],
+                "findings": tac_general or None,
+            }
         if not complete:
             extra["note"] = "More than 1000 devices: only the first 1000 were audited."
         return list_result(
             page_of(rows, limit=limit, offset=offset),
             fmt=response_format,
             extra=extra,
-            columns=["name", "ips", "findings"],
+            columns=["name", "ips", "tacacs", "findings"],
         )
 
 
