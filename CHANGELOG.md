@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Gap analysis refreshed for v0.11.0** (`docs/GAP-ANALYSIS.md`, 2026-10-18) against the live ISE 3.5.0.527
+  swagger: OpenAPI 118 of 849 operations behind curated tools (v0.2.0: 76), ERS 39 of 82 resources (v0.2.0:
+  20) plus 20 operations the data model does not list, MnT 13 of 14. Per-group and per-resource tables, the
+  area map and "not built" reasons updated; Phase 2/3 kept as a dated appendix. Candidates I55–I62 from the
+  uncovered operations are listed under Later in `ROADMAP.md`.
+- `scripts/api_coverage.py`: regenerates the coverage tables from the live swagger (or a saved snapshot) and a
+  static scan of the tool modules; see the gap analysis for how to run it per release.
+
 ## 0.11.0 (2026-10-17)
 
 ### Added
