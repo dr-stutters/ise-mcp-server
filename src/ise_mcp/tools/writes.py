@@ -73,7 +73,8 @@ def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# ERS trustsecsettings for a NAD that had none: ISE's GUI defaults (daily refreshes, updates by CoA).
+# ERS trustsecsettings for a NAD that had none: daily refreshes, and policy changes sent by CoA (without
+# `sendConfigurationToDevice` ISE's TrustSec push skips the device and its device report stays empty).
 TRUSTSEC_NAD_DEFAULTS: dict[str, Any] = {
     "sgaNotificationAndUpdates": {
         "downlaodEnvironmentDataEveryXSeconds": 86400,
@@ -81,7 +82,7 @@ TRUSTSEC_NAD_DEFAULTS: dict[str, Any] = {
         "reAuthenticationEveryXSeconds": 86400,
         "downloadSGACLListsEveryXSeconds": 86400,
         "otherSGADevicesToTrustThisDevice": False,
-        "sendConfigurationToDevice": False,
+        "sendConfigurationToDevice": True,
         "sendConfigurationToDeviceUsing": "ENABLE_USING_COA",
     },
     "deviceConfigurationDeployment": {"includeWhenDeployingSGTUpdates": False},
@@ -294,6 +295,13 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             str | None,
             Field(description="TrustSec device password ('cts credentials ... password' on the switch)"),
         ] = None,
+        trustsec_push: Annotated[
+            bool | None,
+            Field(
+                description="Send TrustSec policy changes to the device by CoA (ise_push_trustsec_matrix "
+                "relies on it); on by default when TrustSec is first enabled"
+            ),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or
@@ -306,7 +314,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         current = await resolve_nad(app, device)
         patch: dict[str, Any] = {}
         blockers: list[str] = []
-        if trustsec_id is not None or trustsec_password is not None:
+        if trustsec_id is not None or trustsec_password is not None or trustsec_push is not None:
             existing = current.get("trustsecsettings") or {}
             auth_settings = dict(existing.get("deviceAuthenticationSettings") or {})
             if trustsec_id is not None:
@@ -315,10 +323,21 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 auth_settings["sgaDevicePassword"] = trustsec_password
             if not auth_settings.get("sgaDeviceId") or not auth_settings.get("sgaDevicePassword"):
                 blockers.append("TrustSec needs both trustsec_id and trustsec_password the first time")
-            patch["trustsecsettings"] = deep_merge(
+            trustsec = deep_merge(
                 TRUSTSEC_NAD_DEFAULTS if not existing else {},
                 {**existing, "deviceAuthenticationSettings": auth_settings},
             )
+            if trustsec_push is not None:
+                trustsec = deep_merge(
+                    trustsec,
+                    {
+                        "sgaNotificationAndUpdates": {
+                            "sendConfigurationToDevice": trustsec_push,
+                            "sendConfigurationToDeviceUsing": "ENABLE_USING_COA",
+                        }
+                    },
+                )
+            patch["trustsecsettings"] = trustsec
         if ips is not None:
             patch["NetworkDeviceIPList"] = parse_ip_entries(ips)
         if radius_secret is not None:
@@ -364,6 +383,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "new_name": new_name,
                 "trustsec_id": trustsec_id,
                 "trustsec_password": trustsec_password,
+                "trustsec_push": trustsec_push,
             },
             confirm=confirm,
             plan=plan,

@@ -138,6 +138,7 @@ async def test_update_nad_trustsec_credentials(mock: respx.MockRouter) -> None:
     added = changes["trustsecsettings"]["to"]
     assert added["deviceAuthenticationSettings"] == {"sgaDeviceId": "mcp-test-sw1", "sgaDevicePassword": MASK}
     assert added["sgaNotificationAndUpdates"]["sendConfigurationToDeviceUsing"] == "ENABLE_USING_COA"
+    assert added["sgaNotificationAndUpdates"]["sendConfigurationToDevice"] is True
     assert "cts-pass-1" not in json.dumps(preview)
     assert applied["status"] == "applied"
     body = json.loads(put.calls.last.request.content)["NetworkDevice"]
@@ -154,3 +155,40 @@ async def test_update_nad_trustsec_needs_both_first_time(mock: respx.MockRouter)
     mock.get("/ers/config/networkdevice/n1").respond(json=nad)
     preview, _ = await two_step("ise_update_nad", {"device": "mcp-test-sw1", "trustsec_password": "x-pass-1"})
     assert preview["status"] == "blocked" and "both" in preview["blockers"][0]
+
+
+async def test_update_nad_trustsec_push_on_existing(mock: respx.MockRouter) -> None:
+    existing = {
+        "deviceAuthenticationSettings": {"sgaDeviceId": "mcp-test-sw1", "sgaDevicePassword": "cts-pass-1"},
+        "sgaNotificationAndUpdates": {
+            "sendConfigurationToDevice": False,
+            "downloadSGACLListsEveryXSeconds": 3600,
+        },
+        "deviceConfigurationDeployment": {"includeWhenDeployingSGTUpdates": False},
+    }
+    nad = {
+        "NetworkDevice": {
+            "id": "n1",
+            "name": "mcp-test-sw1",
+            "NetworkDeviceIPList": [],
+            "trustsecsettings": existing,
+        }
+    }
+    mock.get("/ers/config/networkdevice", params={"filter": "name.EQ.mcp-test-sw1"}).respond(
+        json=ers_page([{"id": "n1", "name": "mcp-test-sw1"}])
+    )
+    mock.get("/ers/config/networkdevice/n1").respond(json=nad)
+    put = mock.put("/ers/config/networkdevice/n1").respond(200, json={"UpdatedFieldsList": {}})
+    preview, applied = await two_step("ise_update_nad", {"device": "mcp-test-sw1", "trustsec_push": True})
+    changes = preview["preview"]["changes"]
+    assert changes == {
+        "trustsecsettings.sgaNotificationAndUpdates.sendConfigurationToDevice": {"from": False, "to": True},
+        "trustsecsettings.sgaNotificationAndUpdates.sendConfigurationToDeviceUsing": {
+            "from": None,
+            "to": "ENABLE_USING_COA",
+        },
+    }
+    assert applied["status"] == "applied"
+    body = json.loads(put.calls.last.request.content)["NetworkDevice"]["trustsecsettings"]
+    assert body["sgaNotificationAndUpdates"]["downloadSGACLListsEveryXSeconds"] == 3600  # kept
+    assert body["deviceAuthenticationSettings"]["sgaDevicePassword"] == "cts-pass-1"  # kept
