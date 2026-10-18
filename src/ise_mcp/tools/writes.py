@@ -302,19 +302,48 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "relies on it); on by default when TrustSec is first enabled"
             ),
         ] = None,
+        trustsec_rest_user: Annotated[
+            str | None,
+            Field(
+                description="HTTP REST API username for the TrustSec HTTPS policy download: what the switch "
+                "sends in 'cts policy-server username' (needs TrustSec on the device and ISE's TrustSec "
+                "HTTPS server, ise_set_trustsec_settings)"
+            ),
+        ] = None,
+        trustsec_rest_password: Annotated[
+            str | None, Field(description="HTTP REST API password ('cts policy-server ... password')")
+        ] = None,
+        trustsec_push_id: Annotated[
+            bool | None,
+            Field(
+                description="Push ID support: ISE tags its TrustSec CoAs with a push id and the device "
+                "reports each policy download back (what fills ise_trustsec_device_report); needs a "
+                "device with PUSH ID (HTTPS) support (IOS XE 26.2.1+, REST API v3)"
+            ),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or
-        TrustSec device id/password (what the switch presents in 'cts credentials' to get a PAC and
-        download environment data and policy; defaults for the refresh timers and CoA-based updates are
-        set the first time). Only the given fields change. Preview-first, showing a field-by-field diff
-        (secrets shown only as changed). Changing a secret breaks RADIUS until the device is updated to
-        match."""
+        TrustSec settings: device id/password (what the switch presents in 'cts credentials' to get a PAC
+        and download environment data and policy; defaults for the refresh timers and CoA-based updates
+        are set the first time), the HTTP REST API username/password for the HTTPS policy download
+        ('cts policy-server' on IOS-XE) and push id support (the device reports its downloads, which is
+        what ise_trustsec_device_report shows). Only the given fields change. Preview-first, showing a
+        field-by-field diff (secrets shown only as changed). Changing a secret breaks RADIUS until the
+        device is updated to match."""
         app: IseApp = get_client(ctx)
         current = await resolve_nad(app, device)
         patch: dict[str, Any] = {}
         blockers: list[str] = []
-        if trustsec_id is not None or trustsec_password is not None or trustsec_push is not None:
+        trustsec_args = (
+            trustsec_id,
+            trustsec_password,
+            trustsec_push,
+            trustsec_rest_user,
+            trustsec_rest_password,
+            trustsec_push_id,
+        )
+        if any(a is not None for a in trustsec_args):
             existing = current.get("trustsecsettings") or {}
             auth_settings = dict(existing.get("deviceAuthenticationSettings") or {})
             if trustsec_id is not None:
@@ -323,6 +352,17 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 auth_settings["sgaDevicePassword"] = trustsec_password
             if not auth_settings.get("sgaDeviceId") or not auth_settings.get("sgaDevicePassword"):
                 blockers.append("TrustSec needs both trustsec_id and trustsec_password the first time")
+            if trustsec_rest_user is not None:
+                auth_settings["restApiUsername"] = trustsec_rest_user
+            if trustsec_rest_password is not None:
+                auth_settings["restApiPassword"] = trustsec_rest_password
+            if (trustsec_rest_user is not None or trustsec_rest_password is not None) and not (
+                auth_settings.get("restApiUsername") and auth_settings.get("restApiPassword")
+            ):
+                blockers.append(
+                    "The REST API credentials need both trustsec_rest_user and trustsec_rest_password the "
+                    "first time"
+                )
             trustsec = deep_merge(
                 TRUSTSEC_NAD_DEFAULTS if not existing else {},
                 {**existing, "deviceAuthenticationSettings": auth_settings},
@@ -337,6 +377,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                         }
                     },
                 )
+            if trustsec_push_id is not None:
+                trustsec["pushIdSupport"] = "true" if trustsec_push_id else "false"  # ERS keeps it a string
             patch["trustsecsettings"] = trustsec
         if ips is not None:
             patch["NetworkDeviceIPList"] = parse_ip_entries(ips)
@@ -384,6 +426,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "trustsec_id": trustsec_id,
                 "trustsec_password": trustsec_password,
                 "trustsec_push": trustsec_push,
+                "trustsec_rest_user": trustsec_rest_user,
+                "trustsec_rest_password": trustsec_rest_password,
+                "trustsec_push_id": trustsec_push_id,
             },
             confirm=confirm,
             plan=plan,
