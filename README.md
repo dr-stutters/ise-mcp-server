@@ -259,11 +259,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-143 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 75 read tools plus `ise_api_call` (GET-only) are registered. Everything
+145 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 76 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (75)
+### Read (76)
 
 | Tool | What it does |
 |---|---|
@@ -293,6 +293,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_pxgrid_client` | One pxGrid client: state, the product that registered it, description, groups, and what to do next (approve a pending one; a 'created' account never activated). |
 | `ise_get_tacacs_servers` | List TACACS+ external servers (other TACACS+ servers ISE proxies device-admin requests to: host, port, timeout, single-connect, whether a shared secret is set, never its value) and TACACS+ server sequences (the ordered server lists a device-admin policy set can proxy to, with accounting and username prefix/suffix stripping). |
 | `ise_get_task` | Status of an asynchronous ISE task (e.g. |
+| `ise_get_trustsec_settings` | ISE's TrustSec general settings: whether the TrustSec HTTPS (REST) policy server is on (what 'cts policy-server' on IOS-XE downloads environment data and policy from, port 9063 on the PSNs, and what feeds ise_trustsec_device_report), its audit log, whether a matrix cell may carry several SGACLs, automatic SGT numbering, and the HTTPS server list ISE hands to devices in environment data (host name, addresses, port). |
 | `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN, audit session id), plus total, posture and profiler session counts. |
 | `ise_list_ad_groups` | Search the joined domain for groups (name as ISE writes it, e.g. |
 | `ise_list_allowed_protocols` | List allowed-protocols services (selected by each policy set) and which authentication protocols each permits: PAP, CHAP, MS-CHAPv2, EAP-MD5, EAP-TLS, PEAP, EAP-FAST, TEAP, LEAP. |
@@ -343,7 +344,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_trustsec_device_report` | Which network devices have downloaded ISE's current TrustSec policy: per device the last step of the ISE <-> switch exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device last reported, whether it is current, and what to check when it is not (PAC, CTS credentials, CoA, 'cts refresh policy'). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (51)
+### Write (52)
 
 | Tool | What it does |
 |---|---|
@@ -391,11 +392,12 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
 | `ise_set_tacacs_server` | Create a TACACS+ external server (a TACACS+ server ISE proxies device-admin requests to, used through a TACACS+ server sequence), or update an existing one: given fields change, others are kept. |
 | `ise_set_tacacs_server_sequence` | Create a TACACS+ server sequence (an ordered list of TACACS+ external servers a device-admin policy set can proxy to), or update one: given fields change, others are kept. |
+| `ise_set_trustsec_settings` | Change ISE's TrustSec general settings: the TrustSec HTTPS (REST) policy server that 'cts policy-server' switches download from (and that feeds ise_trustsec_device_report), its audit log, and whether a matrix cell may carry several SGACLs. |
 | `ise_suspend_guest_user` | Suspend a guest account as the sponsor: logins fail until ise_reinstate_guest_user. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or description. |
 | `ise_update_guest_user` | Change a guest's contact or visit details as the sponsor. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
-| `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or TrustSec device id/password (what the switch presents in 'cts credentials' to get a PAC and download environment data and policy; defaults for the refresh timers and CoA-based updates are set the first time). |
+| `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or TrustSec settings: device id/password (what the switch presents in 'cts credentials' to get a PAC and download environment data and policy; defaults for the refresh timers and CoA-based updates are set the first time), the HTTP REST API username/password for the HTTPS policy download ('cts policy-server' on IOS-XE) and push id support (the device reports its downloads, which is what ise_trustsec_device_report shows). |
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
@@ -428,12 +430,6 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
-
-The prompts walk a model through ISE and the access switch (via the cml or catc MCP server, when
-connected). `ise_troubleshoot_endpoint_access` ends with a preview-only fix, and its fix step offers write
-tools only when they are enabled. `ise_quarantine_host` applies ANC (dangerous tier) and, with
-`fmc_block=true`, contains the IP on the FTDs through fmc-mcp-server (`fmc_contain_host`). It ends with
-the exact undo steps. Without the dangerous tier it gives GUI steps.
 
 ### Config export, diff and import
 
@@ -530,6 +526,11 @@ UTC-12 so they are never in the future). Portal creation, pages and themes stay 
 device learns bindings from ISE. The node needs the SXP service (`ise_update_node_services`). Static
 mappings (`ise_set_ip_sgt`) sent to an SXP domain reach listeners at once. `ise_deploy_ip_sgt` pushes them
 over SSH instead, and `ise_push_trustsec_matrix` makes TrustSec devices refresh the egress policy.
+Switches can download environment data and policy over ISE's TrustSec HTTPS server instead of RADIUS/PAC:
+`ise_set_trustsec_settings(https_server=True)` (adds the PSNs to the HTTPS server list on 9063 when it is
+empty), `ise_update_nad(trustsec_rest_user=, trustsec_rest_password=)` for the credentials `cts
+policy-server` sends, and `docs/trustsec.md` for the switch side. `ise_trustsec_device_report` shows the
+devices that report their downloads back (PUSH ID support, IOS XE 26.2.1+); others are checked on the switch.
 
 ### Profiler
 

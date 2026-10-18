@@ -10,7 +10,17 @@ from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
 
-from ise_mcp._core import NotFound, ResponseFormat, ToolRegistrar, get_client
+from ise_mcp._core import (
+    Confirm,
+    InvalidRequest,
+    NotFound,
+    Plan,
+    ResponseFormat,
+    ToolRegistrar,
+    field_changes,
+    get_client,
+    preview_or_apply,
+)
 from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import (
@@ -197,14 +207,61 @@ REPORT_COLUMNS = [
     "status_updated",
     "hint",
 ]
+GENERAL_SETTINGS = "/api/v1/trustsec/general-settings"
+HTTPS_SERVERS = "/api/v1/trustsec/https-server"
+TRUSTSEC_NODES = "/api/v1/trustsec/deployment/node"
+HTTPS_PORT = 9063
 NO_REPORT_NOTE = (
     "No TrustSec device has reported to ISE. This report covers the HTTPS (REST) policy download: the "
-    "device appears once ISE's TrustSec HTTPS server is enabled (GET /api/v1/trustsec/general-settings, "
-    "httpsServerConfig.enableHttps), the NAD has TrustSec settings (ise_update_nad trustsec_id / "
-    "trustsec_password, plus the REST API credentials) and the switch downloads with 'cts policy-server'. "
-    "Switches that download over RADIUS/PAC only never appear here; check them with 'show cts "
-    "role-based permissions'. See docs/trustsec.md."
+    "device appears once ISE's TrustSec HTTPS server is enabled (ise_get_trustsec_settings / "
+    "ise_set_trustsec_settings(https_server=True)), the NAD has TrustSec settings and REST API credentials "
+    "(ise_update_nad trustsec_id / trustsec_password / trustsec_rest_user / trustsec_rest_password) and the "
+    "switch downloads with 'cts policy-server' and reports its downloads back (PUSH ID support: "
+    "ise_update_nad trustsec_push_id, IOS XE 26.2.1+ with REST API v3; a 17.x switch downloads over "
+    "HTTPS but never reports, so it stays out of this list). Switches that download over RADIUS/PAC "
+    "only never appear here either; check them with 'show cts role-based permissions'. See "
+    "docs/trustsec.md."
 )
+
+
+def trustsec_settings_view(settings: dict[str, Any]) -> dict[str, Any]:
+    """GET general-settings -> the fields a reader needs, in one flat dict."""
+    https = settings.get("httpsServerConfig") or {}
+    auto = settings.get("configuredGenerateSgtAutomatically")
+    return {
+        "https_server": https.get("enableHttps"),
+        "https_audit_log": https.get("enableAuditLog"),
+        "multiple_sgacls": settings.get("allowMultipleSGACLs"),
+        "auto_sgt_numbering": auto if isinstance(auto, bool) else str(auto).lower() == "true",
+        "next_sgt": settings.get("nextTag"),
+    }
+
+
+def https_server_body(node: dict[str, Any]) -> dict[str, Any]:
+    """A TrustSec deployment node (GET trustsec/deployment/node) -> POST body for trustsec/https-server."""
+    v4 = [i["ipv4Address"] for i in node.get("nicInterfaces") or [] if i.get("ipv4Address")]
+    v6 = [a for i in node.get("nicInterfaces") or [] for a in i.get("ipv6Addresses") or []]
+    return {
+        "name": node.get("hostname"),
+        "hostName": node.get("fqdn") or node.get("hostname"),
+        "ipAddresses": v4 + v6,
+        "ipv4Addresses": v4,
+        "ipv6Addresses": v6,
+        "port": HTTPS_PORT,
+        "serverType": "PSN",
+        "CtsCertificates": [],
+    }
+
+
+def https_server_row(server: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": server.get("name"),
+        "host": server.get("hostName"),
+        "ips": server.get("ipAddresses") or server.get("ipv4Addresses"),
+        "port": server.get("port"),
+        "type": server.get("serverType"),
+        "index": server.get("index"),
+    }
 
 
 def register(reg: ToolRegistrar) -> None:
@@ -348,11 +405,12 @@ def register(reg: ToolRegistrar) -> None:
                 data = await app.openapi.get(f"{DEVICE_REPORT}/network-device/{quote(name, safe='')}")
             except NotFound:
                 raise NotFound(
-                    f"ISE has no TrustSec report for network device {name!r}: it has never downloaded "
-                    "TrustSec policy over HTTPS (the flow this report covers). Check the NAD's TrustSec "
-                    "settings (ise_get_nad), ISE's TrustSec HTTPS server (GET /api/v1/trustsec/"
-                    "general-settings) and the switch ('show cts policy-server statistics' for HTTPS, "
-                    "'show cts pacs' / 'show cts role-based permissions' for RADIUS downloads); see "
+                    f"ISE has no TrustSec report for network device {name!r}: it has never reported a "
+                    "TrustSec policy download over HTTPS (the flow this report covers; the device needs "
+                    "PUSH ID support, IOS XE 26.2.1+). Check the NAD's TrustSec "
+                    "settings and REST API credentials (ise_get_nad), ISE's TrustSec HTTPS server "
+                    "(ise_get_trustsec_settings) and the switch ('show cts policy-server statistics' for "
+                    "HTTPS, 'show cts pacs' / 'show cts role-based permissions' for RADIUS downloads); see "
                     "docs/trustsec.md.",
                     404,
                 ) from None
@@ -368,6 +426,107 @@ def register(reg: ToolRegistrar) -> None:
         rows = sorted((device_report_row(i) for i in items), key=lambda r: str(r["device"]))
         page = page_of(rows, limit=limit, offset=offset)
         return list_result(page, fmt=response_format, columns=REPORT_COLUMNS, extra=extra)
+
+    @reg.read(title="TrustSec general settings")
+    async def ise_get_trustsec_settings(ctx: Context) -> dict[str, Any]:
+        """ISE's TrustSec general settings: whether the TrustSec HTTPS (REST) policy server is on (what
+        'cts policy-server' on IOS-XE downloads environment data and policy from, port 9063 on the PSNs,
+        and what feeds ise_trustsec_device_report), its audit log, whether a matrix cell may carry several
+        SGACLs, automatic SGT numbering, and the HTTPS server list ISE hands to devices in environment
+        data (host name, addresses, port). Change them with ise_set_trustsec_settings."""
+        app: IseApp = get_client(ctx)
+        settings = await app.openapi.get(GENERAL_SETTINGS)
+        servers = await openapi_all(app, HTTPS_SERVERS)
+        return {**trustsec_settings_view(settings), "https_servers": [https_server_row(x) for x in servers]}
+
+    @reg.write(title="Change TrustSec general settings")
+    async def ise_set_trustsec_settings(
+        ctx: Context,
+        https_server: Annotated[
+            bool | None,
+            Field(
+                description="Enable ISE's TrustSec HTTPS (REST) policy server, TCP 9063 on the PSNs: "
+                "switches with 'cts policy-server' download environment data and policy over it and appear "
+                "in ise_trustsec_device_report"
+            ),
+        ] = None,
+        audit_log: Annotated[
+            bool | None, Field(description="Log the whole HTTPS download payload in ISE's audit")
+        ] = None,
+        multiple_sgacls: Annotated[
+            bool | None,
+            Field(description="Allow several SGACLs in one egress cell (off: one SGACL plus a catch-all)"),
+        ] = None,
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Change ISE's TrustSec general settings: the TrustSec HTTPS (REST) policy server that
+        'cts policy-server' switches download from (and that feeds ise_trustsec_device_report), its audit
+        log, and whether a matrix cell may carry several SGACLs. Only the given settings change; the
+        switch side (trustpoint, 'cts policy-server', the NAD's REST API credentials via ise_update_nad)
+        is in docs/trustsec.md. Preview-first, with the current value of each setting."""
+        app: IseApp = get_client(ctx)
+        if https_server is None and audit_log is None and multiple_sgacls is None:
+            raise InvalidRequest("Nothing to change: give https_server, audit_log or multiple_sgacls")
+        current = await app.openapi.get(GENERAL_SETTINGS)
+        https = dict(current.get("httpsServerConfig") or {})
+        if https_server is not None:
+            https["enableHttps"] = https_server
+        if audit_log is not None:
+            https["enableAuditLog"] = audit_log
+        body = {
+            "allowMultipleSGACLs": (
+                current.get("allowMultipleSGACLs") if multiple_sgacls is None else multiple_sgacls
+            ),
+            "httpsServerConfig": https,
+        }
+        before = {k: current.get(k) for k in body}
+        side_effects: list[str] = []
+        details: dict[str, Any] = {
+            "changes": field_changes(before, body),
+            "current": trustsec_settings_view(current),
+        }
+        was_on = bool((current.get("httpsServerConfig") or {}).get("enableHttps"))
+        new_servers: list[dict[str, Any]] = []
+        if https_server and not was_on:
+            side_effects.append(
+                "ISE's PSNs start answering TrustSec policy downloads on TCP 9063; devices use it only "
+                "once they have 'cts policy-server' and REST API credentials on their NAD"
+            )
+            # ISE refuses to enable HTTPS (HTTP 500) while its TrustSec HTTPS server list is empty: the
+            # GUI makes you add the PSNs first. Do that here, one entry per PSN on the default port.
+            if not await openapi_all(app, HTTPS_SERVERS):
+                new_servers = [https_server_body(n) for n in await openapi_all(app, TRUSTSEC_NODES)]
+                details["https_servers_added"] = [https_server_row(x) for x in new_servers]
+                if not new_servers:
+                    raise InvalidRequest(
+                        "ISE has no TrustSec HTTPS server and no node to add as one "
+                        "(GET /api/v1/trustsec/deployment/node is empty)"
+                    )
+        if https_server is False and was_on:
+            side_effects.append(
+                "Devices that download policy with 'cts policy-server' lose their policy source until "
+                "they fall back to RADIUS"
+            )
+        plan = Plan(
+            "Update TrustSec general settings",
+            details=details,
+            fingerprint=current,
+            side_effects=side_effects,
+        )
+
+        async def apply() -> Any:
+            created = [await app.openapi.post(HTTPS_SERVERS, json=server) for server in new_servers]
+            result = await app.openapi.put(GENERAL_SETTINGS, json=body)
+            return {"result": result, "https_servers_added": created} if created else result
+
+        return await preview_or_apply(
+            ctx,
+            tool="ise_set_trustsec_settings",
+            args={"https_server": https_server, "audit_log": audit_log, "multiple_sgacls": multiple_sgacls},
+            confirm=confirm,
+            plan=plan,
+            apply=apply,
+        )
 
     @reg.read(title="List IP-SGT mappings")
     async def ise_list_ip_sgt_mappings(
