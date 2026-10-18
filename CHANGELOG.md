@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 (2026-10-18)
 
 ### Added
 - **TrustSec HTTPS (REST) policy download (I55 follow-up).** `ise_set_trustsec_settings(https_server,
