@@ -198,9 +198,12 @@ REPORT_COLUMNS = [
     "hint",
 ]
 NO_REPORT_NOTE = (
-    "No TrustSec device has reported to ISE. A switch appears here once it downloads environment data "
-    "or policy: it needs TrustSec settings on its NAD (ise_update_nad trustsec_id/trustsec_password) and "
-    "'cts credentials' plus a PAC on the switch ('show cts pacs'); see docs/trustsec.md."
+    "No TrustSec device has reported to ISE. This report covers the HTTPS (REST) policy download: the "
+    "device appears once ISE's TrustSec HTTPS server is enabled (GET /api/v1/trustsec/general-settings, "
+    "httpsServerConfig.enableHttps), the NAD has TrustSec settings (ise_update_nad trustsec_id / "
+    "trustsec_password, plus the REST API credentials) and the switch downloads with 'cts policy-server'. "
+    "Switches that download over RADIUS/PAC only never appear here; check them with 'show cts "
+    "role-based permissions'. See docs/trustsec.md."
 )
 
 
@@ -333,7 +336,9 @@ def register(reg: ToolRegistrar) -> None:
         changed policy, when the device last reported, whether it is current, and what to check when it
         is not (PAC, CTS credentials, CoA, 'cts refresh policy'). This is ISE's side of the check after
         ise_set_egress_policy / ise_push_trustsec_matrix; the switch side is 'show cts role-based
-        permissions'. A device missing from the report has never downloaded TrustSec policy."""
+        permissions'. ISE keeps this report for devices that download policy over HTTPS ('cts
+        policy-server' on IOS-XE, ISE's TrustSec HTTPS server enabled); a device missing from it either
+        never downloaded policy or downloads over RADIUS/PAC only (then the switch CLI is the check)."""
         app: IseApp = get_client(ctx)
         extra: dict[str, Any] | None = None
         if nad:
@@ -344,8 +349,11 @@ def register(reg: ToolRegistrar) -> None:
             except NotFound:
                 raise NotFound(
                     f"ISE has no TrustSec report for network device {name!r}: it has never downloaded "
-                    "TrustSec policy. Check the NAD's TrustSec device id/password (ise_get_nad) and the "
-                    "switch ('show cts pacs', 'cts refresh environment-data'); see docs/trustsec.md.",
+                    "TrustSec policy over HTTPS (the flow this report covers). Check the NAD's TrustSec "
+                    "settings (ise_get_nad), ISE's TrustSec HTTPS server (GET /api/v1/trustsec/"
+                    "general-settings) and the switch ('show cts policy-server statistics' for HTTPS, "
+                    "'show cts pacs' / 'show cts role-based permissions' for RADIUS downloads); see "
+                    "docs/trustsec.md.",
                     404,
                 ) from None
             items = report_items(data)

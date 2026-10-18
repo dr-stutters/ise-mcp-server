@@ -9,13 +9,17 @@
   exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device
   last reported, `current` (the device reported success after the last policy change) and a hint naming what
   to check for each failure status (PAC and CTS credentials, CoA port and key, `cts refresh policy`). A device
-  that never downloaded policy is explained rather than returned as a bare 404. `ise_update_nad` gains
-  `trustsec_id` / `trustsec_password` (the NAD's TrustSec device id and password, what the switch presents in
-  `cts credentials`; refresh timers and CoA-based updates get ISE's defaults the first time). `docs/trustsec.md`
-  is the runbook: switch configuration, the policy/push/verify sequence with the tool calls and the switch
-  commands, what to check when enforcement does not happen, undo, and the evidence of the lab run (bob
-  `Contractors` -> DC `Production_Servers` denied on sw1 with the counters, alice permitted, ISE report
-  agreeing with the switch).
+  that never downloaded policy is explained rather than returned as a bare 404. ISE feeds this report from
+  the TrustSec HTTPS (REST) policy download; a switch that downloads over RADIUS with a PAC never appears in
+  it, and the tool's empty-report note and 404 message say so. `ise_update_nad` gains `trustsec_id` /
+  `trustsec_password` (the NAD's TrustSec device id and password, what the switch presents in `cts
+  credentials`; refresh timers get ISE's defaults the first time and policy changes are sent by CoA, which
+  `ise_push_trustsec_matrix` relies on) and `trustsec_push` (toggle the CoA updates on an existing NAD).
+  `docs/trustsec.md` is the runbook: switch configuration, the policy/push/verify sequence with the tool
+  calls and the switch commands, what to check when enforcement does not happen (PAC, environment data,
+  CoA, ISE's single-SGACL setting, binding precedence, Catalyst 9000v limits), undo, and the evidence of the
+  lab run: bob (`Contractors`) -> `Production_Servers` denied on sw1 (`HW-Denied 5`, 100% loss), alice
+  (`Employees`) permitted (`HW-Permitt 10`, 0% loss), the cell on the switch identical to ISE's.
 
 ### Changed
 - **Gap analysis refreshed for v0.11.0** (`docs/GAP-ANALYSIS.md`, 2026-10-18) against the live ISE 3.5.0.527

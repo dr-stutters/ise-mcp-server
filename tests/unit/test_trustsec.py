@@ -78,7 +78,7 @@ async def test_device_report_all(mock: respx.MockRouter) -> None:
 async def test_device_report_nobody_reported(mock: respx.MockRouter) -> None:
     mock.get(REPORT).respond(json={"version": "1.0.0", "response": None})
     out = await call_tool(make_server(), "ise_trustsec_device_report", {"response_format": "json"})
-    assert out["results"] == [] and "never" not in out["note"] and "cts credentials" in out["note"]
+    assert out["results"] == [] and "cts policy-server" in out["note"] and "RADIUS" in out["note"]
 
 
 def nad_routes(mock: respx.MockRouter) -> None:
@@ -112,7 +112,7 @@ async def test_device_report_one_never_downloaded(mock: respx.MockRouter) -> Non
     mock.get(f"{REPORT}/network-device/mcp-test-sw1").respond(404)
     async with Client(make_server()) as c:
         r = await c.call_tool("ise_trustsec_device_report", {"nad": "sw1"}, raise_on_error=False)
-    assert r.is_error and "never downloaded" in r.content[0].text and "show cts pacs" in r.content[0].text
+    assert r.is_error and "never downloaded" in r.content[0].text and "HTTPS" in r.content[0].text
 
 
 async def test_update_nad_trustsec_credentials(mock: respx.MockRouter) -> None:
