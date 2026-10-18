@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+- **TrustSec segmentation proven live (I51, #33) and `ise_trustsec_device_report` (I55).** The new read tool
+  returns ISE's TrustSec policy download report per network device (`GET /api/v1/trustsec/policy/device-report`,
+  one device with `nad=`: name, partial name or IP like `ise_get_nad`): the last step of the ISE <-> switch
+  exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device
+  last reported, `current` (the device reported success after the last policy change) and a hint naming what
+  to check for each failure status (PAC and CTS credentials, CoA port and key, `cts refresh policy`). A device
+  that never downloaded policy is explained rather than returned as a bare 404. `ise_update_nad` gains
+  `trustsec_id` / `trustsec_password` (the NAD's TrustSec device id and password, what the switch presents in
+  `cts credentials`; refresh timers and CoA-based updates get ISE's defaults the first time). `docs/trustsec.md`
+  is the runbook: switch configuration, the policy/push/verify sequence with the tool calls and the switch
+  commands, what to check when enforcement does not happen, undo, and the evidence of the lab run (bob
+  `Contractors` -> DC `Production_Servers` denied on sw1 with the counters, alice permitted, ISE report
+  agreeing with the switch).
+
 ### Changed
 - **Gap analysis refreshed for v0.11.0** (`docs/GAP-ANALYSIS.md`, 2026-10-18) against the live ISE 3.5.0.527
   swagger: OpenAPI 118 of 849 operations behind curated tools (v0.2.0: 76), ERS 39 of 82 resources (v0.2.0:

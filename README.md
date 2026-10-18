@@ -259,11 +259,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-142 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 74 read tools plus `ise_api_call` (GET-only) are registered. Everything
+143 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 75 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (74)
+### Read (75)
 
 | Tool | What it does |
 |---|---|
@@ -340,6 +340,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
+| `ise_trustsec_device_report` | Which network devices have downloaded ISE's current TrustSec policy: per device the last step of the ISE <-> switch exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device last reported, whether it is current, and what to check when it is not (PAC, CTS credentials, CoA, 'cts refresh policy'). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
 ### Write (51)
@@ -394,7 +395,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or description. |
 | `ise_update_guest_user` | Change a guest's contact or visit details as the sponsor. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
-| `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port or name. |
+| `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or TrustSec device id/password (what the switch presents in 'cts credentials' to get a PAC and download environment data and policy; defaults for the refresh timers and CoA-based updates are set the first time). |
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
