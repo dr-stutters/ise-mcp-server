@@ -1,5 +1,5 @@
 # ise-mcp-server roadmap
-_Last updated 2026-10-16: **Wave 4 planned (I35–I48): standalone packaging, de-labbed repo, profiler, device admin, config export/import, four prompts.** **I30 (pxGrid clients + certs for FMC) delivered in v0.9.0.** **I11 (AD) delivered in v0.8.0** against a real Windows DC, and I8 re-proven with its AD CS. **Next delivered in v0.4.0** (I8–I10). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.11.0 (2026-10-17: Phase B depth: I31, I40–I43); v0.10.0 (standalone packaging, I35–I39) released the same day. Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
+_Last updated 2026-10-17: **Wave 5 planned** (I49–I54 new; I44–I48 to Now, I32–I34 to Next; target v0.12.0; see [Wave 5](#wave-5-planned-2026-10-17-scenarios-depth-demos) and the suite board). Current release v0.11.0. Earlier: 2026-10-16: **Wave 4 planned (I35–I48): standalone packaging, de-labbed repo, profiler, device admin, config export/import, four prompts.** **I30 (pxGrid clients + certs for FMC) delivered in v0.9.0.** **I11 (AD) delivered in v0.8.0** against a real Windows DC, and I8 re-proven with its AD CS. **Next delivered in v0.4.0** (I8–I10). Now delivered in v0.3.0 (I1–I6). Logs and events are pull-only ([ADR-003](https://github.com/dr-stutters/stutters-mcp-core/blob/main/docs/adr/003-no-event-ingestion.md)); I7 and I12 dropped, I3 reframed as on-demand MnT lookups. Current release v0.11.0 (2026-10-17: Phase B depth: I31, I40–I43); v0.10.0 (standalone packaging, I35–I39) released the same day. Suite roadmap: [stutters-mcp-core/ROADMAP.md](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md). Gap analysis: [docs/GAP-ANALYSIS.md](docs/GAP-ANALYSIS.md)._
 
 ## Summary
 - v0.2.0 covers the day-to-day ISE work across OpenAPI, ERS and MnT: 72 tools for troubleshooting, policy and device-admin editing, TrustSec reads, ANC and CoA. They are live-tested against ISE 3.5 with a real cat9000v switch and client (CML `ise-access`).
@@ -175,3 +175,57 @@ Scoping answers (2026-10-16):
 | TACACS+ re-applied on sw1 | I41 | ✅ in place (2026-10-17) |
 | Profiler probes (DHCP/RADIUS) reaching the PSN | I40 | ⏳ when the lab is back |
 | Sponsor account + guest portal | I31, I48 | ✅ (I31: AD sponsor with REST access, default portals) |
+
+
+## Wave 5 (planned 2026-10-17): scenarios, depth, demos
+See the [suite roadmap](https://github.com/dr-stutters/stutters-mcp-core/blob/main/ROADMAP.md#wave-5-planned-2026-10-17-cross-architecture-scenarios) for the four cross-architecture scenario epics this wave serves ([C24](https://github.com/dr-stutters/stutters-mcp-core/issues/71) Secure branch, [C25](https://github.com/dr-stutters/stutters-mcp-core/issues/72) User-based firewall, [C26](https://github.com/dr-stutters/stutters-mcp-core/issues/73) Incident, [C27](https://github.com/dr-stutters/stutters-mcp-core/issues/74) Zero-touch site) and the suite board, [MCP Suite roadmap](https://github.com/users/dr-stutters/projects/1).
+
+Scoping answers (2026-10-17):
+- **Format:** Wave 5 in the existing system (issues + this file), plus the suite-wide project board as the cross-repo view.
+- **Themes:** operator workflows and prompts, ISE API depth, demo/PoC storylines. Production gate items stay where they are (I17 needs older ISE versions).
+- **Cross architecture:** scenarios are sequences of prompts, each owned by its server, proven live in CML and tracked as epics in the suite roadmap. No orchestrator server. This server **owns C26 Incident** (`ise_incident_response`) and **the C25 User-based firewall prompts** (employee onboarding/offboarding on the existing `Windows_Server` MCP; core C18 stays Later, owner's decision 2026-10-17); it gives C27 and C24 their NADs, NDGs and stamped policy (I49, I50) and the ISE step of C24 (I45).
+- **Site-as-code:** the same YAML site spec as catc D46 drives `ise_plan_site` and the I50 bundles; the schema is shared and written first.
+- **Size:** one release, v0.12.0; S/M items.
+- **Carry-overs:** I44–I48 move Later → Now; I32–I34 move Later → Next (P11 promised). I36 stays Now (PyPI, owner); I17 stays Production gate.
+- **Blockers the owner clears:** P11, a domain-joinable Windows client VM (I32–I34).
+
+### Items
+| # | Item | Why (operator value) | External needs | Test plan | Size | Milestone | Issue |
+|---|---|---|---|---|---|---|---|
+| [I44](https://github.com/dr-stutters/ise-mcp-server/issues/10) | *(carry)* **Operator-eyes pass 2 + `ISE_TOOLSETS`** | as issue | none | as issue | M | Now | [#10](https://github.com/dr-stutters/ise-mcp-server/issues/10) |
+| [I45](https://github.com/dr-stutters/ise-mcp-server/issues/11) | *(carry)* **Prompt `ise_onboard_nad`** (the ISE step of C24) | as issue | cml or catc for the switch | as issue | S | Now | [#11](https://github.com/dr-stutters/ise-mcp-server/issues/11) |
+| [I46](https://github.com/dr-stutters/ise-mcp-server/issues/12) | *(carry)* **Prompt `ise_policy_change_review`** | as issue | none | as issue | S | Now | [#12](https://github.com/dr-stutters/ise-mcp-server/issues/12) |
+| [I47](https://github.com/dr-stutters/ise-mcp-server/issues/13) | *(carry)* **Prompt `ise_deployment_health_review`** | as issue | none | as issue | S | Now | [#13](https://github.com/dr-stutters/ise-mcp-server/issues/13) |
+| [I48](https://github.com/dr-stutters/ise-mcp-server/issues/14) | *(carry)* **Prompt `ise_guest_onboarding`** | as issue | sponsor (in place) | Live with the CML `firefox` node | S | Now | [#14](https://github.com/dr-stutters/ise-mcp-server/issues/14) |
+| [I49](https://github.com/dr-stutters/ise-mcp-server/issues/31) | **NADs and NDGs from a site spec**: `ise_plan_site(spec)` creates the NDG path (Location/Site type), NADs (RADIUS + TACACS, secrets by reference from the spec, never echoed), and the site's identity/endpoint groups; bulk through ERS bulk where ISE supports it; same spec schema as D46; preview lists every object | A new branch is six NADs and an NDG today, one at a time; C27/C24 need it as one step | none | Unit; live: `mcp-test-site2` spec → objects → `ise_audit_nads` clean → delete | M | Now | [#31](https://github.com/dr-stutters/ise-mcp-server/issues/31) |
+| [I50](https://github.com/dr-stutters/ise-mcp-server/issues/32) | **Parametrised policy bundles**: `ise_export_config` / `ise_import_config` (I42/I43) take variables (`${{site}}`, `${{ndg}}`, `${{vlan_employee}}`, `${{sgt}}`, `${{dacl}}`), so one "branch wired policy" bundle stamps a policy set per site; a `bundles/` folder of three documented bundles (wired 802.1X + MAB, guest, device admin) | Policy per site is copy-and-edit in the GUI today; the branch scenarios need it repeatable | none | Unit; live: stamp `mcp-test-site2`, `ise_policy_explain` hits the new set from the site's NAD | S | Now | [#32](https://github.com/dr-stutters/ise-mcp-server/issues/32) |
+| [I51](https://github.com/dr-stutters/ise-mcp-server/issues/33) | **TrustSec segmentation proven live**: authz rule assigns SGTs to alice (Employees) and bob (Contractors), SGACL denies contractors → DC, matrix pushed (I9), sw1 enforces (`cts role-based enforcement`), `ise_trustsec_status(nad)` reads the switch's SGT bindings and SGACL counters through cml/catc; a `docs/trustsec.md` runbook | Segmentation is the demo customers ask for; the writes exist, enforcement on a switch was never shown | sw1 CTS credentials and PAC (in place) | Live on `ise-access`: counters increase on the deny cell | M | Now | [#33](https://github.com/dr-stutters/ise-mcp-server/issues/33) |
+| [I52](https://github.com/dr-stutters/ise-mcp-server/issues/34) | **Prompt `ise_cert_renewal`**: expiring certificate (I6) → CSR (I8) → sign with the lab CA (`win_sign_csr` or any CA) → import chain → bind in the change window (Admin usage restarts the app server: dangerous, previewed) → verify EAP-TLS still works | Expired ISE certificates are the top outage; the pieces exist in four tools and a Windows step | `Windows_Server` MCP or a CA file | Live: renew the EAP certificate on the lab node, client re-authenticates | S | Now | [#34](https://github.com/dr-stutters/ise-mcp-server/issues/34) |
+| [I53](https://github.com/dr-stutters/ise-mcp-server/issues/35) | **Prompt `ise_incident_response`** (C26 owner): indicator → find (`ise_endpoint_360`, `catc_find_host`, `fmc_find_address`, `fmc_live_connections`) → `ise_incident_timeline` → contain (ANC + CoA, FMC contain, optional `catc_set_interface` shut) → verify on switch, FTD, ISE → release → report with the undo list; supersedes the containment half of `ise_quarantine_host`, which stays for the simple case | The SOC story end to end, with the discovery step the two existing prompts lack | fmc and catc servers | Live on `ise-fmc-identity` + r1: contain bob, verify, release | S | Now | [#35](https://github.com/dr-stutters/ise-mcp-server/issues/35) |
+| [I54](https://github.com/dr-stutters/ise-mcp-server/issues/36) | **Demo storylines + seed**: `docs/demos.md` (why can't X connect; quarantine and release; guest day), seeds in `stutters-mcp-lab/servers/ise-mcp-server/` | As fmc F60 | none | Run each once from a reset lab | S | Now | [#36](https://github.com/dr-stutters/ise-mcp-server/issues/36) |
+| [I33](https://github.com/dr-stutters/ise-mcp-server/issues/18) | *(carry)* **Machine + user EAP-TLS, TEAP** (allowed-protocols write for TEAP included) | as issue | P11 VM, GPO auto-enrolment | as issue | M | Next | [#18](https://github.com/dr-stutters/ise-mcp-server/issues/18) |
+| [I34](https://github.com/dr-stutters/ise-mcp-server/issues/19) | *(carry)* **PassiveID from AD logins** (feeds FMC identity without 802.1X) | as issue | P11 VM | as issue | M | Next | [#19](https://github.com/dr-stutters/ise-mcp-server/issues/19) |
+| [I32](https://github.com/dr-stutters/ise-mcp-server/issues/17) | *(carry)* **Posture** | as issue | P11 VM + Secure Client package | as issue | L | Next | [#17](https://github.com/dr-stutters/ise-mcp-server/issues/17) |
+
+### Carry-overs
+- **To Now:** [I44](https://github.com/dr-stutters/ise-mcp-server/issues/10), [I45](https://github.com/dr-stutters/ise-mcp-server/issues/11) (the ISE step of C24), [I46](https://github.com/dr-stutters/ise-mcp-server/issues/12), [I47](https://github.com/dr-stutters/ise-mcp-server/issues/13), [I48](https://github.com/dr-stutters/ise-mcp-server/issues/14).
+- **Later → Next (P11 promised):** [I32](https://github.com/dr-stutters/ise-mcp-server/issues/17), [I33](https://github.com/dr-stutters/ise-mcp-server/issues/18), [I34](https://github.com/dr-stutters/ise-mcp-server/issues/19).
+- **Unchanged:** [I36](https://github.com/dr-stutters/ise-mcp-server/issues/2) PyPI (owner) stays Now; [I17](https://github.com/dr-stutters/ise-mcp-server/issues/15) version matrix stays Production gate.
+
+### Order
+1. **Now, no dependencies, in parallel:** I44, I47, I52.
+2. **C26 Incident:** I53 as soon as fmc F55/F59 and catc D47/D48 land, then the live run and talk track.
+3. **Site spec track:** I49 + I50 with catc D46 (one shared schema, written first), then the **C27 Zero-touch** live run.
+4. **Branch track:** I45 (with fmc F41/F54, cml L39) → **C24 Secure branch** live run; I51 gives the branch its SGT step.
+5. **Identity track (long):** the C25 employee onboarding/offboarding prompts once fmc F34 lands; I33/I34 when the P11 VM exists.
+6. **Prompts and demos** around the tracks: I46, I48, I54.
+7. Release v0.12.0 once the Now items are merged.
+
+### New prerequisites
+| Prerequisite | Needed for | Status |
+|---|---|---|
+| P11: domain-joinable Windows client VM | I32, I33, I34 | ⏳ owner (promised) |
+| Shared site-spec schema (with catc [D46](https://github.com/dr-stutters/catc-mcp-server/issues/92)) | I49, I50, C27, C24 | ⏳ written first in the site spec track |
+| sw1 CTS credentials and PAC | I51 | ✅ in place |
+| `Windows_Server` MCP (or a CA file) for CSR signing | I52, C25 prompts | ✅ in place (core C18 stays Later) |
+| fmc [F34](https://github.com/dr-stutters/fmc-mcp-server/issues/79) (pxGrid identity source on FMC) | C25 prompts | ⏳ fmc, Now |
