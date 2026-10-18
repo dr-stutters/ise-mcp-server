@@ -574,6 +574,6 @@ them those tests skip with a message naming what is missing. The live write test
   commands are authorized by ISE at all).
 - Condition values for `DEVICE:Location`/`Device Type` are written without the root
   (`All Locations#Sydney`); the tools strip `Location#` if it is given.
-- See docs/GAP-ANALYSIS.md for what is and isn't covered, and why.
+- See docs/GAP-ANALYSIS.md for what is and isn't covered, and why (per-group counts regenerated with `scripts/api_coverage.py`).
 
 Not affiliated with or endorsed by Cisco Systems, Inc. MIT licensed.
