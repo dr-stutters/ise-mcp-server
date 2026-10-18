@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- **TrustSec HTTPS (REST) policy download (I55 follow-up).** `ise_set_trustsec_settings(https_server,
+  audit_log, multiple_sgacls)` changes ISE's TrustSec general settings preview-first (`PUT
+  /api/v1/trustsec/general-settings`); turning the HTTPS server on adds ISE's TrustSec nodes to the HTTPS
+  server list on port 9063 first when that list is empty, because ISE 3.5 answers HTTP 500 otherwise.
+  `ise_get_trustsec_settings` reads them with the HTTPS server list. `ise_update_nad` gains
+  `trustsec_rest_user` / `trustsec_rest_password` (the NAD's HTTP REST API credentials, what `cts
+  policy-server username/password` sends) and `trustsec_push_id` (ISE's push id support for the device's
+  download reports). Proven on the lab (docs/trustsec.md section 2b and 7): a Catalyst 9000v 17.18.2 with
+  `cts policy-server` downloaded environment data and a new egress cell from ISE over TCP 9063 (nine HTTP
+  200s, no PAC). ISE's device report stayed empty: it is fed by the switch's own download report (PUSH ID,
+  IOS XE 26.2.1 with REST API v3 per Cisco's guide), so `ise_trustsec_device_report`'s empty-report note and
+  404 message now say which devices can appear in it and point at `show cts policy-server statistics` for
+  the rest.
 - **TrustSec segmentation proven live (I51, #33) and `ise_trustsec_device_report` (I55).** The new read tool
   returns ISE's TrustSec policy download report per network device (`GET /api/v1/trustsec/policy/device-report`,
   one device with `nad=`: name, partial name or IP like `ise_get_nad`): the last step of the ISE <-> switch
