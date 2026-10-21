@@ -9,13 +9,14 @@ from typing import Annotated, Any
 
 from fastmcp import Context
 from fastmcp.tools import ToolResult
-from pydantic import Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from ise_mcp._core import (
     InvalidRequest,
     NotFound,
     ResponseFormat,
     ToolRegistrar,
+    UpstreamError,
     get_client,
     object_result,
 )
@@ -122,6 +123,198 @@ def unmask_flags(nad: dict[str, Any]) -> dict[str, Any]:
     return nad
 
 
+EXPECTED_MAX = 2000
+
+
+class ExpectedNad(BaseModel):
+    """One device an inventory says should be a NAD; a catc_list_devices row works as it is
+    (hostname, managementIpAddress)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    name: str = Field(
+        validation_alias=AliasChoices("name", "hostname"), description="Device name in the inventory"
+    )
+    ip: str = Field(
+        validation_alias=AliasChoices("ip", "managementIpAddress", "management_ip"),
+        description="The IP its RADIUS/TACACS+ comes from (usually the management IP)",
+    )
+    ndg: str | list[str] | None = Field(
+        default=None,
+        description="Device group(s) it should be in: a full path ('Location#All Locations#SYD') or the "
+        "last part ('SYD')",
+    )
+    aaa_server: str | None = Field(
+        default=None,
+        description="The RADIUS server IP or name its running config points at, when known: checked "
+        "against the ISE nodes",
+    )
+
+
+def short_name(name: str) -> str:
+    return name.strip().lower().split(".")[0]
+
+
+def in_group(groups: list[str], want: str) -> bool:
+    """A NAD group path matches a full path or its last part(s), case-insensitively."""
+    w = want.strip().lower()
+    return any(g.lower() == w or g.lower().endswith("#" + w) for g in groups)
+
+
+def covering(nads: list[dict[str, Any]], ip: str) -> list[tuple[int, dict[str, Any]]]:
+    """(prefix length, NAD) for every NAD whose IP list covers `ip`, most specific first."""
+    addr = ipaddress.ip_address(ip)
+    hits = []
+    for nad in nads:
+        nets = [n for n in nad_networks(nad) if n.version == addr.version and addr in n]
+        if nets:
+            hits.append((max(n.prefixlen for n in nets), nad))
+    hits.sort(key=lambda h: -h[0])
+    return hits
+
+
+def coverage_audit(
+    nads: list[dict[str, Any]],
+    expected: list[ExpectedNad],
+    *,
+    check_stale: bool,
+    stale_within: str | None,
+    ise_addresses: set[str] | None,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Reconcile an inventory with the NADs. Devices are matched by IP (a NAD whose IP list or
+    subnet covers the device's IP, most specific first), never by name: Catalyst Center reuses an
+    existing NAD with another name. Returns the coverage section and {stale NAD name: finding}."""
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for nad in nads:
+        by_name.setdefault(short_name(str(nad.get("name") or "")), []).append(nad)
+    rows: list[dict[str, Any]] = []
+    used: set[str] = set()
+    counts = {"missing_nad": 0, "wrong_ndg": 0, "ip_mismatch": 0, "aaa_elsewhere": 0}
+    renamed = 0
+    for dev in expected:
+        ip = str(ipaddress.ip_address(dev.ip.strip()))
+        row: dict[str, Any] = {"device": dev.name, "ip": ip}
+        findings: list[str] = []
+        fix: list[str] = []
+        hits = covering(nads, ip)
+        twins = [n for n in by_name.get(short_name(dev.name), []) if n not in [h[1] for h in hits]]
+        if hits:
+            prefix, nad = hits[0]
+            name = str(nad.get("name"))
+            used.update(str(h[1].get("name")) for h in hits)
+            row["nad"] = name
+            row["match"] = "ip" if prefix in (32, 128) else f"subnet ({', '.join(nad_ips(nad))})"
+            if short_name(name) != short_name(dev.name):
+                row["nad_name_differs"] = True
+                renamed += 1
+            groups = [str(g) for g in nad.get("NetworkDeviceGroupList") or []]
+            wanted = [dev.ndg] if isinstance(dev.ndg, str) else list(dev.ndg or [])
+            missing_groups = [w for w in wanted if w.strip() and not in_group(groups, w)]
+            if missing_groups:
+                counts["wrong_ndg"] += 1
+                findings.append(
+                    f"wrong_ndg: NAD {name} is not in {', '.join(missing_groups)} (its groups: "
+                    f"{', '.join(groups) or 'none'})"
+                )
+                fix.append(f"ise_update_nad(device={name!r}, groups=[...]) with the expected group paths")
+        else:
+            counts["missing_nad"] += 1
+            findings.append(
+                f"missing_nad: no NAD covers {ip}: ISE drops its RADIUS/TACACS+ silently (11007), so "
+                "nobody behind it can authenticate"
+            )
+            fix.append(f"ise_create_nad(name={dev.name!r}, ips=['{ip}/32'], ...) or a bulk plan for many")
+        for twin in twins:
+            counts["ip_mismatch"] += 1
+            used.add(str(twin.get("name")))
+            findings.append(
+                f"ip_mismatch: NAD {twin.get('name')} has the device's name but {', '.join(nad_ips(twin))}, "
+                f"not {ip} (re-addressed device or a stale entry)"
+            )
+            fix.append(f"ise_update_nad(device={twin.get('name')!r}, ips=['{ip}/32']) if it is this device")
+        if (
+            dev.aaa_server
+            and ise_addresses is not None
+            and dev.aaa_server.strip().lower() not in ise_addresses
+        ):
+            counts["aaa_elsewhere"] += 1
+            findings.append(
+                f"aaa_elsewhere: its RADIUS server {dev.aaa_server} is not an ISE node "
+                f"({', '.join(sorted(ise_addresses)) or 'none found'})"
+            )
+            fix.append("point the device's 'radius server' at an ISE PSN (template or catc site AAA)")
+        row["findings"] = findings or ["ok"]
+        if fix:
+            row["fix"] = fix
+        rows.append(row)
+    stale: dict[str, str] = {}
+    if check_stale:
+        for nad in nads:
+            name = str(nad.get("name"))
+            groups = [str(g) for g in nad.get("NetworkDeviceGroupList") or []]
+            if name in used or (stale_within and not in_group(groups, stale_within)):
+                continue
+            stale[name] = (
+                f"stale_nad: not in the expected inventory ({', '.join(nad_ips(nad))}): a decommissioned "
+                "device, or one the inventory doesn't manage"
+            )
+    rows.sort(key=lambda r: r["findings"] == ["ok"])
+    ok = sum(1 for r in rows if r["findings"] == ["ok"])
+    problems = {k: v for k, v in counts.items() if v}
+    if stale:
+        problems["stale_nad"] = len(stale)
+    verdict = f"{len(expected) - counts['missing_nad']} of {len(expected)} expected device(s) are NADs in ISE"
+    if renamed:
+        verdict += f" (matched by IP; {renamed} under another NAD name)"
+    checked = (
+        "missing, stale, wrong-group or IP-mismatch" if check_stale else "missing, wrong-group or IP-mismatch"
+    )
+    verdict += (
+        ": " + ", ".join(f"{v} {k}" for k, v in problems.items()) + "."
+        if problems
+        else f"; no {checked} findings."
+    )
+    if not check_stale:
+        verdict += " Stale NADs not checked (check_stale=false)."
+
+    section: dict[str, Any] = {
+        "verdict": verdict,
+        "expected": len(expected),
+        "ok": ok,
+        **problems,
+        "devices": rows,
+    }
+    if stale:
+        section["stale_nads"] = [
+            {
+                "nad": n,
+                "finding": f,
+                "fix": f"ise_get_auth_list(nad={n!r}) for recent traffic, then "
+                "ise_delete_nad (dangerous) or add the device to the inventory",
+            }
+            for n, f in stale.items()
+        ]
+    if check_stale:
+        section["stale_scope"] = f"NADs in {stale_within}" if stale_within else "every NAD"
+    return section, stale
+
+
+async def ise_node_addresses(app: IseApp) -> set[str] | None:
+    """IPs, FQDNs and hostnames of the ISE nodes (lower case), or None when they can't be read."""
+    try:
+        nodes = (await app.openapi.get("/api/v1/deployment/node")).get("response") or []
+    except (UpstreamError, NotFound):
+        return None
+    out: set[str] = set()
+    for n in nodes:
+        for key in ("ipAddress", "fqdn", "hostname"):
+            if n.get(key):
+                out.add(str(n[key]).lower())
+        for ip in n.get("ipAddresses") or []:
+            out.add(str(ip).lower())
+    return out
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="List network devices (NADs)")
     async def ise_list_nads(
@@ -212,6 +405,30 @@ def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Audit network devices")
     async def ise_audit_nads(
         ctx: Context,
+        expected: Annotated[
+            list[ExpectedNad] | None,
+            Field(
+                description="Inventory to reconcile with the NADs, e.g. the rows of "
+                "catc_list_devices(site=...): {name, ip, ndg?, aaa_server?} (hostname / "
+                "managementIpAddress also accepted). Adds missing_nad, stale_nad, wrong_ndg, ip_mismatch "
+                "and aaa_elsewhere findings in `coverage`",
+                max_length=EXPECTED_MAX,
+            ),
+        ] = None,
+        check_stale: Annotated[
+            bool,
+            Field(
+                description="With `expected`: report NADs that match no expected device (stale_nad). "
+                "Turn off, or scope with stale_within, when `expected` is only part of the inventory"
+            ),
+        ] = True,
+        stale_within: Annotated[
+            str | None,
+            Field(
+                description="With `expected`: only NADs in this device group can be stale (a path or "
+                "its last part, e.g. the site's location group)"
+            ),
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
         offset: Annotated[int, Field(ge=0)] = 0,
         response_format: ResponseFormat = "json",
@@ -223,12 +440,31 @@ def register(reg: ToolRegistrar) -> None:
         mode, and the device-admin policy set their logins would select (a finding when only the default
         set, or none, matches; 'may_match_first' lists sets whose conditions depend on the user), plus a
         warning when no node runs the DeviceAdmin service. Returns one row per device with findings
-        (secret values are never shown)."""
+        (secret values are never shown). With `expected` (an inventory such as catc_list_devices
+        rows) it also reconciles coverage, matching devices to NADs by IP (Catalyst Center reuses an
+        existing NAD under its own name): missing_nad (no NAD covers the device's IP: silent drops,
+        11007), stale_nad (a NAD no expected device matches), wrong_ndg, ip_mismatch (a NAD with the
+        device's name but another IP) and aaa_elsewhere (the device's RADIUS server is not an ISE
+        node), each with the fix to preview."""
         from ise_mcp.tools.device_admin import tacacs_audit  # noqa: PLC0415 - device_admin imports this module
 
         app: IseApp = get_client(ctx)
+        bad = [d.ip for d in expected or [] if parse_ip(d.ip) is None]
+        if bad:
+            raise InvalidRequest(f"Not IP addresses in `expected`: {', '.join(bad[:10])}")
         nads, complete = await all_nads(app)
         tac_rows, tac_general = await tacacs_audit(app, nads)
+        coverage: dict[str, Any] | None = None
+        stale: dict[str, str] = {}
+        if expected is not None:
+            needs_nodes = any(d.aaa_server for d in expected)
+            coverage, stale = coverage_audit(
+                nads,
+                expected,
+                check_stale=check_stale,
+                stale_within=stale_within,
+                ise_addresses=await ise_node_addresses(app) if needs_nodes else None,
+            )
         secret_users: dict[str, list[str]] = {}
         for nad in nads:
             secret = (nad.get("authenticationSettings") or {}).get("radiusSharedSecret")
@@ -274,6 +510,8 @@ def register(reg: ToolRegistrar) -> None:
                 tac = dict(tac_rows[name])
                 findings += tac.pop("findings")
                 row["tacacs"] = tac
+            if name in stale:
+                findings.append(stale[name])
             row["findings"] = findings or ["ok"]
             rows.append(row)
         rows.sort(key=lambda r: r["findings"] == ["ok"])
@@ -292,6 +530,8 @@ def register(reg: ToolRegistrar) -> None:
                 ],
                 "findings": tac_general or None,
             }
+        if coverage is not None:
+            extra["coverage"] = coverage
         if not complete:
             extra["note"] = "More than 1000 devices: only the first 1000 were audited."
         return list_result(
