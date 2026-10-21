@@ -266,9 +266,10 @@ def register(reg: ToolRegistrar) -> None:
         candidate MACs: the ones you pass, then sessions authenticated in the window, then the endpoint
         database. The result says how many MACs were checked and whether more exist; a failing MAC
         that ISE never stored is only found when you pass it. RADIUS from an unknown NAD or with a
-        wrong shared secret leaves no record at all (check ise_audit_nads). The window always ends now.
-        The list holds one row per failed attempt, newest first; diagnose one MAC with
-        ise_why_auth_failed."""
+        wrong shared secret leaves no record at all (check ise_audit_nads). Repeated successful logins
+        may be missing from MnT's history, so a MAC listed here may have passed since: ise_find_session
+        has its newest authentication. The window always ends now. The list holds one row per failed
+        attempt, newest first; diagnose one MAC with ise_why_auth_failed."""
         app: IseApp = get_client(ctx)
         start, end = window(since_minutes, None)
         flt = await nad_filter(app, nad)
@@ -395,6 +396,11 @@ def register(reg: ToolRegistrar) -> None:
             "by_nad": dict(Counter(str(f.get("nad") or f.get("nas_ip") or "?") for f in failures)),
             "coverage": coverage,
         }
+        if failures:
+            extra["history_note"] = (
+                "Repeated successful logins may be missing from MnT's history, so a MAC listed here may "
+                "have passed since: ise_find_session has its newest authentication."
+            )
         if flt:
             extra["nad_filter"] = flt.label
         if coa_skipped:

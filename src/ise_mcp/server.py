@@ -55,10 +55,11 @@ switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk t
 ise_get_egress_matrix(source, destination); "why is this device profiled as X?" -> ise_explain_profile
 (custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status). Everything is queried from
 ISE when called: MnT keeps per-MAC auth history (CoA results are labelled kind=coa, not logins) and has
-nothing when no RADIUS reached ISE. Not available over REST, so don't search for it: the configuration
-change audit ("what changed?": GUI Operations > Reports > Audit > Change Configuration Audit, or ISE
-syslog in a SIEM), TACACS+ live logs, and on the profiler: editing classic profiling policies, certainty
-factors and the feed service (docs/profiler.md). Policy changes (writes):
+nothing when no RADIUS reached ISE; it leaves out repeated successful logins, which the session
+(ise_find_session) still shows. Not available over REST, so don't search for it: the RADIUS suppression
+settings, the configuration change audit ("what changed?": GUI Operations > Reports > Audit > Change
+Configuration Audit, or ISE syslog in a SIEM), TACACS+ live logs, and on the profiler: editing classic
+profiling policies, certainty factors and the feed service (docs/profiler.md). Policy changes (writes):
 ise_create_policy_set -> ise_create_authn_rule -> ise_create_authz_rule, then ise_update_policy_rule;
 conditions are 'Dictionary:Attribute operator value' or library condition names
 (ise_list_dictionary_attributes, ise_list_conditions) and are checked before anything is sent. Device

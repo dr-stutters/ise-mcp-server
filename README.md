@@ -567,6 +567,10 @@ them those tests skip with a message naming what is missing. The live write test
 - MnT keeps auth history per MAC. `ise_recent_auth_failures` checks a capped set of candidate MACs
   (given, sessions in the window, endpoint database) and reports its coverage; RADIUS that ISE drops
   silently (unknown NAD, wrong secret) leaves no record. `ise_get_auth_list` windows are UTC.
+- MnT's auth history leaves out repeated successful logins (ISE's "Suppress Repeated Successful
+  Authentications", a RADIUS setting REST can't read). The session (`ise_find_session`) still shows the
+  newest authentication, and `ise_why_auth_failed` reports it as `newest_login` when it is newer than every
+  record.
 - The ERS spec is synthesised from ISE's SDK data model, with the JSON wrapper names for 46 resources;
   it does not say which operations each resource really supports.
 - `ise_deployment_health`: REST reports only the PAN's patch level, has no backup-schedule view and no
