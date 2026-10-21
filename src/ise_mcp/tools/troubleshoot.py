@@ -3,6 +3,7 @@
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -31,7 +32,7 @@ from ise_mcp.tools.endpoints import endpoint_row, profile_name
 from ise_mcp.tools.identity import user_row
 from ise_mcp.tools.network import find_nads_for_ip, nad_summary
 from ise_mcp.tools.policy import rules_using_profile
-from ise_mcp.tools.sessions import auth_history, auth_row, failure_info, find_session
+from ise_mcp.tools.sessions import auth_history, auth_row, failure_info, find_session, is_coa_record
 
 USER_STORE_CODES = {"22056", "22040", "22041", "24206", "22063"}
 LOCAL_STORES = {"", "internal users", "internal endpoints", "guest users", "none"}
@@ -115,6 +116,149 @@ def coa_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"count": len(rows), "latest": latest.get("time"), "reason": reason, "meaning": meaning}
 
 
+LAST_RECORD_LOOKBACK = 10080  # minutes (7 days, the tool's own maximum) searched for the last record
+
+SWITCH_CHECKS = [
+    "On the switch, 'show aaa servers': Authen requests rising with no timeouts means ISE answered (the "
+    "conversation ended without a result: an abandoned EAP session); timeouts rising means ISE dropped "
+    "the requests or can't be reached (unknown NAD 11007, wrong shared secret 11036, routing/ACL)",
+    "'show dot1x interface <port> statistics' (EAP frames rising with no session = EAP started and "
+    "stopped) and 'show access-session interface <port> details' (is a session in progress?)",
+    "A capture between switch and ISE (cml_capture / cml_summarize_capture in a lab): Access-Challenges "
+    "with no final Access-Accept/Reject = the client abandoned EAP; no answers at all = ISE dropped them",
+]
+
+
+async def no_record_diagnosis(app: IseApp, mac: str, minutes: int) -> dict[str, Any]:
+    """What an empty MnT window can mean. MnT's history holds finished conversations only, and not
+    every repeated successful login: a request ISE dropped (unknown NAD, wrong secret), an EAP
+    conversation the client abandoned mid-way (ISE answered with challenges), a switch that sent
+    nothing, and a login ISE didn't log all leave no record. The live session and the endpoint's last
+    record further back say whether its switch reaches ISE, which orders the causes."""
+    endpoint, session = await asyncio.gather(_safe(get_endpoint(app, mac)), _safe(find_session(app, mac=mac)))
+    out: dict[str, Any] = {"endpoint_known_to_ise": bool(endpoint and not endpoint.get("error"))}
+    head = f"ISE has no authentication record for {mac} in the last {minutes} minutes."
+    sess: dict[str, Any] = session if isinstance(session, dict) and not session.get("error") else {}
+    live = bool(sess) and sess.get("active") is not False
+    if sess:
+        shown = ("user_name", "nas_ip_address", "nas_port_id", "auth_acs_timestamp", "acct_status_type")
+        out["session"] = {k: sess[k] for k in shown if sess.get(k)} | {"active": live}
+    # MnT times are ISO 8601 UTC ('2026-10-21T10:52:20.238Z'): they compare as strings.
+    start = (datetime.now(UTC) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S")
+    auth_at = str(sess.get("auth_acs_timestamp") or "")
+    if live and auth_at >= start:
+        where = " ".join(str(x) for x in (sess.get("nas_ip_address"), sess.get("nas_port_id")) if x)
+        out["verdict"] = (
+            f"{head} But MnT has a live session for it, authenticated at {auth_at} through {where}: the "
+            "endpoint authenticated, and the history holds no record of that login (ISE doesn't log "
+            "every repeated successful authentication). Nothing failed in the window."
+        )
+        out["next_steps"] = [
+            "If the user still can't connect: the port's live state ('show access-session interface "
+            "<port> details' on the switch) and the authorization the session got (ise_find_session)",
+            "A newer attempt the client abandoned would leave no record either: the switch's "
+            "'show dot1x interface <port> statistics' and 'show aaa servers' counters show one",
+        ]
+        return out
+    last: dict[str, Any] | None = None
+    if minutes < LAST_RECORD_LOOKBACK:
+        older = await _safe(auth_history(app, mac, LAST_RECORD_LOOKBACK, 5))
+        rows = [auth_row(r) for r in older if not is_coa_record(r)] if isinstance(older, list) else []
+        last = rows[0] if rows else None
+    # The newest evidence that this endpoint's switch got an answer from ISE: a passed login in the
+    # history, or the session MnT holds (a session exists only after an authentication passed).
+    passed: dict[str, Any] | None = None
+    if last and last.get("result") == "PASS":
+        how = " ".join(str(x) for x in (last.get("method"), last.get("protocol")) if x)
+        passed = {"time": last.get("time"), "nas_ip": last.get("nas_ip"), "via": last.get("nad"), "how": how}
+    if auth_at and (passed is None or auth_at > str(passed["time"])):
+        passed = {"time": auth_at, "nas_ip": sess.get("nas_ip_address"), "via": None, "how": "session"}
+    if last:
+        keep = ("time", "result", "user", "nad", "nas_ip", "nas_port", "method", "protocol", "failure_reason")
+        out["last_record"] = {k: last[k] for k in keep if last.get(k)}
+    nad_ok = False
+    if passed and passed.get("nas_ip"):
+        nads = await _safe(find_nads_for_ip(app, str(passed["nas_ip"])))
+        if isinstance(nads, list):
+            nad_ok = bool(nads)
+            out["nad_now"] = (
+                str(nads[0].get("name")) if nads else f"no NAD covers {passed['nas_ip']} any more (11007)"
+            )
+            passed["via"] = passed["via"] or (nads[0].get("name") if nads else None)
+    abandoned = (
+        "the client started EAP and abandoned it mid-way: ISE answered with challenges but the "
+        "conversation never finished, so MnT records nothing (typical when the supplicant doesn't trust "
+        "ISE's EAP certificate, or offers another EAP method or identity)"
+    )
+    no_request = (
+        "the switch sent no new request (no reauthentication, the port isn't running 802.1X/MAB, an idle "
+        "MAB client that hasn't sent traffic)"
+    )
+    dropped = (
+        "ISE dropped the request without a record: no NAD for the switch's RADIUS source IP (11007) or a "
+        "shared secret that no longer matches (11036), or it went to another server (RADIUS config, "
+        "ACL/firewall, another PSN)"
+    )
+    less_likely = f"less likely after that pass, unless the NAD or its secret changed since: {dropped}"
+    if passed and nad_ok and live:
+        via = passed.get("via") or passed.get("nas_ip")
+        out["verdict"] = (
+            f"{head} The endpoint is still on its session authenticated at {auth_at} through {via} (MnT "
+            "ends a session only with the switch's accounting Stop): it has not logged in again since, "
+            "which is normal while it stays connected, and ISE saw nothing fail. If it can't connect "
+            "now, a newer attempt that the client abandoned or that ISE dropped leaves no record either: "
+            "the switch's RADIUS counters show which."
+        )
+        out["likely_causes"] = [
+            f"{no_request}: it is still connected on that session",
+            abandoned,
+            less_likely,
+        ]
+    elif passed and nad_ok:
+        via = passed.get("via") or passed.get("nas_ip")
+        how = f" ({passed['how']})" if passed.get("how") else ""
+        out["verdict"] = (
+            f"{head} No record is not proof that RADIUS never arrived: MnT keeps finished "
+            f"conversations only. The endpoint last passed at {passed['time']} through {via}{how}, and "
+            "that switch is still a NAD, so it reached ISE with a working shared secret then: an "
+            "abandoned EAP session or no new request is likelier than a drop, unless the NAD or its "
+            "shared secret changed since. The switch's RADIUS counters tell them apart."
+        )
+        out["likely_causes"] = [abandoned, no_request, less_likely]
+    elif last:
+        out["verdict"] = (
+            f"{head} Its last record further back ({last.get('result')} at {last.get('time')} through "
+            f"{last.get('nad') or last.get('nas_ip')}) shows the endpoint is known; MnT keeps finished "
+            "conversations only, so the latest attempt may have been dropped, abandoned or never sent."
+        )
+        out["likely_causes"] = [dropped, abandoned, no_request]
+    else:
+        out["verdict"] = (
+            f"{head} Most likely the RADIUS request never reached ISE (wrong RADIUS server/port on the "
+            "switch or WLC, ACL/firewall, or the NAD sends to another PSN), or the MAC is wrong. An EAP "
+            "conversation the client abandoned also leaves no record."
+        )
+        out["likely_causes"] = [dropped, "the MAC is wrong", abandoned, no_request]
+    steps = []
+    if not nad_ok:
+        steps += [
+            "Check the NAD exists in ISE for the switch's RADIUS source IP (ise_get_nad <ip>): ISE "
+            "silently drops RADIUS from unknown devices (11007), which the switch logs as 'RADIUS "
+            "server not responding' / 'AAA Server Down', and MnT keeps no record for the MAC",
+            "Check the shared secret matches on both sides (a mismatch is also dropped: 11036)",
+        ]
+    steps += SWITCH_CHECKS
+    steps += [
+        "On the client: the supplicant log (EAP method, identity, does it trust the issuer of ISE's EAP "
+        "certificate? ise_list_certificates)",
+        "Check the switch/WLC RADIUS server config points at this ISE (1812/1813) and that the port "
+        "actually tries MAB/802.1X (an idle MAB client must send traffic first)",
+        "Widen `minutes` if the attempt was earlier",
+    ]
+    out["next_steps"] = steps
+    return out
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Why did authentication fail?")
     async def ise_why_auth_failed(
@@ -134,7 +278,10 @@ def register(reg: ToolRegistrar) -> None:
         explains the latest failure: decoded failure reason with cause, resolution and a likely fix, the
         execution steps, the network device it came through (or that none matches the NAS IP), the
         internal user's state when the user store is involved, the authorization profile and the rules
-        that use it, and whether the latest attempt has since passed. Give a MAC (best) or a username
+        that use it, and whether the latest attempt has since passed. With no record in the window it
+        reads the live session and the last record further back, and orders what an empty window can
+        mean (a live session ISE didn't log, an EAP conversation the client abandoned, no new request,
+        a silent drop) with the switch checks that tell them apart. Give a MAC (best) or a username
         with a live session."""
         app: IseApp = get_client(ctx)
         if not mac and not username:
@@ -162,22 +309,7 @@ def register(reg: ToolRegistrar) -> None:
         out["mac"] = mac_n
         records = await auth_history(app, mac_n, minutes, 50)
         if not records:
-            endpoint = await _safe(get_endpoint(app, mac_n))
-            out["verdict"] = (
-                f"ISE has no authentication record for {mac_n} in the last {minutes} minutes: the RADIUS "
-                "request never reached ISE (wrong RADIUS server/port on the switch or WLC, ACL/firewall, "
-                "or the NAD sends to another PSN), or the MAC is wrong."
-            )
-            out["endpoint_known_to_ise"] = bool(endpoint and not endpoint.get("error"))
-            out["next_steps"] = [
-                "Check the NAD exists in ISE for the switch's RADIUS source IP (ise_get_nad <ip>): ISE "
-                "silently drops RADIUS from unknown devices (11007), which the switch logs as 'RADIUS "
-                "server not responding' / 'AAA Server Down', and MnT keeps no record for the MAC",
-                "Check the shared secret matches on both sides (a mismatch is also dropped: 11036)",
-                "Check the switch/WLC RADIUS server config points at this ISE (1812/1813) and that the "
-                "port actually tries MAB/802.1X (an idle MAB client must send traffic first)",
-                "Widen `minutes` if the attempt was earlier",
-            ]
+            out.update(await no_record_diagnosis(app, mac_n, minutes))
             return object_result(out)
 
         all_rows = [auth_row(r) for r in records]

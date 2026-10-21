@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 import respx
 
 from ise_mcp._core.testing import call_tool
@@ -166,10 +167,18 @@ async def test_why_auth_failed_no_records(mock: respx.MockRouter) -> None:
     mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{mac}/86400/50/All").respond(
         text=xml(f'<authStatusOutputList><authStatusList key="{mac}"/></authStatusOutputList>')
     )
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{mac}/604800/5/All").respond(
+        text=xml(f'<authStatusOutputList><authStatusList key="{mac}"/></authStatusOutputList>')
+    )
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{mac}").respond(500, text=MISSING_SESSION)
     mock.get(f"/api/v1/endpoint/{mac}").respond(404, json={"message": "not found"})
     out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": mac})
     assert "no authentication record" in out["verdict"]
+    # Never seen at all: a drop or a wrong MAC lead, but an abandoned EAP conversation is named too.
+    assert "never reached ISE" in out["verdict"] and "abandoned" in out["verdict"]
+    assert out["likely_causes"][0].startswith("ISE dropped the request")
     assert out["endpoint_known_to_ise"] is False
+    assert any("ise_get_nad" in s for s in out["next_steps"])
 
 
 async def test_why_auth_failed_username_without_session(mock: respx.MockRouter) -> None:
@@ -296,3 +305,93 @@ async def test_get_nad_fuzzy_and_candidates(mock: respx.MockRouter) -> None:
         raise AssertionError("expected an error")
     except ToolError as e:
         assert "'sw1', 'sw2'" in str(e)
+
+
+# --- an empty window: abandoned EAP, a live session, nothing at all (#59) ------------------------
+# Recorded live on 2026-10-21 (lab mcp-cml-ise, catc Wave 6 part D, D45 case 2). The EAP-TLS client
+# 52:54:00:62:C6:B2 passed through NAD mcp-test-sw1 at 10:13:34Z; its supplicant was then switched to
+# PEAP with a bad identity and it abandoned the conversation (ISE answered with challenges). MnT kept
+# no record: ise_why_auth_failed(minutes=10) said 'the RADIUS request never reached ISE'.
+
+EAPTLS_MAC = "52:54:00:62:C6:B2"
+SW1_NAD = {
+    "NetworkDevice": {
+        "id": "8e5c6540-c9cb-11f1-b4ef-aecc499b6f77",
+        "name": "mcp-test-sw1",
+        "NetworkDeviceIPList": [{"ipaddress": "198.18.128.154", "mask": 32}],
+        "NetworkDeviceGroupList": ["Location#All Locations#mcp-test-lab"],
+        "authenticationSettings": {"radiusSharedSecret": "secret-sw1-long-xx"},
+    }
+}
+EMPTY_WINDOW = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><authStatusOutputList>'
+    f'<authStatusList key="{EAPTLS_MAC}"/></authStatusOutputList>'
+)
+
+
+def mock_eaptls(mock: respx.MockRouter, *, minutes: int, session: str | None) -> None:
+    base = f"/admin/API/mnt/AuthStatus/MACAddress/{EAPTLS_MAC}"
+    mock.get(f"{base}/{minutes * 60}/50/All").respond(text=EMPTY_WINDOW)
+    mock.get(f"{base}/604800/5/All").respond(text=fixture_text("mnt_authstatus_eaptls_7d.xml"))
+    if session is None:
+        mock.get(f"/admin/API/mnt/Session/MACAddress/{EAPTLS_MAC}").respond(500, text=MISSING_SESSION)
+    else:
+        mock.get(f"/admin/API/mnt/Session/MACAddress/{EAPTLS_MAC}").respond(text=session)
+    mock.get(f"/api/v1/endpoint/{EAPTLS_MAC}").respond(json={"mac": EAPTLS_MAC, "id": "ep-1"})
+    nid = SW1_NAD["NetworkDevice"]["id"]
+    mock.get("/ers/config/networkdevice", params={"filter": "ipaddress.EQ.198.18.128.154"}).respond(
+        json=ers_page([{"id": nid, "name": "mcp-test-sw1"}])
+    )
+    mock.get(f"/ers/config/networkdevice/{nid}").respond(json=SW1_NAD)
+
+
+def ended_session() -> str:
+    """The 10:13:34Z session after the switch tore it down (accounting Stop at the failed reauth)."""
+    s = fixture_text("mnt_session_eaptls_live.xml")
+    s = s.replace("2026-10-21T10:52:20.238Z", "2026-10-21T10:13:34.659Z")
+    s = s.replace("2026-10-21T11:40:30.870Z", "2026-10-21T10:30:21.000Z")
+    return s.replace("<acct_status_type>Accounting-On<", "<acct_status_type>Stop<")
+
+
+@pytest.mark.parametrize("ended", [False, True], ids=["no-session", "ended-session"])
+async def test_why_auth_failed_abandoned_eap_is_not_never_reached(
+    mock: respx.MockRouter, ended: bool
+) -> None:
+    # MnT has no session for the MAC, or only the ended one.
+    mock_eaptls(mock, minutes=10, session=ended_session() if ended else None)
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC.lower(), "minutes": 10})
+    assert "never reached ISE" not in out["verdict"]
+    assert "No record is not proof that RADIUS never arrived" in out["verdict"]
+    assert "last passed at 2026-10-21T10:13:34.659Z through mcp-test-sw1 (dot1x EAP-TLS)" in out["verdict"]
+    assert out["likely_causes"][0].startswith("the client started EAP and abandoned it mid-way")
+    assert out["likely_causes"][2].startswith("less likely after that pass")
+    assert out["last_record"]["nad"] == "mcp-test-sw1" and out["nad_now"] == "mcp-test-sw1"
+    assert out["endpoint_known_to_ise"] is True
+    steps = " ".join(out["next_steps"])
+    assert "show aaa servers" in steps and "show dot1x interface" in steps and "cml_capture" in steps
+    assert "ise_get_nad" not in steps  # the NAD is known to cover the switch
+    assert "secret-sw1" not in json.dumps(out)
+
+
+async def test_why_auth_failed_live_session_recent_login(mock: respx.MockRouter) -> None:
+    """MnT's history left out the client's later logins (the newest record stayed 10:13:34Z while the
+    session shows an authentication at 10:52:20Z): a live session inside the window is a pass."""
+    from datetime import UTC, datetime, timedelta
+
+    recent = (datetime.now(UTC) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    session = fixture_text("mnt_session_eaptls_live.xml").replace("2026-10-21T10:52:20.238Z", recent)
+    mock_eaptls(mock, minutes=60, session=session)
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC, "minutes": 60})
+    assert "But MnT has a live session for it, authenticated at" in out["verdict"]
+    assert "198.18.128.154 GigabitEthernet1/0/3" in out["verdict"] and "Nothing failed" in out["verdict"]
+    assert out["session"]["active"] is True and "likely_causes" not in out
+
+
+async def test_why_auth_failed_still_on_an_older_session(mock: respx.MockRouter) -> None:
+    mock_eaptls(mock, minutes=60, session=fixture_text("mnt_session_eaptls_live.xml"))
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC, "minutes": 60})
+    assert (
+        "still on its session authenticated at 2026-10-21T10:52:20.238Z through mcp-test-sw1"
+        in out["verdict"]
+    )
+    assert out["likely_causes"][0].endswith("it is still connected on that session")
