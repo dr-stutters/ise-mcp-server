@@ -8,6 +8,23 @@
   `'Radius:Session-Timeout=3600'`. Sent as ERS `advancedAttributes`; a malformed entry is refused before
   anything is sent.
 
+### Fixed
+- `ise_why_auth_failed` no longer says "the RADIUS request never reached ISE" just because MnT has no record in
+  the window (#59). MnT keeps finished conversations only, and not every repeated successful login, so the
+  tool now reads the endpoint's live session and its last record up to 7 days back, checks that the NAD
+  still covers that switch, and orders the causes that leave no record:
+  - a live session inside the window: authenticated, nothing failed;
+  - still on an older live session: no new login, which is normal;
+  - a recent pass through a NAD that still exists: an EAP conversation the client abandoned, or no new
+    request, is likelier than a drop;
+  - otherwise: a drop (11007/11036), a wrong MAC or an abandoned conversation.
+
+  It lists the switch checks that tell them apart (`show aaa servers` timeouts vs requests, `show dot1x
+  interface <port> statistics`, a capture with Access-Challenges and no final Accept/Reject). Found live in
+  the catc part D window: an abandoned PEAP attempt had been reported as "never reached ISE". ISE had answered
+  10 challenges, and the client had passed through the same NAD 17 minutes earlier. In the same window, MnT's
+  history left out the client's later successful logins, which only the session showed.
+
 ## 0.11.1 (2026-10-18)
 
 ### Added
