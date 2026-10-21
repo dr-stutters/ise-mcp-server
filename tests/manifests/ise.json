@@ -328,6 +328,10 @@
       "tier": "read",
       "title": "Get an ISE task's status"
     },
+    "ise_get_trustsec_settings": {
+      "tier": "read",
+      "title": "TrustSec general settings"
+    },
     "ise_import_config": {
       "tier": "dangerous",
       "title": "Import ISE configuration from an export"
@@ -608,6 +612,10 @@
       "tier": "write",
       "title": "Create or update a TACACS+ server sequence"
     },
+    "ise_set_trustsec_settings": {
+      "tier": "write",
+      "title": "Change TrustSec general settings"
+    },
     "ise_status": {
       "tier": "read",
       "title": "Cisco ISE status"
@@ -623,6 +631,10 @@
     "ise_test_command_set": {
       "tier": "read",
       "title": "Test a command against TACACS+ command sets"
+    },
+    "ise_trustsec_device_report": {
+      "tier": "read",
+      "title": "TrustSec policy status per device"
     },
     "ise_update_authz_profile": {
       "tier": "write",
@@ -657,5 +669,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.11.0"
+  "version": "0.11.1"
 }
