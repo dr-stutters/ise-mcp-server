@@ -29,8 +29,16 @@ PROMPT_SAMPLES = {
         "ip": "10.0.0.5",
         "username": "alice",
     },
+    "ise_aaa_chain_check": {
+        "nad": "198.18.128.154",
+        "site": "Global/mcp-test-lab/mcp-test-nac",
+        "switch": "mcp-cml-ise/sw1",
+        "user": "alice",
+        "minutes": "60",
+    },
 }
-KNOWN = {"cml", "ise", "fmc", "catc"}
+# win = the Windows_Server MCP (no manifest: its references are checked for `uses` only).
+KNOWN = {"cml", "ise", "fmc", "catc", "win"}
 # Every fmc_*/catc_* tool a prompt references must exist in that server's manifest (tests/manifests/).
 EXTERNAL = load_tool_manifests("tests/manifests")
 
@@ -168,3 +176,53 @@ async def test_incident_timeline_listed_read_tier() -> None:
     async with Client(make_server()) as c:  # read-only server
         names = {p.name for p in await c.list_prompts()}
     assert "ise_incident_timeline" in names
+
+
+async def render(name: str, args: dict[str, str], **settings: object) -> str:
+    async with Client(make_server(**settings)) as c:
+        r = await c.get_prompt(name, args)
+    return r.messages[0].content.text  # type: ignore[union-attr]
+
+
+async def test_aaa_chain_check_renders_for_a_nad_on_a_cml_switch() -> None:
+    text = await render(
+        "ise_aaa_chain_check", {"nad": "198.18.128.154", "switch": "mcp-cml-ise/sw1", "user": "alice"}
+    )
+    assert '`cml_run_commands` with lab="mcp-cml-ise", nodes=["sw1"]' in text
+    # I67: the NAD is checked for coverage by IP, with the RADIUS server the switch points at.
+    assert '`ise_audit_nads` with expected=[{"name": "198.18.128.154", "ip": "198.18.128.154"' in text
+    # D75 / D68: the Catalyst Center link reads next_action and quotes the AAA verdict line.
+    assert "`catc_get_policy_servers`" in text and "next_action" in text and '"none"' in text
+    assert '`catc_network_services_health` with service="aaa"' in text and "hours=1" in text
+    assert '`ise_test_ad_user` with the join point and username="alice"' in text
+    for tool in ("ise_why_auth_failed", "ise_pxgrid_status", "fmc_test_realm", "fmc_get_identity_sources"):
+        assert f"`{tool}`" in text, tool
+    assert "win_get_dns_records" in text
+    assert "Silent failures leave NO MnT record" in text and "never pass confirm" in text
+    assert "ISE write tools are not enabled" in text and "`ise_update_nad`" not in text
+
+
+async def test_aaa_chain_check_offers_ise_fixes_when_writes_on() -> None:
+    text = await render("ise_aaa_chain_check", {"nad": "mcp-test-sw1"}, mcp_enable_writes=True)
+    assert "`ise_create_nad`" in text and "`ise_update_nad`" in text
+    assert "`catc_update_policy_server`" in text and "`catc_accept_ise_certificate`" in text
+    assert '"ip": "<its IP>"' in text and '`catc_run_show_commands` with devices=["mcp-test-sw1"]' in text
+
+
+async def test_aaa_chain_check_renders_for_a_site() -> None:
+    text = await render("ise_aaa_chain_check", {"site": "Global/mcp-test-lab/mcp-test-nac", "minutes": "180"})
+    assert '`catc_list_devices` with site="Global/mcp-test-lab/mcp-test-nac"' in text
+    assert "check_stale=false" in text
+    assert "hours=3" in text
+    assert '`catc_run_show_commands` with devices=["<each switch from step 2>"]' in text
+    assert "skip the AD user test" in text
+
+
+@pytest.mark.parametrize(
+    "args",
+    [{}, {"nad": "sw1; rm -rf"}, {"site": "Global/<script>"}, {"nad": "sw1", "user": "a b"}],
+)
+async def test_aaa_chain_check_validates(args: dict[str, str]) -> None:
+    async with Client(make_server()) as c:
+        with pytest.raises(Exception):  # noqa: B017 - FastMCP wraps the InvalidRequest
+            await c.get_prompt("ise_aaa_chain_check", args)

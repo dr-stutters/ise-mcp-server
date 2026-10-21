@@ -13,6 +13,7 @@ from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, normalize_mac, parse
 # Prompt arguments are interpolated into instructions, so they are held to strict shapes.
 SAFE_USER = re.compile(r"^[\w.@\\+-]{1,128}$")
 SAFE_SWITCH = re.compile(r"^[\w.:-]{1,128}(/[\w.:-]{1,128})?$")
+SAFE_SITE = re.compile(r"^[\w .#()-]{1,64}(/[\w .#()-]{1,64}){0,7}$")
 
 
 def _validated(mac: str, username: str, ip: str, switch: str) -> tuple[str, str, str, str]:
@@ -72,6 +73,7 @@ def register(reg: ToolRegistrar) -> None:
     fix_text = fix_instructions(set(reg.tiers))
     register_quarantine(reg)
     register_incident_timeline(reg)
+    register_aaa_chain_check(reg)
 
     @reg.prompt(
         title="Troubleshoot endpoint network access",
@@ -431,3 +433,169 @@ the catc_* tools the catc-mcp server to be connected to this client: if a call i
      ANC quarantine lining up with a CatC issue.
    - End with a short "what happened" summary and the gaps (sources not connected, windows with no
      data). Suggest next steps as read-only lookups; propose no change without the user asking."""
+
+
+CHAIN_FIX_TOOLS = ("ise_create_nad", "ise_update_nad", "ise_approve_pxgrid_client")
+
+
+def register_aaa_chain_check(reg: ToolRegistrar) -> None:
+    # The ISE fixes it may preview: only the write tools this server exposes.
+    ise_fixes = [tool_ref(t) for t in CHAIN_FIX_TOOLS if t in reg.tiers]
+    ise_fix_text = (
+        f"ISE fixes: {', '.join(ise_fixes)} (for a pending pxGrid consumer and for missing_nad / "
+        "wrong_ndg / ip_mismatch; the RADIUS secret comes from the user, secrets are masked everywhere)"
+        if ise_fixes
+        else "ISE write tools are not enabled on this server: give the ISE GUI steps (menu path and exact "
+        "values) for NAD and pxGrid fixes"
+    )
+
+    @reg.prompt(
+        title="Check the AAA chain: switch, ISE, AD, Catalyst Center, FMC",
+        uses=["ise", "catc", "fmc", "cml", "win"],
+        example={"nad": "198.18.128.154", "site": "Global/mcp-test-lab/mcp-test-nac"},
+        tools=[
+            "ise_get_nad",
+            "ise_audit_nads",
+            "ise_list_nodes",
+            "ise_get_auth_list",
+            "ise_recent_auth_failures",
+            "ise_why_auth_failed",
+            "ise_list_identity_sources",
+            "ise_get_ad_join_point",
+            "ise_pxgrid_status",
+            "ise_list_pxgrid_clients",
+            "catc_get_policy_servers",
+            "catc_network_services_health",
+            "catc_list_devices",
+            "catc_run_show_commands",
+            "fmc_get_realm",
+            "fmc_test_realm",
+            "fmc_get_identity_sources",
+            "cml_run_commands",
+        ],
+    )
+    def ise_aaa_chain_check(
+        nad: Annotated[
+            str, Field(description="The switch or WLC users authenticate through: NAD name or IP")
+        ] = "",
+        site: Annotated[
+            str,
+            Field(
+                description="Catalyst Center site path (e.g. 'Global/SYD/Bldg-1'): checks every device there"
+            ),
+        ] = "",
+        switch: Annotated[
+            str,
+            Field(
+                description="Where to run the switch's show commands: 'lab/node' for a CML lab node, or "
+                "its Catalyst Center name or IP (default: the NAD's IP through Catalyst Center)"
+            ),
+        ] = "",
+        user: Annotated[str, Field(description="Optional: a username to test against AD")] = "",
+        minutes: Annotated[
+            int, Field(ge=5, le=10080, description="Window for ISE and Catalyst Center counters, in minutes")
+        ] = 60,
+    ) -> str:
+        """'802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and
+        RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join
+        and a user test), the Catalyst Center to ISE integration (policy server state and next action,
+        Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source
+        with name resolution. Ends with one table: link, evidence, verdict and the fix, shown as a
+        preview only. Read-only; the catc, fmc, cml and Windows_Server steps are skipped (noted) when
+        those servers aren't connected."""
+        nad = nad.strip()
+        site = site.strip()
+        if not (nad or site):
+            raise InvalidRequest("Give the NAD (name or IP) or a Catalyst Center site")
+        if nad and not SAFE_SWITCH.match(nad):
+            raise InvalidRequest("nad must be a device name or IP (letters, digits, . : - _)")
+        if site and not SAFE_SITE.match(site):
+            raise InvalidRequest("site must be a site path like 'Global/Area/Building'")
+        _, user, _, switch = _validated("", user, "", switch)
+        nad_ip = parse_ip(nad) if nad else None
+        hours = max(1, round(minutes / 60))
+        scope = " and ".join(x for x in (f"NAD {nad}" if nad else "", f"site {site}" if site else "") if x)
+        if switch and "/" in switch:
+            lab, node = switch.split("/", 1)
+            cli = f'{tool_ref("cml_run_commands")} with lab="{lab}", nodes=["{node}"]'
+        else:
+            target = switch or nad_ip or nad or "<each switch from step 2>"
+            cli = f'{tool_ref("catc_run_show_commands")} with devices=["{target}"]'
+        inventory = (
+            f'{tool_ref("catc_list_devices")} with site="{site}" gives the devices '
+            "(hostname, managementIpAddress)"
+            if site
+            else f"the NAD's IP{f' ({nad_ip})' if nad_ip else ''} is the one device"
+        )
+        expected = (
+            "the catc_list_devices rows as they are, check_stale=false (one site is a partial inventory)"
+            if site
+            else f'[{{"name": "{nad}", "ip": "{nad_ip or "<its IP>"}", '
+            '"aaa_server": "<the RADIUS server from step 1>"}]'
+        )
+        ad_user = (
+            f'{tool_ref("ise_test_ad_user")} with the join point and username="{user}": the groups ISE sees.'
+            if user
+            else "(no user given: skip the AD user test)"
+        )
+        return f"""Check the authentication chain for {scope} (window {minutes} minutes). Read only: no tool
+here changes anything. Each link gets a verdict (green / amber / red / not checked) with its evidence;
+fixes are shown at the end as previews only and applied only if the user approves them.
+
+Only the ise_* tools are certain to exist. catc_* needs the catc-mcp server, fmc_* the fmc-mcp server,
+cml_* the cml-mcp server and win_* the Windows_Server server: if one is not connected, mark its links
+"not checked (server not connected)" and carry on.
+
+1. Switch: AAA config and RADIUS counters. {cli} and commands
+   "show aaa servers", "show running-config | section radius server|aaa group server radius",
+   "show access-session" (and "show dot1x statistics" if there are 802.1X ports). Green: every RADIUS
+   server is UP with timeouts not rising; red: a server DEAD or timeouts rising. Note each server's
+   IP and compare it with {tool_ref("ise_list_nodes")} (ipAddress/fqdn of the PSNs). Requests rising
+   with no timeouts means ISE answered them, even when ISE keeps no record (step 2). A real auth probe
+   is outside this check: it needs a client or 'test aaa' with a test account.
+
+2. ISE: the NAD and what ISE recorded. {inventory}; then
+   {tool_ref("ise_audit_nads")} with expected={expected}. Devices are matched by IP: a NAD under another
+   name is fine (Catalyst Center reuses an existing NAD). Red on missing_nad (silent drops, 11007),
+   wrong_ndg (policy conditions may miss it), ip_mismatch, aaa_elsewhere; amber on a short or reused
+   secret. Then {tool_ref("ise_get_nad")} for the device (secret set, groups, CoA port),
+   {tool_ref("ise_get_auth_list")} with nad= and since_minutes={minutes} (passes prove the secret works) and
+   {tool_ref("ise_recent_auth_failures")} with nad= and since_minutes={minutes} (decoded reasons).
+   Silent failures leave NO MnT record: a wrong shared secret (11036), an unknown NAD (11007) and a
+   client that abandons EAP mid-way all look like "nothing happened" in ISE. Tell them apart with
+   step 1's counters (timeouts rising = dropped; requests rising without timeouts = ISE answered,
+   client side); for one endpoint, {tool_ref("ise_why_auth_failed")} with its MAC orders these causes.
+
+3. ISE identity sources. {tool_ref("ise_list_identity_sources")}; for each Active Directory join point
+   {tool_ref("ise_get_ad_join_point")} (joined on every PSN? domain reachable?). {ad_user} Red when a PSN
+   is not joined or the domain is unreachable.
+
+4. Catalyst Center to ISE (skip if catc is not connected). {tool_ref("catc_get_policy_servers")}: for
+   each ISE server its state, trust and `next_action`. Green only with next_action "none" (COMPLETE,
+   TRUSTED); "update_entry" (with the field Catalyst Center names, e.g. fqdn), "accept_certificate",
+   "approve_pxgrid_on_ise" and "wait" are red/amber and name their own fix. Then
+   {tool_ref("catc_network_services_health")} with service="aaa"{f', site="{site}"' if site else ""} and
+   hours={hours}: quote its verdict line ("ISE ... answered N% of M AAA requests, average latency ...").
+   Catalyst Center counts only Access-Rejects as failures, so silent drops and abandoned EAP sessions
+   don't lower that percentage; Catalyst Center's own admin logins over RADIUS don't appear in MnT
+   sessions (the policy set's hit counters are their evidence).
+
+5. pxGrid. {tool_ref("ise_pxgrid_status")} (persona, certificate chain and hostname as consumers see
+   them) and {tool_ref("ise_list_pxgrid_clients")}: Catalyst Center's and FMC's consumers should be
+   enabled; a pending client is amber (approve it), none for an integration that needs one is red.
+
+6. FMC identity (skip if fmc is not connected). {tool_ref("fmc_get_identity_sources")} (ISE/pxGrid
+   identity source and its status), {tool_ref("fmc_get_realm")} and {tool_ref("fmc_test_realm")} for
+   each realm (directory server reachable, LDAPS vs plain LDAP). A realm that can't resolve the DC's name
+   is a DNS problem: check the records with `win_get_dns_records` (Windows_Server server) for the DC
+   and the ISE FQDN.
+
+7. Report one table, one row per link (switch, ISE NAD, ISE identity, Catalyst Center integration,
+   Catalyst Center AAA health, pxGrid, FMC realm, FMC identity source, DNS): link | evidence (tool and
+   the key value) | verdict | fix. Then the fixes, each as a preview call WITHOUT confirm:
+   {tool_ref("catc_update_policy_server")} for next_action update_entry (dangerous tier: it re-runs the
+   integration), {tool_ref("catc_accept_ise_certificate")} after comparing fingerprints with
+   ise_pxgrid_status, the switch's `radius server` config for aaa_elsewhere; {ise_fix_text}.
+   Show each preview and wait for the user's approval; never pass confirm yourself. End with the one
+   link most likely to explain the outage, and what proves it fixed (step 1's counters, a pass in
+   ise_get_auth_list)."""

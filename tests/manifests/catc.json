@@ -1,8 +1,26 @@
 {
-  "core_version": "0.12.3",
+  "core_version": "0.14.3",
   "manifest": 1,
   "prefix": "catc",
   "prompts": {
+    "catc_admin_access_via_ise": {
+      "arguments": [
+        "catc_ip",
+        "ad_group",
+        "ad_user",
+        "role",
+        "mirror_local_accounts",
+        "keep_enabled"
+      ],
+      "references": [],
+      "rendered": false,
+      "tier": "dangerous",
+      "uses": [
+        "catc",
+        "ise",
+        "win"
+      ]
+    },
     "catc_change_window": {
       "arguments": [
         "template",
@@ -16,6 +34,21 @@
       "tier": "write",
       "uses": [
         "catc"
+      ]
+    },
+    "catc_client_troubleshoot": {
+      "arguments": [
+        "client",
+        "destination_ip",
+        "expected_vlan",
+        "hours"
+      ],
+      "references": [],
+      "rendered": false,
+      "tier": "read",
+      "uses": [
+        "catc",
+        "ise"
       ]
     },
     "catc_decommission_device": {
@@ -124,6 +157,10 @@
       "tier": "dangerous",
       "title": "Add Cisco ISE to Catalyst Center"
     },
+    "catc_ai_insights": {
+      "tier": "read",
+      "title": "AI-driven insights"
+    },
     "catc_api_call": {
       "tier": "dangerous",
       "title": "Raw Cisco Catalyst Center API call"
@@ -160,6 +197,10 @@
       "tier": "read",
       "title": "Client 360"
     },
+    "catc_clone_template": {
+      "tier": "write",
+      "title": "Clone template"
+    },
     "catc_commit_template": {
       "tier": "write",
       "title": "Commit template"
@@ -167,6 +208,14 @@
     "catc_compare_device_configs": {
       "tier": "read",
       "title": "Compare device configs"
+    },
+    "catc_compliance_report": {
+      "tier": "read",
+      "title": "Compliance report"
+    },
+    "catc_config_drift": {
+      "tier": "read",
+      "title": "Config drift"
     },
     "catc_create_compliance_policy": {
       "tier": "write",
@@ -288,6 +337,10 @@
       "tier": "dangerous",
       "title": "Deploy template"
     },
+    "catc_deploy_wlc_config": {
+      "tier": "dangerous",
+      "title": "Deploy WLC config"
+    },
     "catc_detach_template_from_profile": {
       "tier": "write",
       "title": "Detach template from network profiles"
@@ -296,9 +349,25 @@
       "tier": "read",
       "title": "Device 360"
     },
+    "catc_diff_config": {
+      "tier": "read",
+      "title": "Diff configuration exports"
+    },
+    "catc_diff_template_versions": {
+      "tier": "read",
+      "title": "Diff template versions"
+    },
     "catc_distribute_image": {
       "tier": "dangerous",
       "title": "Distribute software image"
+    },
+    "catc_export_config": {
+      "tier": "read",
+      "title": "Export configuration"
+    },
+    "catc_export_templates": {
+      "tier": "read",
+      "title": "Export templates"
     },
     "catc_get_client": {
       "tier": "read",
@@ -335,6 +404,10 @@
     "catc_get_device_hardware": {
       "tier": "read",
       "title": "Device hardware and licences"
+    },
+    "catc_get_external_authentication": {
+      "tier": "read",
+      "title": "External authentication (admin login through AAA)"
     },
     "catc_get_issue": {
       "tier": "read",
@@ -407,6 +480,30 @@
     "catc_get_wireless_controller": {
       "tier": "read",
       "title": "Wireless controller"
+    },
+    "catc_get_wlc_config": {
+      "tier": "read",
+      "title": "WLC feature config"
+    },
+    "catc_get_wlc_deployments": {
+      "tier": "read",
+      "title": "WLC deployments"
+    },
+    "catc_health_trend": {
+      "tier": "read",
+      "title": "Health trend"
+    },
+    "catc_import_config": {
+      "tier": "dangerous",
+      "title": "Import configuration"
+    },
+    "catc_import_templates": {
+      "tier": "write",
+      "title": "Import templates"
+    },
+    "catc_issue_recurrence": {
+      "tier": "read",
+      "title": "Issue recurrence"
     },
     "catc_list_audit_logs": {
       "tier": "read",
@@ -520,6 +617,10 @@
       "tier": "read",
       "title": "List template projects"
     },
+    "catc_list_template_versions": {
+      "tier": "read",
+      "title": "List template versions"
+    },
     "catc_list_templates": {
       "tier": "read",
       "title": "List templates"
@@ -527,6 +628,10 @@
     "catc_mark_device_for_replacement": {
       "tier": "write",
       "title": "Mark a device for replacement"
+    },
+    "catc_network_services_health": {
+      "tier": "read",
+      "title": "Network services health (AAA, DHCP, DNS)"
     },
     "catc_path_trace": {
       "tier": "read",
@@ -572,6 +677,26 @@
       "tier": "read",
       "title": "Search the Cisco Catalyst Center API spec"
     },
+    "catc_set_external_authentication": {
+      "tier": "dangerous",
+      "title": "Turn external authentication on or off"
+    },
+    "catc_set_rf_profile": {
+      "tier": "write",
+      "title": "Set RF profile"
+    },
+    "catc_set_wlan_security": {
+      "tier": "write",
+      "title": "Set WLAN security"
+    },
+    "catc_set_wlan_vlan": {
+      "tier": "write",
+      "title": "Set WLAN VLAN"
+    },
+    "catc_site_health_report": {
+      "tier": "read",
+      "title": "Site health report"
+    },
     "catc_status": {
       "tier": "read",
       "title": "Cisco Catalyst Center status"
@@ -580,13 +705,37 @@
       "tier": "write",
       "title": "Tag golden image"
     },
+    "catc_template_drift": {
+      "tier": "read",
+      "title": "Template drift"
+    },
+    "catc_template_usage": {
+      "tier": "read",
+      "title": "Template usage"
+    },
+    "catc_test_login": {
+      "tier": "read",
+      "title": "Test a Catalyst Center login"
+    },
+    "catc_top_problems": {
+      "tier": "read",
+      "title": "Top problem devices or clients"
+    },
     "catc_unassign_profile_from_sites": {
       "tier": "write",
       "title": "Unassign network profile from sites"
     },
+    "catc_update_compliance_policy": {
+      "tier": "write",
+      "title": "Update compliance policy"
+    },
     "catc_update_issue_status": {
       "tier": "write",
       "title": "Resolve or ignore issues"
+    },
+    "catc_update_policy_server": {
+      "tier": "dangerous",
+      "title": "Update an authentication and policy server"
     },
     "catc_update_site": {
       "tier": "write",
@@ -609,5 +758,5 @@
       "title": "Update template"
     }
   },
-  "version": "0.8.2"
+  "version": "0.11.0"
 }
