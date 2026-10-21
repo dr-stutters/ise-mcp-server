@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-10-21)
+
+NAD coverage against an inventory (I67), the cross-product prompt `ise_aaa_chain_check` (I68), advanced attributes on
+authorization profiles, and two fixes for MnT's incomplete history found in the Catalyst Center part D window.
 
 ### Added
 - **Prompt `ise_aaa_chain_check(nad?, site?, switch?, user?, minutes=60)` (I68, #46).** Read only; uses catc, fmc,
@@ -32,6 +35,10 @@
   `'Cisco:cisco-av-pair=Role=OBSERVER-ROLE'` (the role a Catalyst Center admin login gets, catc D88/D89) or
   `'Radius:Session-Timeout=3600'`. Sent as ERS `advancedAttributes`; a malformed entry is refused before
   anything is sent.
+
+### Security
+- certifi 2026.10.19 (PYSEC-2026-4320: certifi 2026.7.22 shipped the emSign ECC Root CA - G3, whose eMudhra
+  intermediates had compromised keys).
 
 ### Fixed
 - `ise_why_auth_failed` no longer says "the RADIUS request never reached ISE" just because MnT has no record in
