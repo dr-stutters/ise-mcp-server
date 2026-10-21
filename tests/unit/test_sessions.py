@@ -264,6 +264,8 @@ async def test_auth_history_labels_coa_and_compacts_reply(mock: respx.MockRouter
     assert "kind" not in login
     assert "Class=" not in login.get("reply", "")
     assert "response" not in login
+    assert "Repeated successful logins may be missing" in out["history_note"]
+    assert "ise_find_session" in out["history_note"]
 
 
 def test_compact_reply_drops_key_material() -> None:
@@ -395,3 +397,132 @@ async def test_why_auth_failed_still_on_an_older_session(mock: respx.MockRouter)
         in out["verdict"]
     )
     assert out["likely_causes"][0].endswith("it is still connected on that session")
+
+
+# --- the history leaves out repeated successful logins; the session doesn't ----------------------
+# Same recording: 4 h of history held 2 records and the newest is 10:13:34Z, while the live session
+# shows an authentication at 10:52:20Z. The newest login comes from the session.
+
+WEEK = 10080
+LIVE_AUTH = "2026-10-21T10:52:20.238Z"
+NEWEST_RECORD = "2026-10-21T10:13:34.659Z"
+LIVE_WHERE = "its live session through 198.18.128.154 GigabitEthernet1/0/3"
+
+
+def mock_week(mock: respx.MockRouter, *, history: str, session: str | None) -> None:
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{EAPTLS_MAC}/{WEEK * 60}/50/All").respond(text=history)
+    if session is None:
+        mock.get(f"/admin/API/mnt/Session/MACAddress/{EAPTLS_MAC}").respond(500, text=MISSING_SESSION)
+    else:
+        mock.get(f"/admin/API/mnt/Session/MACAddress/{EAPTLS_MAC}").respond(text=session)
+    mock.get("/admin/API/mnt/FailureReasons").respond(text=FAILURE_REASONS_XML)
+    mock.get("/api/v1/policy/network-access/policy-set").respond(json={"response": []})
+    nid = SW1_NAD["NetworkDevice"]["id"]
+    mock.get("/ers/config/networkdevice", params={"filter": "ipaddress.EQ.198.18.128.154"}).respond(
+        json=ers_page([{"id": nid, "name": "mcp-test-sw1"}])
+    )
+    mock.get(f"/ers/config/networkdevice/{nid}").respond(json=SW1_NAD)
+
+
+def history_with_failure(at: str) -> str:
+    """The recorded history plus a failed EAP-TLS attempt at `at`."""
+    text = fixture_text("mnt_authstatus_eaptls_7d.xml")
+    start = text.index("<authStatusElements>")
+    end = text.index("</authStatusElements>") + len("</authStatusElements>")
+    failed = (
+        text[start:end]
+        .replace(">true</passed>", ">false</passed>")
+        .replace(">false</failed>", ">true</failed>")
+        .replace(
+            "<failure_reason></failure_reason>",
+            "<failure_reason>12520 EAP-TLS failed SSL/TLS handshake because the client rejected the ISE "
+            "local-certificate</failure_reason>",
+        )
+        .replace(NEWEST_RECORD, at)
+    )
+    return text[:start] + failed + text[start:]
+
+
+async def test_why_auth_failed_newest_pass_comes_from_the_session(mock: respx.MockRouter) -> None:
+    mock_week(
+        mock,
+        history=fixture_text("mnt_authstatus_eaptls_7d.xml"),
+        session=fixture_text("mnt_session_eaptls_live.xml"),
+    )
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC, "minutes": WEEK})
+    verdict = out["verdict"]
+    assert verdict.startswith(f"No login failures: the newest login PASSED at {LIVE_AUTH} ({LIVE_WHERE})")
+    assert f"The history's latest record is older ({NEWEST_RECORD}" in verdict
+    assert "MnT's history leaves out repeated successful logins" in verdict
+    assert out["newest_login"] == {
+        "time": LIVE_AUTH,
+        "user": "mcp-eaptls-client",
+        "nas_ip": "198.18.128.154",
+        "nas_port": "GigabitEthernet1/0/3",
+        "active": True,
+    }
+    assert out["latest_attempt"]["time"] == NEWEST_RECORD
+    assert "session" not in out  # it is live
+
+
+async def test_why_auth_failed_session_no_newer_than_the_history(mock: respx.MockRouter) -> None:
+    # The session of the newest record itself, since ended: nothing was left out.
+    mock_week(mock, history=fixture_text("mnt_authstatus_eaptls_7d.xml"), session=ended_session())
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC, "minutes": WEEK})
+    assert out["verdict"] == (
+        f"No login failures: the latest login PASSED at {NEWEST_RECORD} "
+        "(authorization profile mcp-test-permit)."
+    )
+    assert "newest_login" not in out
+    assert out["session"].startswith("no active session now")
+
+
+@pytest.mark.parametrize(
+    ("failed_at", "start", "newer"),
+    [
+        # failed after the newest record, passed later (only the session shows it)
+        (
+            "2026-10-21T10:30:00.000Z",
+            "The latest recorded login FAILED at 2026-10-21T10:30:00.000Z: 12520",
+            True,
+        ),
+        # failed after the session's authentication: still the latest
+        ("2026-10-21T11:00:00.000Z", "The latest login FAILED at 2026-10-21T11:00:00.000Z: 12520", False),
+        # failed before the newest record, which passed, and the session is newer still
+        ("2026-10-21T10:00:00.000Z", f"The latest login PASSED at {LIVE_AUTH} ({LIVE_WHERE}; MnT's", True),
+    ],
+    ids=["passed-since", "failure-is-latest", "older-failure"],
+)
+async def test_why_auth_failed_failure_against_the_session(
+    mock: respx.MockRouter, failed_at: str, start: str, newer: bool
+) -> None:
+    mock_week(
+        mock, history=history_with_failure(failed_at), session=fixture_text("mnt_session_eaptls_live.xml")
+    )
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC, "minutes": WEEK})
+    assert out["verdict"].startswith(start), out["verdict"]
+    assert out["failure"]["code"] == "12520"
+    assert ("newest_login" in out) is newer
+    if failed_at == "2026-10-21T10:30:00.000Z":
+        assert (
+            f"The endpoint has passed since: {LIVE_WHERE} shows a successful authentication at {LIVE_AUTH}"
+            in out["verdict"]
+        )
+    if newer:
+        assert "leaves out repeated successful logins" in out["verdict"]
+        assert out["newest_login"]["time"] == LIVE_AUTH
+
+
+async def test_why_auth_failed_only_coa_then_a_pass_the_history_left_out(mock: respx.MockRouter) -> None:
+    coa = COA_NAK.replace(MAC_OK, EAPTLS_MAC).replace("2026-10-14T13:00:00.000Z", "2026-10-21T10:40:00.000Z")
+    history = xml(
+        f'<authStatusOutputList><authStatusList key="{EAPTLS_MAC}">{coa}</authStatusList>'
+        "</authStatusOutputList>"
+    )
+    mock_week(mock, history=history, session=fixture_text("mnt_session_eaptls_live.xml"))
+    out = await call_tool(make_server(), "ise_why_auth_failed", {"mac": EAPTLS_MAC, "minutes": WEEK})
+    verdict = out["verdict"]
+    assert verdict.startswith(f"No login record for {EAPTLS_MAC} in the last {WEEK} minutes, only 1 CoA")
+    assert f"but {LIVE_WHERE} shows a successful authentication at {LIVE_AUTH}, after them" in verdict
+    assert "has not authenticated since" not in verdict
+    assert out["coa_failures"]["count"] == 1

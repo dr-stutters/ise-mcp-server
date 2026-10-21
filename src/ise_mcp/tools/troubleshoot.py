@@ -32,7 +32,14 @@ from ise_mcp.tools.endpoints import endpoint_row, profile_name
 from ise_mcp.tools.identity import user_row
 from ise_mcp.tools.network import find_nads_for_ip, nad_summary
 from ise_mcp.tools.policy import rules_using_profile
-from ise_mcp.tools.sessions import auth_history, auth_row, failure_info, find_session, is_coa_record
+from ise_mcp.tools.sessions import (
+    auth_history,
+    auth_row,
+    failure_info,
+    find_session,
+    is_coa_record,
+    newer_session_login,
+)
 
 USER_STORE_CODES = {"22056", "22040", "22041", "24206", "22063"}
 LOCAL_STORES = {"", "internal users", "internal endpoints", "guest users", "none"}
@@ -114,6 +121,16 @@ def coa_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "same key) on the switch, the NAD's CoA port in ISE (default 1700), and UDP 1700 in between."
         )
     return {"count": len(rows), "latest": latest.get("time"), "reason": reason, "meaning": meaning}
+
+
+def session_where(login: dict[str, Any]) -> str:
+    """'its live session through 198.18.128.154 GigabitEthernet1/0/3' for a newer_session_login row."""
+    which = "live session" if login.get("active", True) else "session (since ended)"
+    where = " ".join(str(login[k]) for k in ("nas_ip", "nas_port") if login.get(k))
+    return f"its {which}" + (f" through {where}" if where else "")
+
+
+HISTORY_LEFT_OUT = "MnT's history leaves out repeated successful logins"
 
 
 LAST_RECORD_LOOKBACK = 10080  # minutes (7 days, the tool's own maximum) searched for the last record
@@ -278,7 +295,9 @@ def register(reg: ToolRegistrar) -> None:
         explains the latest failure: decoded failure reason with cause, resolution and a likely fix, the
         execution steps, the network device it came through (or that none matches the NAS IP), the
         internal user's state when the user store is involved, the authorization profile and the rules
-        that use it, and whether the latest attempt has since passed. With no record in the window it
+        that use it, and whether the latest attempt has since passed. MnT's history leaves out repeated
+        successful logins, so a session authenticated after the newest record is reported as the newest
+        login (newest_login). With no record in the window it
         reads the live session and the last record further back, and orders what an empty window can
         mean (a live session ISE didn't log, an EAP conversation the client abandoned, no new request,
         a silent drop) with the switch checks that tell them apart. Give a MAC (best) or a username
@@ -326,7 +345,21 @@ def register(reg: ToolRegistrar) -> None:
             out["attempts_in_window"]["coa_records"] = len(coa_rows)
         if coa_failed:
             out["coa_failures"] = coa_summary(coa_failed)
+        # The session's authentication can be newer than every record: the history leaves out
+        # repeated successful logins, the session doesn't.
+        session = await _safe(find_session(app, mac=mac_n))
+        newer = newer_session_login(session, (rows or coa_rows)[0].get("time"))
+        if newer:
+            out["newest_login"] = newer
         if not rows:
+            if newer:
+                out["verdict"] = (
+                    f"No login record for {mac_n} in the last {minutes} minutes, only {len(coa_rows)} CoA "
+                    f"(change-of-authorization) record(s), but {session_where(newer)} shows a successful "
+                    f"authentication at {newer['time']}, after them: the endpoint authenticated again, and "
+                    f"{HISTORY_LEFT_OUT}."
+                )
+                return object_result(out)
             out["verdict"] = (
                 f"No login attempt for {mac_n} in the last {minutes} minutes, only "
                 f"{len(coa_rows)} CoA (change-of-authorization) record(s): ISE tried to reauthenticate or "
@@ -336,14 +369,21 @@ def register(reg: ToolRegistrar) -> None:
             return object_result(out)
         latest = rows[0]
         if not fails:
-            out["verdict"] = (
-                f"No login failures: the latest login PASSED at {latest.get('time')} "
-                f"(authorization profile {latest.get('authz_profiles')})."
-            )
+            if newer:
+                out["verdict"] = (
+                    f"No login failures: the newest login PASSED at {newer['time']} "
+                    f"({session_where(newer)}). The history's latest record is older ({latest.get('time')}, "
+                    f"authorization profile {latest.get('authz_profiles')}): {HISTORY_LEFT_OUT}, the session "
+                    "doesn't."
+                )
+            else:
+                out["verdict"] = (
+                    f"No login failures: the latest login PASSED at {latest.get('time')} "
+                    f"(authorization profile {latest.get('authz_profiles')})."
+                )
             if coa_failed:
                 out["verdict"] += " Only CoA requests failed (see coa_failures); they don't block login."
             out["latest_attempt"] = latest
-            session = await _safe(find_session(app, mac=mac_n))
             if isinstance(session, dict) and session.get("matched_policy"):
                 out["matched_policy"] = session["matched_policy"]
             elif latest.get("authz_profiles"):
@@ -358,13 +398,24 @@ def register(reg: ToolRegistrar) -> None:
         failed = rows[idx]
         info = await failure_info(app, failed.get("failure_reason"))
         code = (info or {}).get("code", "")
-        if idx == 0:
+        if idx == 0 and newer:
+            out["verdict"] = (
+                f"The latest recorded login FAILED at {failed.get('time')}: {failed.get('failure_reason')}. "
+                f"The endpoint has passed since: {session_where(newer)} shows a successful authentication "
+                f"at {newer['time']} ({HISTORY_LEFT_OUT})."
+            )
+        elif idx == 0:
             out["verdict"] = (
                 f"The latest login FAILED at {failed.get('time')}: {failed.get('failure_reason')}."
             )
         else:
+            passed_at = (
+                f"{newer['time']} ({session_where(newer)}; {HISTORY_LEFT_OUT})"
+                if newer
+                else latest.get("time")
+            )
             out["verdict"] = (
-                f"The latest login PASSED at {latest.get('time')}; the most recent failure was at "
+                f"The latest login PASSED at {passed_at}; the most recent failure was at "
                 f"{failed.get('time')}: {failed.get('failure_reason')}."
             )
         failed.pop("failure_reason", None)

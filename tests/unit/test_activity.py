@@ -235,6 +235,8 @@ async def test_recent_failures_grouped(mock: respx.MockRouter) -> None:
     assert out["coverage"]["macs_checked"] == 5
     assert out["coverage"]["from"] == {"given": 1, "auth_list": 3, "endpoint_db": 1}
     assert [r["time"] for r in out["results"]] == sorted((r["time"] for r in out["results"]), reverse=True)
+    # MnT's history leaves out repeated successful logins: a failing MAC may have passed since.
+    assert "may have passed since" in out["history_note"] and "ise_find_session" in out["history_note"]
 
 
 async def test_recent_failures_nad_filter_and_cap(mock: respx.MockRouter) -> None:
@@ -265,6 +267,7 @@ async def test_recent_failures_none_found(mock: respx.MockRouter) -> None:
     out = body(await call_tool(make_server(), "ise_recent_auth_failures", {}))
     assert out["failed_attempts"] == 0
     assert "Silent drops" in out["note"]
+    assert "history_note" not in out  # nothing listed, nothing to have passed since
 
 
 async def test_recent_failures_tolerates_lookup_errors_and_flags_truncation(mock: respx.MockRouter) -> None:

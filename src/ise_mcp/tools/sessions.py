@@ -28,6 +28,15 @@ from ise_mcp.xmlutil import as_list
 SESSION_COLUMNS = ["user", "mac", "ip", "nas_ip", "nad", "psn", "audit_session_id"]
 
 
+# MnT's AuthStatus history leaves out repeated successful logins (ISE's RADIUS setting 'Suppress
+# Repeated Successful Authentications', which REST can't read: docs/GAP-ANALYSIS.md); the session
+# (Session/MACAddress, auth_acs_timestamp) still shows the newest. Seen live on ISE 3.5: 2 records in
+# 4 h while the session showed a later login.
+HISTORY_GAP_NOTE = (
+    "Repeated successful logins may be missing: MnT's history leaves them out (ISE's 'Suppress Repeated "
+    "Successful Authentications'). ise_find_session has the newest authentication."
+)
+
 COA_MESSAGE_CODES = {"5417", "5205"}
 # Dynamic-authorization (CoA) failure reasons that MnT stores alongside logins.
 COA_FAILURE_CODES = {"11213", "11215", "11216", "11217", "11218", "11219"}
@@ -153,6 +162,25 @@ async def auth_history(app: IseApp, mac: str, minutes: int, records: int) -> lis
             out += [e for e in as_list(lst.get("authStatusElements")) if isinstance(e, dict)]
     out.sort(key=lambda e: str(e.get("acs_timestamp") or ""), reverse=True)
     return out
+
+
+def newer_session_login(session: Any, than: Any) -> dict[str, Any] | None:
+    """The session's authentication when it is newer than `than` (the newest history record's time):
+    a login the history left out. MnT times are ISO 8601 UTC and compare as strings."""
+    if not isinstance(session, dict) or session.get("error"):
+        return None
+    auth_at = str(session.get("auth_acs_timestamp") or "")
+    if not auth_at or auth_at <= str(than or ""):
+        return None
+    row = {
+        "time": auth_at,
+        "user": session.get("user_name"),
+        "nas_ip": session.get("nas_ip_address"),
+        "nas_port": session.get("nas_port_id"),
+        "authz_profiles": session.get("selected_azn_profiles"),
+        "active": session.get("active", True),
+    }
+    return {k: v for k, v in row.items() if v not in (None, "")}
 
 
 async def find_session(
@@ -393,7 +421,8 @@ def register(reg: ToolRegistrar) -> None:
         one). Returns the session's NAD, port, framed IP, PSN, timestamps, endpoint profile, posture and
         accounting counters, or found=false when MnT has no session. active=false means MnT only has
         the last, ended session (accounting Stop): the endpoint is not connected now (see
-        ise_get_auth_history for past attempts)."""
+        ise_get_auth_history for past attempts). auth_acs_timestamp is the endpoint's newest
+        authentication, which the auth history may leave out (repeated successful logins)."""
         app: IseApp = get_client(ctx)
         session = await find_session(app, mac=mac, ip=ip, username=username, session_id=session_id)
         if session is None:
@@ -421,7 +450,9 @@ def register(reg: ToolRegistrar) -> None:
     ) -> ToolResult:
         """Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail,
         username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure
-        reason decoded with cause and resolution. For a single diagnosis use ise_why_auth_failed."""
+        reason decoded with cause and resolution. Repeated successful logins may be missing (MnT leaves
+        them out); ise_find_session has the newest authentication. For a single diagnosis use
+        ise_why_auth_failed."""
         app: IseApp = get_client(ctx)
         mac_n = normalize_mac(mac)
         records = await auth_history(app, mac_n, minutes, max_records)
@@ -430,7 +461,12 @@ def register(reg: ToolRegistrar) -> None:
         for row in rows:
             if row.get("failure_reason"):
                 row["failure"] = await failure_info(app, row.pop("failure_reason"))
-        out: dict[str, Any] = {"mac": mac_n, "window_minutes": minutes, "attempts": rows}
+        out: dict[str, Any] = {
+            "mac": mac_n,
+            "window_minutes": minutes,
+            "attempts": rows,
+            "history_note": HISTORY_GAP_NOTE,
+        }
         if not rows:
             out["note"] = (
                 f"MnT has no authentication records for {mac_n} in the last {minutes} minutes. "
