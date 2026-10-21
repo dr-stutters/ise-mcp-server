@@ -705,6 +705,28 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
 
     # --- authorization results -----------------------------------------------------------------
 
+    def _av_pair(spec: str) -> dict[str, Any]:
+        """'Cisco:cisco-av-pair=Role=OBSERVER-ROLE' -> an ERS advanced attribute (ERS spells the keys
+        'leftHandSideDictionaryAttribue' / 'rightHandSideAttribueValue')."""
+        lhs, sep, value = spec.partition("=")
+        dictionary, colon, attribute = lhs.strip().partition(":")
+        if not sep or not colon or not dictionary.strip() or not attribute.strip() or not value.strip():
+            raise InvalidRequest(
+                f"av_pairs entry {spec!r}: use 'Dictionary:attribute=value', e.g. "
+                "'Cisco:cisco-av-pair=Role=OBSERVER-ROLE'."
+            )
+        return {
+            "leftHandSideDictionaryAttribue": {
+                "AdvancedAttributeValueType": "AdvancedDictionaryAttribute",
+                "dictionaryName": dictionary.strip(),
+                "attributeName": attribute.strip(),
+            },
+            "rightHandSideAttribueValue": {
+                "AdvancedAttributeValueType": "AttributeValue",
+                "value": value.strip(),
+            },
+        }
+
     async def _profile_body(
         app: IseApp,
         *,
@@ -748,12 +770,22 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             bool | None, Field(description="Grant voice domain permission (IP phones)")
         ] = None,
         description: Annotated[str | None, Field(description="Free-text description")] = None,
+        av_pairs: Annotated[
+            list[str] | None,
+            Field(
+                description="Advanced attributes as 'Dictionary:attribute=value', e.g. "
+                "'Cisco:cisco-av-pair=Role=OBSERVER-ROLE' (Catalyst Center admin role) or "
+                "'Radius:Session-Timeout=3600'; the value is everything after the first '='"
+            ),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL,
-        reauth timer, voice domain. Preview-first; blocked if the name exists. Use it in a rule with
+        reauth timer, voice domain and advanced attributes (av_pairs, e.g. cisco-av-pair=Role=<role> for
+        a Catalyst Center admin login). Preview-first; blocked if the name exists. Use it in a rule with
         ise_create_authz_rule."""
         app: IseApp = get_client(ctx)
+        advanced = [_av_pair(a) for a in av_pairs or []]
         body = {
             "name": name,
             "authzProfileType": "SWITCH",
@@ -771,6 +803,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 description=description,
             ),
         }
+        if advanced:
+            body["advancedAttributes"] = advanced
         blockers = (
             [f"Profile {name!r} already exists"] if await exists(app, "authorizationprofile", name) else []
         )
@@ -785,6 +819,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "reauth_seconds": reauth_seconds,
                 "voice_domain": voice_domain,
                 "description": description,
+                "av_pairs": av_pairs,
             },
             confirm=confirm,
             plan=Plan(f"Create authorization profile {name}", details=body, blockers=blockers),

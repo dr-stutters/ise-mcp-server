@@ -285,3 +285,43 @@ async def test_update_user_preview_does_not_list_kept_password(mock: respx.MockR
             await c.call_tool("ise_update_internal_user", {"user": "bob", "enabled": False})
         ).structured_content
     assert preview["preview"]["changes"] == {"enabled": {"from": True, "to": False}}
+
+
+async def test_create_authz_profile_av_pairs(mock: respx.MockRouter) -> None:
+    """Advanced attributes, e.g. the Catalyst Center admin role (catc D89): ERS's misspelled keys."""
+    mock.get("/ers/config/authorizationprofile/name/mcp-catc-observer").respond(404)
+    mock.get("/ers/config/authorizationprofile", params={"filter": "name.EQ.mcp-catc-observer"}).respond(
+        json=ers_page([])
+    )
+    post = mock.post("/ers/config/authorizationprofile").respond(
+        201, headers={"Location": f"{BASE}/ers/config/authorizationprofile/new-id"}
+    )
+    args = {"name": "mcp-catc-observer", "av_pairs": ["Cisco:cisco-av-pair=Role=OBSERVER-ROLE"]}
+    preview, done = await two_step("ise_create_authz_profile", args)
+    assert preview["status"] == "preview" and done["status"] == "applied"
+    sent = json.loads(post.calls.last.request.content)["AuthorizationProfile"]
+    assert sent["advancedAttributes"] == [
+        {
+            "leftHandSideDictionaryAttribue": {
+                "AdvancedAttributeValueType": "AdvancedDictionaryAttribute",
+                "dictionaryName": "Cisco",
+                "attributeName": "cisco-av-pair",
+            },
+            "rightHandSideAttribueValue": {
+                "AdvancedAttributeValueType": "AttributeValue",
+                "value": "Role=OBSERVER-ROLE",
+            },
+        }
+    ]
+    assert sent["accessType"] == "ACCESS_ACCEPT"
+
+
+async def test_create_authz_profile_bad_av_pair(mock: respx.MockRouter) -> None:
+    server = make_server(mcp_enable_writes=True)
+    async with Client(server) as c:
+        res = await c.call_tool(
+            "ise_create_authz_profile",
+            {"name": "x", "av_pairs": ["cisco-av-pair=Role=X"]},
+            raise_on_error=False,
+        )
+    assert res.is_error and "Dictionary:attribute=value" in res.content[0].text  # type: ignore[union-attr]

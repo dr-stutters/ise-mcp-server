@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `ise_create_authz_profile(av_pairs=[...])`: advanced attributes as `'Dictionary:attribute=value'`, e.g.
+  `'Cisco:cisco-av-pair=Role=OBSERVER-ROLE'` (the role a Catalyst Center admin login gets, catc D88/D89) or
+  `'Radius:Session-Timeout=3600'`. Sent as ERS `advancedAttributes`; a malformed entry is refused before
+  anything is sent.
+
 ## 0.11.1 (2026-10-18)
 
 ### Added
