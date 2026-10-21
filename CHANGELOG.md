@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **NAD coverage against an inventory (I67, #45).** `ise_audit_nads(expected=[{name, ip, ndg?, aaa_server?}],
+  check_stale=true, stale_within?)`: `catc_list_devices` rows work as they are (`hostname`,
+  `managementIpAddress`). Devices are matched to NADs **by IP** (an exact entry or a covering subnet, most
+  specific first), never by name, because Catalyst Center reuses an existing NAD under its own name. A
+  `coverage` section adds `missing_nad` (no NAD covers the IP: silent drops, 11007), `stale_nad` (a NAD no
+  expected device matches; `stale_within` limits it to one device group, `check_stale=false` turns it off for a
+  partial inventory), `wrong_ndg`, `ip_mismatch` (a NAD with the device's name but another IP) and
+  `aaa_elsewhere` (the device's RADIUS server isn't an ISE node), each with the fix to preview, and a verdict
+  line. Live: sw1 is clean in both inventories (Catalyst Center's `mcp-sw1.mcp.lab` = NAD `mcp-test-sw1`, matched
+  by IP); against the whole Catalyst Center inventory, 7 devices are missing and 3 NADs are stale.
 - `ise_create_authz_profile(av_pairs=[...])`: advanced attributes as `'Dictionary:attribute=value'`, e.g.
   `'Cisco:cisco-av-pair=Role=OBSERVER-ROLE'` (the role a Catalyst Center admin login gets, catc D88/D89) or
   `'Radius:Session-Timeout=3600'`. Sent as ERS `advancedAttributes`; a malformed entry is refused before
