@@ -49,6 +49,18 @@
   the catc part D window: an abandoned PEAP attempt had been reported as "never reached ISE". ISE had answered
   10 challenges, and the client had passed through the same NAD 17 minutes earlier. In the same window, MnT's
   history left out the client's later successful logins, which only the session showed.
+- MnT's auth history leaves out repeated successful logins, and the tools no longer treat it as complete (a
+  #59 follow-up). `ise_why_auth_failed` reads the session in every path that has records. When the session's
+  authentication (`auth_acs_timestamp`) is newer than the newest record, the tool reports it as `newest_login`:
+  - the latest login passed: the verdict gives the session's time as the newest login, not the stale record;
+  - the latest record is a failure: the verdict adds that the endpoint has passed since;
+  - only CoA records: the verdict no longer says the endpoint has not authenticated since.
+
+  `ise_get_auth_history` and `ise_recent_auth_failures` (when it lists failures) add a `history_note` pointing to
+  `ise_find_session`. The RADIUS setting behind the gap ("Suppress Repeated Successful Authentications") isn't
+  readable over OpenAPI, ERS or MnT on ISE 3.5, so `ise_deployment_health` can't report it
+  (docs/GAP-ANALYSIS.md). Recorded live: 4 h of history held 2 records for an EAP-TLS client, the newest at
+  10:13:34Z, while its live session showed an authentication at 10:52:20Z.
 
 ## 0.11.1 (2026-10-18)
 

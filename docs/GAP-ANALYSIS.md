@@ -142,6 +142,19 @@ wraps, with the reason.
   the pre-change step of the review prompts.
 - **Portal creation and customisation, BYOD, native supplicant profiles**: GUI work.
 - **Allowed-protocols writes**: large boolean model; I33 adds the TEAP slice only.
+- **RADIUS suppression settings** (Administration > System > Settings > Protocols > RADIUS, including
+  "Suppress Repeated Successful Authentications"): ISE 3.5 has no OpenAPI, ERS or MnT resource for them, so
+  `ise_deployment_health` can't report whether they are on. Checked on 3.5.0.527 patches 3 and 4 with
+  `ise_search_spec` (2026-10-21). "suppress", "repeat", "anomalous", "radius" and "setting" find only the
+  TrustSec RADIUS servers, the external RADIUS servers and sequences, the rejected-endpoints list
+  (`GET /api/v1/endpoint/getRejected`, already used by `ise_endpoint_360` and
+  `ise_release_rejected_endpoint`) and unrelated settings. What it does to the tools: MnT's `AuthStatus`
+  history leaves out repeated successful logins, while `Session/MACAddress` (`auth_acs_timestamp`) still
+  shows the newest. On the lab ISE, 4 h of history held 2 records for an EAP-TLS client, the newest at
+  10:13:34Z, while its live session showed an authentication at 10:52:20Z. So `ise_why_auth_failed` takes
+  the newest login from the session when the session is newer than every record (`newest_login`), and
+  `ise_get_auth_history` and `ise_recent_auth_failures` say in their output that repeated successful logins
+  may be missing (`history_note`).
 - Previously listed here and **now built**: SXP connection writes and IP-SGT deploy (I9), the certificate
   lifecycle (I8), AD join points and groups (I11), guest lifecycle as a sponsor (I31), profiler rules (I40),
   device-admin depth (I41), config export/import (I42/I43), endpoint bulk and custom attributes (I4),
