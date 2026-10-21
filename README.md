@@ -43,6 +43,8 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 - **`ise_audit_nads`**: finds missing, short or reused shared secrets, NADs in default groups only,
   overlapping ranges and default SNMP communities, without ever showing a secret.
   Devices with TACACS+ also get single-connect mode and the device-admin policy set their logins select.
+  With `expected` (an inventory such as `catc_list_devices` rows) it reconciles coverage by IP: missing and
+  stale NADs, wrong device groups, IP mismatches and RADIUS servers that aren't ISE.
 - **Device admin checks without a device**: `ise_admin_policy_explain(user, nad, command)` predicts the
   device-admin policy set, rule, shell profile and command verdict for an admin login;
   `ise_test_command_set` says whether command lines would be permitted by a rule's command sets (or a

@@ -323,3 +323,139 @@ async def test_authz_profile_name_path_404_falls_back_to_scan(mock: respx.MockRo
     mock.get("/api/v1/policy/network-access/policy-set").respond(json={"response": []})
     out = await call_tool(make_server(), "ise_get_authz_profile", {"profile": "permitaccess"})
     assert out["accessType"] == "ACCESS_ACCEPT"
+
+
+# --- I67: ise_audit_nads(expected=...) ---------------------------------------------------------
+# The lab on 2026-10-21: ISE's four NADs and Catalyst Center's inventory, with sw1 in both. Catalyst
+# Center reused the NAD mcp-test-sw1 when it provisioned sw1 (inventory name mcp-sw1.mcp.lab).
+
+LAB = "Location#All Locations#mcp-test-lab"
+LAB_NADS = [
+    nad("n1", "mcp-test-sw1", [("198.18.128.154", 32)], "secret-sw1-long-xx", [LAB, "IPSEC#Is IPSEC Device"]),
+    nad("n2", "mcp-test-cml-identity-sw", [("198.18.128.194", 32)], "secret-id-long-xxx", [LAB]),
+    nad("n3", "mcp-test-radius-client", [("10.16.138.131", 32)], "secret-rc-long-xxx"),
+    nad("n4", "mcp-test-cml-ap", [("198.18.128.196", 32)], "secret-ap-long-xxx"),
+]
+SW1_ROW = {"hostname": "mcp-sw1.mcp.lab", "managementIpAddress": "198.18.128.154", "role": "ACCESS"}
+
+
+def mock_nodes(mock: respx.MockRouter) -> respx.Route:
+    return mock.get("/api/v1/deployment/node").respond(
+        json={"response": [{"hostname": "ise", "fqdn": "ise.mitchcloud.lab", "ipAddress": "198.18.134.35"}]}
+    )
+
+
+async def test_audit_nads_expected_clean_positive_case(mock: respx.MockRouter) -> None:
+    mock_nads(mock, LAB_NADS)
+    mock_nodes(mock)
+    out = as_json(
+        await call_tool(
+            make_server(),
+            "ise_audit_nads",
+            # A catc_list_devices row as it comes (hostname / managementIpAddress), plus the site group.
+            {
+                "expected": [{**SW1_ROW, "ndg": "mcp-test-lab", "aaa_server": "198.18.134.35"}],
+                "check_stale": False,
+            },
+        )
+    )
+    cov = out["coverage"]
+    assert cov["devices"] == [
+        {
+            "device": "mcp-sw1.mcp.lab",
+            "ip": "198.18.128.154",
+            "nad": "mcp-test-sw1",
+            "match": "ip",
+            "nad_name_differs": True,
+            "findings": ["ok"],
+        }
+    ]
+    assert cov["ok"] == 1 and "missing_nad" not in cov and "stale_nads" not in cov
+    assert cov["verdict"].startswith(
+        "1 of 1 expected device(s) are NADs in ISE (matched by IP; 1 under another"
+    )
+    assert "Stale NADs not checked" in cov["verdict"]
+    assert not any("stale_nad" in f for r in out["results"] for f in r["findings"])
+
+
+async def test_audit_nads_expected_full_inventory(mock: respx.MockRouter) -> None:
+    mock_nads(mock, LAB_NADS)
+    mock_nodes(mock)
+    inventory = [
+        SW1_ROW,
+        {"hostname": "r1.mcp.lab", "managementIpAddress": "198.18.128.152"},
+        {"hostname": "mcp-catc-wlc.mcp.lab", "managementIpAddress": "198.18.128.173"},
+    ]
+    out = as_json(await call_tool(make_server(), "ise_audit_nads", {"expected": inventory}))
+    cov = out["coverage"]
+    assert cov["missing_nad"] == 2 and cov["stale_nad"] == 3 and cov["ok"] == 1
+    missing = {r["device"]: r for r in cov["devices"] if r["findings"] != ["ok"]}
+    assert set(missing) == {"r1.mcp.lab", "mcp-catc-wlc.mcp.lab"}
+    assert "11007" in missing["r1.mcp.lab"]["findings"][0]
+    assert missing["r1.mcp.lab"]["fix"][0].startswith(
+        "ise_create_nad(name='r1.mcp.lab', ips=['198.18.128.152/32']"
+    )
+    assert [s["nad"] for s in cov["stale_nads"]] == [
+        "mcp-test-cml-identity-sw",
+        "mcp-test-radius-client",
+        "mcp-test-cml-ap",
+    ]
+    assert cov["stale_scope"] == "every NAD"
+    stale_rows = {r["name"] for r in out["results"] if any("stale_nad" in f for f in r["findings"])}
+    assert stale_rows == {"mcp-test-cml-identity-sw", "mcp-test-radius-client", "mcp-test-cml-ap"}
+    assert "secret-" not in json.dumps(out)
+
+
+async def test_audit_nads_expected_scoped_stale_wrong_ndg_and_aaa(mock: respx.MockRouter) -> None:
+    mock_nads(mock, LAB_NADS)
+    mock_nodes(mock)
+    row = {
+        "name": "mcp-sw1",
+        "ip": "198.18.128.154",
+        "ndg": ["mcp-test-lab", "Switch"],
+        "aaa_server": "10.9.9.9",
+    }
+    out = as_json(
+        await call_tool(make_server(), "ise_audit_nads", {"expected": [row], "stale_within": "mcp-test-lab"})
+    )
+    cov = out["coverage"]
+    findings = cov["devices"][0]["findings"]
+    assert findings[0].startswith("wrong_ndg: NAD mcp-test-sw1 is not in Switch")
+    assert findings[1].startswith("aaa_elsewhere: its RADIUS server 10.9.9.9 is not an ISE node")
+    assert "ise.mitchcloud.lab" in findings[1]
+    assert cov["devices"][0]["nad_name_differs"] is True
+    # Only NADs in the site's location group can be stale.
+    assert [s["nad"] for s in cov["stale_nads"]] == ["mcp-test-cml-identity-sw"]
+    assert cov["stale_scope"] == "NADs in mcp-test-lab"
+
+
+async def test_audit_nads_expected_ip_mismatch_and_subnet(mock: respx.MockRouter) -> None:
+    nads = [
+        nad("n1", "edge-sw7", [("10.20.0.7", 32)], "secret-e7-long-xxx", [LAB]),  # re-addressed switch
+        nad("n2", "syd-access", [("10.30.0.0", 24)], "secret-sy-long-xxx", [LAB]),
+    ]
+    mock_nads(mock, nads)
+    expected = [
+        {"name": "edge-sw7.corp.local", "ip": "10.20.9.7"},
+        {"name": "syd-sw3", "ip": "10.30.0.33"},
+    ]
+    out = as_json(await call_tool(make_server(), "ise_audit_nads", {"expected": expected}))
+    rows = {r["device"]: r for r in out["coverage"]["devices"]}
+    moved = rows["edge-sw7.corp.local"]
+    assert [f.split(":")[0] for f in moved["findings"]] == ["missing_nad", "ip_mismatch"]
+    assert "NAD edge-sw7 has the device's name but 10.20.0.7/32, not 10.20.9.7" in moved["findings"][1]
+    assert "ise_update_nad(device='edge-sw7', ips=['10.20.9.7/32'])" in moved["fix"][1]
+    sub = rows["syd-sw3"]
+    assert (
+        sub["nad"] == "syd-access" and sub["match"] == "subnet (10.30.0.0/24)" and sub["findings"] == ["ok"]
+    )
+    assert "stale_nads" not in out["coverage"]  # both NADs matched a device (by name or subnet)
+
+
+async def test_audit_nads_expected_refuses_bad_ips(mock: respx.MockRouter) -> None:
+    mock_nads(mock, LAB_NADS)
+    async with __import__("fastmcp").Client(make_server()) as c:
+        r = await c.call_tool(
+            "ise_audit_nads", {"expected": [{"name": "x", "ip": "not-an-ip"}]}, raise_on_error=False
+        )
+    assert r.is_error and "not-an-ip" in r.content[0].text
