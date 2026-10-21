@@ -33,6 +33,7 @@ from ise_mcp.tools.identity import user_row
 from ise_mcp.tools.network import find_nads_for_ip, nad_summary
 from ise_mcp.tools.policy import rules_using_profile
 from ise_mcp.tools.sessions import (
+    HISTORY_GAP_NOTE,
     auth_history,
     auth_row,
     failure_info,
@@ -489,8 +490,9 @@ def register(reg: ToolRegistrar) -> None:
         """Everything ISE knows about one endpoint, in one call: the endpoint record (identity group,
         static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN),
         the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE
-        has it on the rejected-endpoints list. Start here
-        for 'what is this device and what happened to it?'."""
+        has it on the rejected-endpoints list. When the session authenticated after the newest history
+        record (MnT leaves out repeated successful logins), newest_login has that authentication and
+        history_note says why. Start here for 'what is this device and what happened to it?'."""
         app: IseApp = get_client(ctx)
         mac_n = normalize_mac(mac)
         endpoint, session, history, anc, groups, rejected = await asyncio.gather(
@@ -518,6 +520,18 @@ def register(reg: ToolRegistrar) -> None:
                 if a.get("failure_reason"):
                     a["failure"] = await _safe(failure_info(app, a.pop("failure_reason")))
             out["recent_auths"] = attempts or "none in the last 24 hours"
+            # The session's authentication can be newer than every record (the history leaves out
+            # repeated successful logins); with no record, newer than the window's start.
+            if attempts:
+                logins = [a for a in attempts if a.get("kind") != "coa"]
+                than = (logins or attempts)[0].get("time")
+            else:
+                start = datetime.now(UTC) - timedelta(minutes=DEFAULT_LOOKBACK_MINUTES)
+                than = start.strftime("%Y-%m-%dT%H:%M:%S")
+            newer = newer_session_login(session, than)
+            if newer:
+                out["newest_login"] = newer
+                out["history_note"] = HISTORY_GAP_NOTE
         else:
             out["recent_auths"] = history
         out["anc_policy"] = anc or "none"
