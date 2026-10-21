@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- **Prompt `ise_aaa_chain_check(nad?, site?, switch?, user?, minutes=60)` (I68, #46).** Read only; uses catc, fmc,
+  cml and Windows_Server, and skips their links (noted) when they aren't connected. The links:
+  - the switch's AAA config and RADIUS counters (`show aaa servers`; requests rising with no timeouts means
+    ISE answered);
+  - ISE NAD coverage by IP with `ise_audit_nads(expected=...)` (I67), auth lists and failures, and the
+    silent-failure caveat (a wrong secret, an unknown NAD and an abandoned EAP session leave no MnT record);
+  - AD join points and a user test;
+  - the Catalyst Center link: `catc_get_policy_servers().next_action` (green only at `none`) and the verdict
+    line of `catc_network_services_health(service='aaa')`, which counts only Access-Rejects as failures;
+  - pxGrid consumers;
+  - FMC's identity sources and realm, with DNS through `win_get_dns_records`.
+
+  It ends in one table (link, evidence, verdict, fix), with fixes as previews only. The ISE fixes are named
+  only when the write tools are on. Live: every link green on the lab (Catalyst Center entry COMPLETE and
+  TRUSTED with `next_action: none`, "ISE 198.18.134.35 answered 100.0% of 9 AAA requests").
 - **NAD coverage against an inventory (I67, #45).** `ise_audit_nads(expected=[{name, ip, ndg?, aaa_server?}],
   check_stale=true, stale_within?)`: `catc_list_devices` rows work as they are (`hostname`,
   `managementIpAddress`). Devices are matched to NADs **by IP** (an exact entry or a covering subnet, most
