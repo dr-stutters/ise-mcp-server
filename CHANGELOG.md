@@ -61,6 +61,9 @@
   readable over OpenAPI, ERS or MnT on ISE 3.5, so `ise_deployment_health` can't report it
   (docs/GAP-ANALYSIS.md). Recorded live: 4 h of history held 2 records for an EAP-TLS client, the newest at
   10:13:34Z, while its live session showed an authentication at 10:52:20Z.
+- `ise_endpoint_360` adds `newest_login` and a `history_note` when the endpoint's session authenticated after
+  the newest record in `recent_auths` (or, with no record in 24 h, inside that window). Before, `recent_auths`
+  read as "none in the last 24 hours" or as a stale latest login while the session showed a newer one.
 
 ## 0.11.1 (2026-10-18)
 

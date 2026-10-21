@@ -526,3 +526,52 @@ async def test_why_auth_failed_only_coa_then_a_pass_the_history_left_out(mock: r
     assert f"but {LIVE_WHERE} shows a successful authentication at {LIVE_AUTH}, after them" in verdict
     assert "has not authenticated since" not in verdict
     assert out["coa_failures"]["count"] == 1
+
+
+def mock_360(mock: respx.MockRouter, *, history: str, session: str) -> None:
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{EAPTLS_MAC}/86400/5/All").respond(text=history)
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{EAPTLS_MAC}").respond(text=session)
+    mock.get(f"/api/v1/endpoint/{EAPTLS_MAC}").respond(json={"mac": EAPTLS_MAC, "id": "ep-1"})
+    mock.get("/ers/config/endpointgroup").respond(json=ers_page([]))
+    mock.get("/ers/config/ancendpoint").respond(json=ers_page([]))
+    mock.get("/api/v1/endpoint/getRejected").respond(json={"response": []})
+
+
+@pytest.mark.parametrize("session_newer", [True, False], ids=["session-newer", "session-not-newer"])
+async def test_endpoint_360_newest_login_from_the_session(
+    mock: respx.MockRouter, session_newer: bool
+) -> None:
+    from ise_mcp.tools.sessions import HISTORY_GAP_NOTE
+
+    session = fixture_text("mnt_session_eaptls_live.xml") if session_newer else ended_session()
+    mock_360(mock, history=fixture_text("mnt_authstatus_eaptls_7d.xml"), session=session)
+    out = await call_tool(make_server(), "ise_endpoint_360", {"mac": EAPTLS_MAC})
+    assert out["recent_auths"][0]["time"] == NEWEST_RECORD
+    if session_newer:
+        assert out["newest_login"] == {
+            "time": LIVE_AUTH,
+            "user": "mcp-eaptls-client",
+            "nas_ip": "198.18.128.154",
+            "nas_port": "GigabitEthernet1/0/3",
+            "active": True,
+        }
+        assert out["history_note"] == HISTORY_GAP_NOTE
+    else:
+        assert "newest_login" not in out and "history_note" not in out
+
+
+@pytest.mark.parametrize(("minutes_ago", "noted"), [(5, True), (2 * 1440, False)], ids=["in-window", "older"])
+async def test_endpoint_360_empty_history_and_a_session(
+    mock: respx.MockRouter, minutes_ago: int, noted: bool
+) -> None:
+    """No record in 24 h: only a session authentication inside the window is a login the history left out."""
+    from datetime import UTC, datetime, timedelta
+
+    auth_at = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    session = fixture_text("mnt_session_eaptls_live.xml").replace(LIVE_AUTH, auth_at)
+    mock_360(mock, history=EMPTY_WINDOW, session=session)
+    out = await call_tool(make_server(), "ise_endpoint_360", {"mac": EAPTLS_MAC})
+    assert out["recent_auths"] == "none in the last 24 hours"
+    assert ("newest_login" in out) is noted and ("history_note" in out) is noted
+    if noted:
+        assert out["newest_login"]["time"] == auth_at
