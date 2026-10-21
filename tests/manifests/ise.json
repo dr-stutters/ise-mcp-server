@@ -3,6 +3,51 @@
   "manifest": 1,
   "prefix": "ise",
   "prompts": {
+    "ise_aaa_chain_check": {
+      "arguments": [
+        "nad",
+        "site",
+        "switch",
+        "user",
+        "minutes"
+      ],
+      "references": [
+        "ise_get_nad",
+        "ise_audit_nads",
+        "ise_list_nodes",
+        "ise_get_auth_list",
+        "ise_recent_auth_failures",
+        "ise_why_auth_failed",
+        "ise_list_identity_sources",
+        "ise_get_ad_join_point",
+        "ise_pxgrid_status",
+        "ise_list_pxgrid_clients",
+        "catc_get_policy_servers",
+        "catc_network_services_health",
+        "catc_list_devices",
+        "catc_run_show_commands",
+        "fmc_get_realm",
+        "fmc_test_realm",
+        "fmc_get_identity_sources",
+        "cml_run_commands",
+        "ise_test_ad_user",
+        "win_get_dns_records",
+        "catc_update_policy_server",
+        "catc_accept_ise_certificate",
+        "ise_create_nad",
+        "ise_update_nad",
+        "ise_approve_pxgrid_client"
+      ],
+      "rendered": true,
+      "tier": "read",
+      "uses": [
+        "ise",
+        "catc",
+        "fmc",
+        "cml",
+        "win"
+      ]
+    },
     "ise_incident_timeline": {
       "arguments": [
         "mac",
@@ -669,5 +714,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.11.1"
+  "version": "0.12.0"
 }
