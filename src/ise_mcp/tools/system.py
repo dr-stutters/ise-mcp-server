@@ -133,7 +133,7 @@ def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Last configuration backup")
     async def ise_get_backup_status(ctx: Context) -> ToolResult:
         """Status of the last configuration backup (name, repository, start/end time, status, progress).
-        Answers 'when did ISE last back up and did it work?'."""
+        Answers 'when did ISE last back up and did it work?'. Take one with ise_create_backup."""
         app: IseApp = get_client(ctx)
         data = _response(await app.openapi.get("/api/v1/backup-restore/config/last-backup-status"))
         if not isinstance(data, dict) or not any(v not in (None, "") for v in data.values()):

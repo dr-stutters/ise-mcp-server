@@ -67,6 +67,12 @@ ERS Operator is read-only, and a functional group such as Policy Admin does not 
 own. The dangerous tier (CoA, ANC apply/clear, `ise_update_node_services`, certificate bind, NAD /
 policy-set deletes) needs Super Admin, so a write-only deployment cannot perform those.
 
+**Backups.** `ise_list_repositories` and `ise_get_backup_status` are OpenAPI GETs (Read Only Admin).
+`ise_create_backup` (dangerous tier) starts a configuration backup, an Administration > System > Backup &
+Restore operation: run it with the dangerous-tier account (Super Admin). Its encryption key is a server secret
+(`ISE_BACKUP_ENCRYPTION_KEY`, `_FILE` or `_REF`), never a tool argument. Unit-tested only so far: the lab ISE has
+no repository (2026-10-22).
+
 ## 3. Dedicated users
 
 | User | Groups | Auth | Notes |
