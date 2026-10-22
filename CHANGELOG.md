@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 (2026-10-22)
+
+On-demand configuration backups before Catalyst Center's group-based policy migration (I78, with catc D114): `ise_list_repositories` and the dangerous-tier `ise_create_backup` (preview-first, refuses without a writable repository or `ISE_BACKUP_ENCRYPTION_KEY`).
 
 ### Added
 - **On-demand configuration backups (I78, #66, with catc D114).** Before Catalyst Center's group-based policy
