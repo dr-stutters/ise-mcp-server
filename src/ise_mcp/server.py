@@ -15,6 +15,7 @@ from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
     activity,
     ad,
+    backup,
     certs,
     config_export,
     config_import,
@@ -74,7 +75,9 @@ ise_approve_pxgrid_client; ise_set_pxgrid_settings (auto-approve); ise_issue_pxg
 then the signed bundle) for a consumer such as FMC. Guest access: ise_list_guest_types /
 ise_list_sponsor_groups / ise_list_guest_portals (admin); guest accounts (ise_create_guest_user,
 ise_extend_guest_user, ise_suspend_guest_user, ...) run as the sponsor set in ISE_SPONSOR_USERNAME
-(ise_status shows guest_sponsor). Names or ids are accepted wherever a tool
+(ise_status shows guest_sponsor). Backups (before Catalyst Center's group-based policy migration or an
+upgrade): ise_list_repositories -> ise_create_backup (dangerous; key from ISE_BACKUP_ENCRYPTION_KEY) ->
+ise_get_backup_status; restores are GUI-only. Names or ids are accepted wherever a tool
 takes an object. Shared secrets, SNMP communities and passwords are always masked (the exceptions:
 ise_issue_pxgrid_client_cert returns the consumer's new private key once, and ise_create_guest_user the
 guest's password once, on confirm). For anything without
@@ -112,6 +115,7 @@ def create_server(
             policy.register,
             trustsec.register,
             system.register,
+            backup.register,
             health.register,
             writes.register,
             endpoint_bulk.register,

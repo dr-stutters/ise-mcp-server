@@ -44,6 +44,13 @@ class Settings(BaseServerSettings):
             return Path(v.strip()).expanduser() if v.strip() else None
         return v
 
+    # ise_create_backup (I78): ISE encrypts a configuration backup with this key and needs it to restore it.
+    # A secret: set it with ISE_BACKUP_ENCRYPTION_KEY, _FILE or _REF; it is never shown or passed per call.
+    backup_encryption_key: SecretStr | None = Field(
+        default=None,
+        description="Configuration backup encryption key (ISE_BACKUP_ENCRYPTION_KEY, _FILE or _REF)",
+    )
+
     # --- product safety rails (I18, on top of core G7) ------------------------------------------
     # Protected endpoints/users/devices a disruptive action (CoA, ANC, NAD delete) is blocked on.
     # Comma-separated, matched case-insensitively (MACs are normalised).

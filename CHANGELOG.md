@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **On-demand configuration backups (I78, #66, with catc D114).** Before Catalyst Center's group-based policy
+  migration (catc D108), which makes ISE's TrustSec objects read-only, both appliances need a backup.
+  - `ise_create_backup(repository, name, wait=false)` (dangerous, preview-first) over
+    `POST /api/v1/backup-restore/config/backup`. The encryption key comes from the new server secret
+    `ISE_BACKUP_ENCRYPTION_KEY` (`_FILE` / `_REF`), never from an argument; it is never shown, and ISE's
+    error text is scrubbed of it.
+  - The preview shows the repository, the file ISE will write (`<name>-CFG10-<yymmdd>-<hhmm>.tar.gpg`), the
+    last backup and how to restore. It refuses when no repository is configured, the repository is missing or
+    read-only (CDROM, HTTP, HTTPS), the key is not set, or a backup is already running.
+  - `wait=true` follows `last-backup-status` until this backup completes or fails.
+  - `ise_list_repositories(repository?)` (read): the repositories (passwords never shown), or one repository's
+    files with the backups first, newest first.
+  - Restore stays manual (README, Backups).
+  - Live reads on the lab ISE 3.5 (2026-10-22): no repository (`{"response": null}`) and no backup ever taken,
+    so the tools are unit-tested only; the live backup waits for a repository and the owner's confirm.
+
 ## 0.12.0 (2026-10-21)
 
 NAD coverage against an inventory (I67), the cross-product prompt `ise_aaa_chain_check` (I68), advanced attributes on

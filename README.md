@@ -155,6 +155,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD` | unset | Sponsor account for the guest-account tools (password also via `_FILE` / `_REF`; never shown). See [Guest access](#guest-access) |
 | `ISE_SPONSOR_PORTAL` | the only sponsor portal | Sponsor portal (name or id) sent as the guest API's `portalId` |
 | `ISE_GUEST_TIMEZONE` | unset | IANA time zone of the guest location; guest dates are in that local time |
+| `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. See [Backups](#backups) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
 | `MCP_AUTH_TOKENS` | | `name:sha256:<hex>` entries; required for HTTP (`ise-mcp-server token <name>`) |
@@ -261,11 +262,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-145 tools and 3 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 76 read tools plus `ise_api_call` (GET-only) are registered. Everything
+147 tools and 4 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 77 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (76)
+### Read (77)
 
 | Tool | What it does |
 |---|---|
@@ -329,6 +330,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_profiler_profiles` | List the classic profiling policies (ISE ships ~700, e.g. |
 | `ise_list_profiling_rules` | List the profiler's custom / direct / ML profiling rules (ISE 3.3+ Profiler Policy Management): name, type, enabled, priority, condition, the endpoint labels it sets (endpoint type, manufacturer, model, OS) and how many endpoints it matched. |
 | `ise_list_pxgrid_clients` | The pxGrid 2.0 clients registered with ISE (FMC, Catalyst Center, SIEMs, scripts): name, state (pending / enabled / disabled / created), the product that registered it when the name shows it (FMC uses iseagent-* and firesightisetest-*), description and groups. |
+| `ise_list_repositories` | Repositories ISE copies configuration backups to (Administration > System > Maintenance > Repository): name, protocol (SFTP, FTP, NFS, DISK, ...), server, path and user; passwords are never shown. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
@@ -356,7 +358,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_ad_join_point` | Create an Active Directory join point (the definition only; no node joins yet). |
 | `ise_create_anc_policy` | Create an Adaptive Network Control policy that ise_apply_anc can put on endpoints. |
 | `ise_create_authn_rule` | Add an authentication rule to a policy set: conditions -> identity source, with what to do when authentication fails, the user isn't found, or the store is unreachable. |
-| `ise_create_authz_profile` | Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL, reauth timer, voice domain. |
+| `ise_create_authz_profile` | Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL, reauth timer, voice domain and advanced attributes (av_pairs, e.g. |
 | `ise_create_authz_rule` | Add an authorization rule (or local exception) to a policy set: conditions -> result. |
 | `ise_create_group` | Create a user identity group or an endpoint identity group, for policy to match on and for users/endpoints to be placed in. |
 | `ise_create_guest_user` | Create a guest account as the sponsor (ISE_SPONSOR_USERNAME), like the sponsor portal does. |
@@ -403,7 +405,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (17)
+### Dangerous (18)
 
 | Tool | What it does |
 |---|---|
@@ -413,6 +415,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_clear_anc` | Remove the ANC policy from an endpoint (release it from quarantine). |
 | `ise_coa_disconnect` | Send a RADIUS CoA disconnect for an endpoint's live session: terminate it, bounce the switch port, or shut the port down (stays down until an admin re-enables it). |
 | `ise_coa_reauth` | Send a RADIUS Change of Authorization (reauthenticate) for an endpoint's live session, so new policy (group, profile, ANC) applies now instead of at the next reauth. |
+| `ise_create_backup` | Take an on-demand ISE configuration backup to a repository, before Catalyst Center's group-based policy migration or an upgrade. |
 | `ise_delete_certificate` | Delete a system (node identity) or trusted certificate. |
 | `ise_delete_nad` | Delete a network device. |
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
@@ -429,9 +432,9 @@ is queried from ISE when called; the server never receives or buffers events (pu
 
 | Prompt | What it does |
 |---|---|
-| `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources, the Catalyst Center to ISE integration (`next_action`, Catalyst Center's AAA health), pxGrid consumers and FMC's realm and identity source, ending in one table of link, evidence, verdict and a preview-only fix. |
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
+| `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join and a user test), the Catalyst Center to ISE integration (policy server state and next action, Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source with name resolution. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 
 ### Config export, diff and import
@@ -534,6 +537,18 @@ Switches can download environment data and policy over ISE's TrustSec HTTPS serv
 empty), `ise_update_nad(trustsec_rest_user=, trustsec_rest_password=)` for the credentials `cts
 policy-server` sends, and `docs/trustsec.md` for the switch side. `ise_trustsec_device_report` shows the
 devices that report their downloads back (PUSH ID support, IOS XE 26.2.1+); others are checked on the switch.
+
+### Backups
+Before a risky change (Catalyst Center's group-based policy migration makes ISE's TrustSec objects read-only;
+an upgrade), take a configuration backup: `ise_list_repositories` (an SFTP, FTP, NFS or disk repository must
+exist: Administration > System > Maintenance > Repository) -> `ise_create_backup(repository, name)`
+(dangerous, preview-first; the key comes from `ISE_BACKUP_ENCRYPTION_KEY`) -> `ise_get_backup_status`;
+`ise_list_repositories(repository=...)` lists the backup files (`<name>-CFG10-<yymmdd>-<hhmm>.tar.gpg`). The
+preview refuses when no repository is configured, the repository is read-only (CDROM, HTTP, HTTPS), the key
+is not set or a backup is already running. The OpenAPI backs up the configuration only (no MnT data).
+Restoring is not automated: Administration > System > Backup & Restore > Restore with the file and the same
+key (it replaces the whole configuration and restarts ISE's services). Catalyst Center's half is catc-mcp-server's
+`catc_create_backup`.
 
 ### Profiler
 
