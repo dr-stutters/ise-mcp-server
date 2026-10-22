@@ -5,6 +5,11 @@ An MCP server for Cisco Identity Services Engine (ISE), built on
 troubleshoot authentications, inspect and change NADs, endpoints, users, policy and TrustSec, and run
 CoA/ANC.
 
+> **Disclaimer.** This is not an official Cisco product or repository, and it isn't supported or endorsed by
+> Cisco. It's a personal project by [@dr-stutters](https://github.com/dr-stutters), for lab and learning use
+> only: don't point it at production systems. It's provided as is, with no warranty (see the
+> [license](LICENSE)). Cisco and Identity Services Engine are trademarks of Cisco Systems, Inc.
+
 It talks to all three ISE REST surfaces with HTTP Basic auth:
 
 | Surface | Path | Used for |
