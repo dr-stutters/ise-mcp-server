@@ -65,7 +65,9 @@ ise_create_policy_set -> ise_create_authn_rule -> ise_create_authz_rule, then is
 conditions are 'Dictionary:Attribute operator value' or library condition names
 (ise_list_dictionary_attributes, ise_list_conditions) and are checked before anything is sent. Device
 admin (TACACS+): kind='device-admin' on the policy tools, plus ise_set_command_set /
-ise_set_shell_profile; the node needs the DeviceAdmin service. Quarantine: an authz rule on
+ise_set_shell_profile; the node needs the DeviceAdmin service. Catalyst SD-WAN Manager admins: sdwan_group
+on ise_create_authz_profile (RADIUS Viptela-Group-Name; ISE ships no Viptela dictionary, the preview names
+the GUI step) or ise_set_shell_profile (TACACS+). Quarantine: an authz rule on
 'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Active Directory: ise_create_ad_join_point
 -> ise_join_ad -> ise_list_ad_groups -> ise_add_ad_groups, then rules on '<join point>:ExternalGroups
 equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_user (a user's groups) for

@@ -56,7 +56,15 @@ from ise_mcp.tools.policy_explain import (
     walk_rules,
     walk_sets,
 )
-from ise_mcp.tools.writes import deep_merge, ers_post, ers_put, fingerprint, masked_changes
+from ise_mcp.tools.writes import (
+    SDWAN_TACACS_ATTRIBUTE,
+    deep_merge,
+    ers_post,
+    ers_put,
+    fingerprint,
+    masked_changes,
+    valid_sdwan_group,
+)
 
 _COMMAND = re.compile(r"^\s*(?P<grant>PERMIT|DENY_ALWAYS|DENY)\s+(?P<cmd>\S+)(?:\s+(?P<args>.*?))?\s*$", re.I)
 
@@ -768,18 +776,31 @@ def register(reg: ToolRegistrar) -> None:
                 description="Other mandatory attributes, e.g. {'role1': 'ALL'} for a WLC, {'autocmd': ...}"
             ),
         ] = None,
+        sdwan_group: Annotated[
+            str | None,
+            Field(
+                description="Catalyst SD-WAN user group for an SD-WAN Manager/edge admin login over TACACS+, "
+                "e.g. 'netadmin' or 'operator': sets the custom attribute viptela-group-name"
+            ),
+        ] = None,
         description: Annotated[str | None, Field(description="Free-text description")] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an
-        admin logs in, e.g. privilege 15 for full IOS access or 1 for read-only, an idle timeout, or WLC
-        roles. Given attributes are set; others on an existing profile are kept. Preview-first."""
+        admin logs in, e.g. privilege 15 for full IOS access or 1 for read-only, an idle timeout, WLC
+        roles, or the Catalyst SD-WAN user group (sdwan_group -> viptela-group-name; TACACS+ needs no
+        dictionary for it). Given attributes are set; others on an existing profile are kept.
+        Preview-first."""
         app: IseApp = get_client(ctx)
         wanted: dict[str, str] = dict(attributes or {})
         clash = [
             k
-            for k, given in (("priv-lvl", privilege), ("idletime", idle_timeout))
-            if given is not None and k in wanted
+            for k, given in (
+                ("priv-lvl", privilege),
+                ("idletime", idle_timeout),
+                (SDWAN_TACACS_ATTRIBUTE, sdwan_group),
+            )
+            if given is not None and k.lower() in {w.lower() for w in wanted}
         ]
         if clash:
             raise InvalidRequest(
@@ -789,8 +810,10 @@ def register(reg: ToolRegistrar) -> None:
             wanted["priv-lvl"] = str(privilege)
         if idle_timeout is not None:
             wanted["idletime"] = str(idle_timeout)
+        if sdwan_group is not None:
+            wanted[SDWAN_TACACS_ATTRIBUTE] = valid_sdwan_group(sdwan_group)
         if not wanted and description is None:
-            raise InvalidRequest("Give privilege, idle_timeout, attributes or description")
+            raise InvalidRequest("Give privilege, idle_timeout, sdwan_group, attributes or description")
         if not _PROFILE_NAME.match(name):
             raise InvalidRequest(
                 f"Shell profile names may only contain letters, digits, '_' and spaces (ISE rule): {name!r}"
@@ -807,6 +830,7 @@ def register(reg: ToolRegistrar) -> None:
             "privilege": privilege,
             "idle_timeout": idle_timeout,
             "attributes": attributes,
+            "sdwan_group": sdwan_group,
             "description": description,
         }
         patch: dict[str, Any] = {"sessionAttributes": {"sessionAttributeList": list(merged.values())}}

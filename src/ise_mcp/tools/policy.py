@@ -84,6 +84,18 @@ async def policy_set_rules(app: IseApp, kind: str, ps_id: str) -> dict[str, list
     return dict(zip(("authentication", "authorization", "local_exceptions"), results, strict=True))
 
 
+def av_pair_text(adv: Any) -> str:
+    """An ERS advanced attribute as 'Dictionary:attribute=value' (the av_pairs form of the write tools)."""
+    if not isinstance(adv, dict):
+        return str(adv)
+    lhs = adv.get("leftHandSideDictionaryAttribue") or {}
+    rhs = adv.get("rightHandSideAttribueValue") or {}
+    value = rhs.get("value")
+    if value is None and rhs.get("attributeName"):  # the value is another dictionary attribute
+        value = f"{rhs.get('dictionaryName')}:{rhs.get('attributeName')}"
+    return f"{lhs.get('dictionaryName')}:{lhs.get('attributeName')}={value}"
+
+
 def authz_profile_row(p: dict[str, Any]) -> dict[str, Any]:
     redirect = p.get("webRedirection") or {}
     adv = p.get("advancedAttributes") or []
@@ -188,7 +200,8 @@ def register(reg: ToolRegistrar) -> None:
         profile: Annotated[str, Field(description="Authorization profile name or id")],
     ) -> ToolResult:
         """Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth,
-        advanced RADIUS attributes, device profile. Also lists which authorization rules (in which
+        advanced RADIUS attributes (also as av_pairs, e.g. 'Viptela:Viptela-Group-Name=netadmin'), device
+        profile. Also lists which authorization rules (in which
         network-access policy sets) use it."""
         app: IseApp = get_client(ctx)
         obj = await ers_resolve(
@@ -198,6 +211,8 @@ def register(reg: ToolRegistrar) -> None:
             what="authorization profile",
             list_tool="ise_list_authz_profiles",
         )
+        if obj.get("advancedAttributes"):
+            obj["av_pairs"] = [av_pair_text(a) for a in obj["advancedAttributes"]]
         obj["used_by_rules"] = await rules_using_profile(app, str(obj.get("name")))
         return object_result(obj)
 

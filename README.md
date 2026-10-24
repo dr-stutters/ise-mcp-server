@@ -287,7 +287,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
-| `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes, device profile. |
+| `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes (also as av_pairs, e.g. |
 | `ise_get_backup_status` | Status of the last configuration backup (name, repository, start/end time, status, progress). |
 | `ise_get_dacl` | One downloadable ACL with its full ACE text (one ACE per line), IP version and description. |
 | `ise_get_definition` | Describe a Cisco ISE API operation (parameters, request fields, required fields) or a schema (fields with types and enums). |
@@ -403,7 +403,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_tacacs_server_sequence` | Create a TACACS+ server sequence (an ordered list of TACACS+ external servers a device-admin policy set can proxy to), or update one: given fields change, others are kept. |
 | `ise_set_trustsec_settings` | Change ISE's TrustSec general settings: the TrustSec HTTPS (REST) policy server that 'cts policy-server' switches download from (and that feeds ise_trustsec_device_report), its audit log, and whether a matrix cell may carry several SGACLs. |
 | `ise_suspend_guest_user` | Suspend a guest account as the sponsor: logins fail until ise_reinstate_guest_user. |
-| `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or description. |
+| `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain, description or advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group). |
 | `ise_update_guest_user` | Change a guest's contact or visit details as the sponsor. |
 | `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or TrustSec settings: device id/password (what the switch presents in 'cts credentials' to get a PAC and download environment data and policy; defaults for the refresh timers and CoA-based updates are set the first time), the HTTP REST API username/password for the HTTPS policy download ('cts policy-server' on IOS-XE) and push id support (the device reports its downloads, which is what ise_trustsec_device_report shows). |

@@ -1,0 +1,50 @@
+{
+ "version": "1.0.0",
+ "response": [
+  {
+   "directionType": "BOTH",
+   "name": "Airespace-ACL-Name",
+   "internalName": "Airespace-ACL-Name",
+   "dataType": "STRING",
+   "dictionaryName": "Airespace",
+   "allowedValues": []
+  },
+  {
+   "directionType": "BOTH",
+   "name": "Airespace-Interface-Name",
+   "internalName": "Airespace-Interface-Name",
+   "dataType": "STRING",
+   "dictionaryName": "Airespace",
+   "allowedValues": []
+  },
+  {
+   "directionType": "BOTH",
+   "name": "Airespace-QOS-Level",
+   "internalName": "Airespace-QOS-Level",
+   "dataType": "UNIT32",
+   "dictionaryName": "Airespace",
+   "allowedValues": [
+    {
+     "key": "Silver",
+     "value": "0",
+     "isDefault": false
+    },
+    {
+     "key": "Gold",
+     "value": "1",
+     "isDefault": false
+    },
+    {
+     "key": "Platinum",
+     "value": "2",
+     "isDefault": false
+    },
+    {
+     "key": "Bronze",
+     "value": "3",
+     "isDefault": false
+    }
+   ]
+  }
+ ]
+}

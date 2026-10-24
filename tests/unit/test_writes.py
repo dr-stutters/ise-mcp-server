@@ -296,6 +296,10 @@ async def test_create_authz_profile_av_pairs(mock: respx.MockRouter) -> None:
     post = mock.post("/ers/config/authorizationprofile").respond(
         201, headers={"Location": f"{BASE}/ers/config/authorizationprofile/new-id"}
     )
+    mock.get("/api/v1/policy/network-access/dictionaries").respond(json={"response": [{"name": "Cisco"}]})
+    mock.get("/api/v1/policy/network-access/dictionaries/Cisco/attribute").respond(
+        json={"response": [{"name": "cisco-av-pair", "directionType": "BOTH", "dictionaryName": "Cisco"}]}
+    )
     args = {"name": "mcp-catc-observer", "av_pairs": ["Cisco:cisco-av-pair=Role=OBSERVER-ROLE"]}
     preview, done = await two_step("ise_create_authz_profile", args)
     assert preview["status"] == "preview" and done["status"] == "applied"
