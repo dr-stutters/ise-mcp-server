@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.1 (2026-10-24)
+
+Prompt `ise_onboard_sdwan_edges` for Catalyst SD-WAN edge AAA. Core stays 0.15.0. 150 tools and six prompts.
+
+### Added
+- Prompt `ise_onboard_sdwan_edges` (I81, #73, #83): Catalyst SD-WAN edges as ISE NADs at their service-VPN loopbacks,
+  device-admin policy, AAA parcel with loopback source, test logins.
+
+### Changed
+- `ise_list_dictionary_attributes` lists reply-only (OUT) vendor attributes (`scope='dictionary'`, and as a fallback for a
+  named dictionary) (I81, #83).
+
 ## 0.14.0 (2026-10-24)
 
 Wave 7 (SD-WAN cross-architecture): pre/post change snapshots on the suite's snapshot contract, per-NAD RADIUS statistics, and
