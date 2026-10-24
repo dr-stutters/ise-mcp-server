@@ -1,0 +1,413 @@
+{
+ "version": "1.0.0",
+ "response": [
+  {
+   "name": "3gpp",
+   "description": "Dictionary for Vendor 3gpp",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "ACIDEX",
+   "description": "ACIDEX dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "ACTIVEDIRECTORY_PROBE",
+   "description": "ACTIVEDIRECTORY_PROBE dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "APIC",
+   "description": "APIC dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Airespace",
+   "description": "Dictionary for Vendor Airespace",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Alcatel-Lucent",
+   "description": "Dictionary for Vendor Alcatel-Lucent",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Aruba",
+   "description": "Dictionary for Vendor Aruba",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Brocade",
+   "description": "Dictionary for Vendor Brocade",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "CDP",
+   "description": "CDP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "CERTIFICATE",
+   "description": "CERTIFICATE dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "CUSTOMATTRIBUTE",
+   "description": "CUSTOMATTRIBUTE dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "CWA",
+   "description": "CWA dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Cisco",
+   "description": "Dictionary for Vendor Cisco",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Cisco-BBSM",
+   "description": "Dictionary for Vendor Cisco-BBSM",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Cisco-VPN3000",
+   "description": "Dictionary for Vendor Cisco-VPN3000",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "CiscoPEP",
+   "description": "CiscoPEP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "DEVICE",
+   "description": "DEVICE dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "DHCP",
+   "description": "DHCP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "ENDPOINTPURGE",
+   "description": "ENDPOINTPURGE dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "EPS",
+   "description": "EPS dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "ERS",
+   "description": "ERS dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "EndPoints",
+   "description": "EndPoints dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Endpoint-Analytics",
+   "description": "Endpoint-Analytics dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Guest",
+   "description": "Guest dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "GuestAccess",
+   "description": "GuestAccess dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "H3C",
+   "description": "Dictionary for Vendor H3C",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "HP",
+   "description": "Dictionary for Vendor HP",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "IOTASSET",
+   "description": "IOTASSET dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "IP",
+   "description": "IP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Identity Mapping",
+   "description": "Identity Mapping dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "IdentityGroup",
+   "description": "IdentityGroup dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "InternalCA",
+   "description": "InternalCA dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "InternalEndpoint",
+   "description": "InternalEndpoint dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "InternalUser",
+   "description": "InternalUser dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Juniper",
+   "description": "Dictionary for Vendor Juniper",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "LLDP",
+   "description": "LLDP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "MAC",
+   "description": "MAC dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "MDM_LOG",
+   "description": "MDM_LOG dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "EXAMPLE_AD",
+   "description": "EXAMPLE_AD dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "MSE",
+   "description": "MSE dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "MUD",
+   "description": "MUD dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Microsoft",
+   "description": "Dictionary for Vendor Microsoft",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Motorola-Symbol",
+   "description": "Dictionary for Vendor Motorola-Symbol",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Multimedia",
+   "description": "Multimedia dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "NETFLOW",
+   "description": "NETFLOW dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "NMAP",
+   "description": "NMAP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "NMAPExtension",
+   "description": "NMAPExtension dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Network Access",
+   "description": "Network Access dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Network",
+   "description": "Network dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Condition",
+   "description": "Condition dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Normalised Radius",
+   "description": "Normalised Radius dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "PROFILER",
+   "description": "PROFILER dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "PassiveID",
+   "description": "PassiveID dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Posture",
+   "description": "Posture dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "RESTIDStoreMonitoring",
+   "description": "RESTIDStoreMonitoring dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Radius",
+   "description": "Radius dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Ruckus",
+   "description": "Dictionary for Vendor Ruckus",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "SNMP",
+   "description": "SNMP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "SPHUB",
+   "description": "SPHUB dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "SXP",
+   "description": "SXP dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Session",
+   "description": "Session dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "TACACS",
+   "description": "TACACS dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "TC-NAC",
+   "description": "TC-NAC dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Threat",
+   "description": "Threat dictionary",
+   "version": "1",
+   "dictionaryAttrType": "PIP_ATTR"
+  },
+  {
+   "name": "TrustSec",
+   "description": "TrustSec dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "UDN",
+   "description": "UDN dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "WISPr",
+   "description": "Dictionary for Vendor WISPr",
+   "version": "0",
+   "dictionaryAttrType": "MSG_ATTR"
+  },
+  {
+   "name": "Wifi_Device_Analytics",
+   "description": "Wifi_Device_Analytics dictionary",
+   "version": "1",
+   "dictionaryAttrType": "MSG_ATTR"
+  }
+ ]
+}

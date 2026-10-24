@@ -8,11 +8,13 @@ never echoed: previews show only whether they are set.
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
+import difflib
 import hashlib
 import ipaddress
 import json
 import re
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastmcp import Context
 from pydantic import Field
@@ -23,6 +25,7 @@ from ise_mcp._core import (
     NotFound,
     Plan,
     ToolRegistrar,
+    UpstreamError,
     compact,
     field_changes,
     get_client,
@@ -33,7 +36,7 @@ from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, ers_resolve, is_uuid, normalize_mac
 from ise_mcp.tools.endpoint_bulk import check_custom_values, custom_attribute_defs
 from ise_mcp.tools.network import resolve_nad
-from ise_mcp.tools.policy import rules_using_profile
+from ise_mcp.tools.policy import av_pair_text, rules_using_profile
 
 # --- helpers ------------------------------------------------------------------------------------
 
@@ -71,6 +74,100 @@ def deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+# --- authorization profile advanced attributes (av_pairs) -------------------------------------
+
+# Catalyst SD-WAN (Viptela) maps an admin's user group from this vendor attribute (vendor 41916,
+# attribute 1). ISE 3.5 ships no Viptela dictionary (checked on the lab ISE, 2026-10-24) and its REST
+# API cannot create RADIUS vendor dictionaries (the OpenAPI Dictionary schema has no vendor id), so a
+# missing dictionary is a blocker that names the one-time GUI step.
+SDWAN_DICTIONARY = "Viptela"
+SDWAN_ATTRIBUTE = "Viptela-Group-Name"
+SDWAN_DICTIONARY_STEP = (
+    "ISE has no 'Viptela' RADIUS dictionary: ISE does not ship one and its REST API cannot create RADIUS "
+    "vendor dictionaries. Add it once in the GUI: Policy > Policy Elements > Dictionaries > System > "
+    "RADIUS > RADIUS Vendors > Add, Name 'Viptela', Vendor ID 41916; then under its Dictionary "
+    "Attributes add 'Viptela-Group-Name', Attribute ID 1, Data Type STRING, Direction OUT (or BOTH). "
+    "Then repeat this call."
+)
+# TACACS+ has no vendor dictionaries: the Manager reads this custom shell-profile attribute.
+SDWAN_TACACS_ATTRIBUTE = "viptela-group-name"
+DICTIONARIES_PATH = "/api/v1/policy/network-access/dictionaries"
+
+
+def _resp(data: Any) -> Any:
+    return data.get("response", data) if isinstance(data, dict) else data
+
+
+def valid_sdwan_group(value: str) -> str:
+    group = value.strip()
+    if not group or not re.fullmatch(r"[A-Za-z0-9_.-]+", group):
+        raise InvalidRequest(
+            f"sdwan_group {value!r}: a Catalyst SD-WAN user group name, e.g. 'netadmin', 'operator' or a "
+            "custom group (letters, digits, '_', '-', '.')"
+        )
+    return group
+
+
+async def check_av_pairs(app: IseApp, advanced: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """Check (and canonicalise in place) ERS advanced attributes against ISE's network-access
+    dictionaries: the dictionary and attribute exist, the attribute can be sent in a reply (not
+    IN-only) and the value is one of its allowed values. Returns (blockers, warnings); when the
+    OpenAPI surface does not answer, nothing is blocked and ISE validates on apply."""
+    if not advanced:
+        return [], []
+    try:
+        dicts = _resp(await app.openapi.get(DICTIONARIES_PATH)) or []
+    except UpstreamError as e:
+        return [], [f"av_pairs not checked against ISE's dictionaries ({e}); ISE validates them on apply"]
+    names = {str(d.get("name")).lower(): str(d.get("name")) for d in dicts if isinstance(d, dict)}
+    attrs_by_dict: dict[str, list[dict[str, Any]]] = {}
+    blockers: list[str] = []
+    for adv in advanced:
+        lhs = adv["leftHandSideDictionaryAttribue"]
+        value = str(adv["rightHandSideAttribueValue"]["value"])
+        given_d, given_a = str(lhs["dictionaryName"]), str(lhs["attributeName"])
+        d = names.get(given_d.lower())
+        if d is None:
+            if given_d.lower() == SDWAN_DICTIONARY.lower():
+                blockers.append(SDWAN_DICTIONARY_STEP)
+            else:
+                close = difflib.get_close_matches(given_d, list(names.values()), n=3, cutoff=0.6)
+                hint = f" Did you mean {', '.join(close)}?" if close else ""
+                blockers.append(f"ISE has no dictionary {given_d!r}.{hint}")
+            continue
+        lhs["dictionaryName"] = d
+        if d not in attrs_by_dict:
+            data = _resp(await app.openapi.get(f"{DICTIONARIES_PATH}/{quote(d, safe='')}/attribute"))
+            attrs_by_dict[d] = [a for a in data or [] if isinstance(a, dict)]
+        attrs = {str(a.get("name")).lower(): a for a in attrs_by_dict[d]}
+        found = attrs.get(given_a.lower())
+        if found is None:
+            known = [str(a.get("name")) for a in attrs_by_dict[d]]
+            close = difflib.get_close_matches(given_a, known, n=3, cutoff=0.6)
+            if d == SDWAN_DICTIONARY and given_a.lower() == SDWAN_ATTRIBUTE.lower():
+                hint = " Add it under the Viptela vendor's Dictionary Attributes: ID 1, STRING, OUT."
+            else:
+                hint = f" Did you mean {', '.join(close)}?" if close else ""
+            blockers.append(f"Dictionary {d} has no attribute {given_a!r}.{hint}")
+            continue
+        lhs["attributeName"] = found.get("name")
+        name = f"{d}:{found.get('name')}"
+        if found.get("directionType") in ("IN", "NONE"):
+            blockers.append(
+                f"{name} is a {found.get('directionType')} attribute: a profile can only return OUT or "
+                "BOTH attributes"
+            )
+        allowed = [v for v in found.get("allowedValues") or [] if isinstance(v, dict)]
+        if allowed:
+            keys = {str(v.get("key")).lower(): str(v.get("key")) for v in allowed}
+            numbers = {str(v.get("value")) for v in allowed}
+            if value.lower() in keys:
+                adv["rightHandSideAttribueValue"]["value"] = keys[value.lower()]
+            elif value not in numbers:
+                blockers.append(f"{name} must be one of: {', '.join(keys.values())} (got {value!r})")
+    return blockers, []
 
 
 # ERS trustsecsettings for a NAD that had none: daily refreshes, and policy changes sent by CoA (without
@@ -727,6 +824,13 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             },
         }
 
+    def _is_sdwan_group(adv: dict[str, Any]) -> bool:
+        lhs = adv.get("leftHandSideDictionaryAttribue") or {}
+        return (
+            str(lhs.get("dictionaryName")).lower() == SDWAN_DICTIONARY.lower()
+            and str(lhs.get("attributeName")).lower() == SDWAN_ATTRIBUTE.lower()
+        )
+
     async def _profile_body(
         app: IseApp,
         *,
@@ -775,17 +879,33 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             Field(
                 description="Advanced attributes as 'Dictionary:attribute=value', e.g. "
                 "'Cisco:cisco-av-pair=Role=OBSERVER-ROLE' (Catalyst Center admin role) or "
-                "'Radius:Session-Timeout=3600'; the value is everything after the first '='"
+                "'Radius:Session-Timeout=3600'; the value is everything after the first '='. Checked "
+                "against ISE's dictionaries"
+            ),
+        ] = None,
+        sdwan_group: Annotated[
+            str | None,
+            Field(
+                description="Catalyst SD-WAN user group for an SD-WAN Manager/edge admin login, e.g. "
+                "'netadmin' or 'operator': adds 'Viptela:Viptela-Group-Name=<group>' (the Viptela "
+                "dictionary must exist in ISE; the preview names the GUI step if not)"
             ),
         ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL,
         reauth timer, voice domain and advanced attributes (av_pairs, e.g. cisco-av-pair=Role=<role> for
-        a Catalyst Center admin login). Preview-first; blocked if the name exists. Use it in a rule with
-        ise_create_authz_rule."""
+        a Catalyst Center admin login; sdwan_group for Viptela-Group-Name, the SD-WAN Manager admin
+        group). Preview-first; blocked if the name exists or an attribute is not in ISE's dictionaries.
+        Use it in a rule with ise_create_authz_rule."""
         app: IseApp = get_client(ctx)
         advanced = [_av_pair(a) for a in av_pairs or []]
+        if sdwan_group is not None:
+            advanced = [a for a in advanced if not _is_sdwan_group(a)]
+            advanced.append(
+                _av_pair(f"{SDWAN_DICTIONARY}:{SDWAN_ATTRIBUTE}={valid_sdwan_group(sdwan_group)}")
+            )
+        av_blockers, av_warnings = await check_av_pairs(app, advanced)
         body = {
             "name": name,
             "authzProfileType": "SWITCH",
@@ -807,7 +927,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             body["advancedAttributes"] = advanced
         blockers = (
             [f"Profile {name!r} already exists"] if await exists(app, "authorizationprofile", name) else []
-        )
+        ) + av_blockers
         return await preview_or_apply(
             ctx,
             tool="ise_create_authz_profile",
@@ -820,9 +940,15 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "voice_domain": voice_domain,
                 "description": description,
                 "av_pairs": av_pairs,
+                "sdwan_group": sdwan_group,
             },
             confirm=confirm,
-            plan=Plan(f"Create authorization profile {name}", details=body, blockers=blockers),
+            plan=Plan(
+                f"Create authorization profile {name}",
+                details=body,
+                blockers=blockers,
+                side_effects=av_warnings,
+            ),
             apply=lambda: ers_post(app, "authorizationprofile", "AuthorizationProfile", body),
         )
 
@@ -836,10 +962,25 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         reauth_seconds: Annotated[int | None, Field(ge=1, le=65535, description="Reauth timer")] = None,
         voice_domain: Annotated[bool | None, Field(description="Voice domain permission")] = None,
         description: Annotated[str | None, Field(description="New description")] = None,
+        av_pairs: Annotated[
+            list[str] | None,
+            Field(
+                description="Replace the advanced attributes with these 'Dictionary:attribute=value' "
+                "entries ([] removes them all); checked against ISE's dictionaries"
+            ),
+        ] = None,
+        sdwan_group: Annotated[
+            str | None,
+            Field(
+                description="Set the Catalyst SD-WAN user group (Viptela:Viptela-Group-Name), keeping the "
+                "other advanced attributes ('' removes it)"
+            ),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
-        """Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain or
-        description. The preview lists the rules that use the profile (they're all affected at the next
+        """Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain,
+        description or advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group).
+        The preview lists the rules that use the profile (they're all affected at the next
         authentication)."""
         app: IseApp = get_client(ctx)
         current = await ers_resolve(
@@ -863,6 +1004,29 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             desired.pop("vlan", None)
         if dacl == "":
             desired.pop("daclName", None)
+        av_blockers: list[str] = []
+        av_warnings: list[str] = []
+        if av_pairs is not None or sdwan_group is not None:
+            advanced = (
+                [_av_pair(a) for a in av_pairs]
+                if av_pairs is not None
+                else [dict(a) for a in current.get("advancedAttributes") or [] if isinstance(a, dict)]
+            )
+            if sdwan_group is not None:
+                advanced = [a for a in advanced if not _is_sdwan_group(a)]
+                if sdwan_group != "":
+                    advanced.append(
+                        _av_pair(f"{SDWAN_DICTIONARY}:{SDWAN_ATTRIBUTE}={valid_sdwan_group(sdwan_group)}")
+                    )
+            # Only new entries are checked: attributes already on the profile are ISE's own.
+            existing = {av_pair_text(a) for a in current.get("advancedAttributes") or []}
+            av_blockers, av_warnings = await check_av_pairs(
+                app, [a for a in advanced if av_pair_text(a) not in existing]
+            )
+            if advanced:
+                desired["advancedAttributes"] = advanced
+            else:
+                desired.pop("advancedAttributes", None)
         if desired == current:
             raise InvalidRequest("Nothing to change: give at least one different field")
         users = await rules_using_profile(app, str(current.get("name")))
@@ -870,7 +1034,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             f"Update authorization profile {current.get('name')}",
             details={"changes": field_changes(current, desired, replace=True), "used_by_rules": users},
             fingerprint=fingerprint(current),
-            side_effects=[f"Affects {len(users)} rule(s) at the next authentication"] if users else [],
+            blockers=av_blockers,
+            side_effects=([f"Affects {len(users)} rule(s) at the next authentication"] if users else [])
+            + av_warnings,
         )
         return await preview_or_apply(
             ctx,
@@ -883,6 +1049,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "reauth_seconds": reauth_seconds,
                 "voice_domain": voice_domain,
                 "description": description,
+                "av_pairs": av_pairs,
+                "sdwan_group": sdwan_group,
             },
             confirm=confirm,
             plan=plan,
