@@ -4,12 +4,14 @@
 
 import asyncio
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastmcp import Context
 from fastmcp.tools import ToolResult
 from pydantic import Field
 
 from ise_mcp._core import (
+    InvalidRequest,
     NotFound,
     ResponseFormat,
     ToolRegistrar,
@@ -36,6 +38,49 @@ PolicyKind = Annotated[
 
 def _resp(data: Any) -> Any:
     return data.get("response", data) if isinstance(data, dict) else data
+
+
+async def _dictionary_rows(app: IseApp, kind: str, dictionary: str, name: str | None) -> list[dict[str, Any]]:
+    """Every attribute of one dictionary (GET .../dictionaries/{name}/attribute), with its direction:
+    IN (request), OUT (reply) or BOTH. [] when the dictionary does not exist or has no attributes."""
+    path = f"/api/v1/policy/{kind}/dictionaries/{quote(dictionary.strip(), safe='')}/attribute"
+    try:
+        data = _resp(await app.openapi.get(path)) or []
+    except NotFound:
+        return []
+    rows = []
+    for a in data if isinstance(data, list) else []:
+        if not isinstance(a, dict) or (name and name.lower() not in str(a.get("name")).lower()):
+            continue
+        allowed = [str(v.get("key")) for v in a.get("allowedValues") or [] if isinstance(v, dict)]
+        row = {
+            "attribute": f"{a.get('dictionaryName') or dictionary}:{a.get('name')}",
+            "type": a.get("dataType"),
+            "direction": a.get("directionType"),
+            "allowed": (", ".join(allowed[:30]) + (" ..." if len(allowed) > 30 else "")) or None,
+            "description": a.get("description"),
+        }
+        rows.append({k: v for k, v in row.items() if v})
+    return rows
+
+
+async def _whole_dictionary(
+    app: IseApp,
+    kind: str,
+    dictionary: str,
+    name: str | None,
+    limit: int,
+    offset: int,
+    fmt: ResponseFormat,
+) -> ToolResult:
+    rows = await _dictionary_rows(app, kind, dictionary, name)
+    if rows:
+        return list_result(page_of(rows, limit=limit, offset=offset), fmt=fmt)
+    dicts = _resp(await app.openapi.get(f"/api/v1/policy/{kind}/dictionaries")) or []
+    known = sorted(str(d.get("name")) for d in dicts if isinstance(d, dict))
+    return object_result(
+        {"results": [], "note": f"No attributes in {dictionary!r}; dictionaries are: {', '.join(known)}"}
+    )
 
 
 def policy_set_row(ps: dict[str, Any]) -> dict[str, Any]:
@@ -304,8 +349,13 @@ def register(reg: ToolRegistrar) -> None:
         ctx: Context,
         kind: PolicyKind = "network-access",
         scope: Annotated[
-            Literal["authorization", "authentication", "policyset"],
-            Field(description="Which conditions the attributes are for (they differ slightly)"),
+            Literal["authorization", "authentication", "policyset", "dictionary"],
+            Field(
+                description="Which conditions the attributes are for (they differ slightly), or "
+                "'dictionary': every attribute of `dictionary` with its direction, including "
+                "reply-only (OUT) vendor attributes such as Viptela:Viptela-Group-Name that no "
+                "condition scope lists"
+            ),
         ] = "authorization",
         dictionary: Annotated[
             str | None,
@@ -322,10 +372,16 @@ def register(reg: ToolRegistrar) -> None:
         """List the dictionary attributes policy conditions can use, with data type and allowed values
         (e.g. Radius:NAS-Port-Type -> Ethernet, Virtual...; Session:ANCPolicy; DEVICE:Location;
         Network Access:EapAuthentication -> EAP-TLS...). Write conditions as 'Dictionary:Attribute
-        operator value' using these names and the allowed value names."""
+        operator value' using these names and the allowed value names. Reply-only (OUT) vendor
+        attributes, used in authorization profiles (av_pairs) rather than conditions, are listed with
+        scope='dictionary' (or when a named dictionary has none for conditions)."""
         from ise_mcp.tools.policy_edit import dictionary_attributes  # avoid an import cycle
 
         app: IseApp = get_client(ctx)
+        if scope == "dictionary":
+            if not dictionary:
+                raise InvalidRequest("scope='dictionary' needs `dictionary`, e.g. 'Viptela' or 'Cisco'")
+            return await _whole_dictionary(app, kind, dictionary, name, limit, offset, response_format)
         attrs = await dictionary_attributes(app, kind, scope)
         if dictionary:
             attrs = [a for a in attrs if str(a.get("dictionaryName")).lower() == dictionary.lower()]
@@ -341,6 +397,18 @@ def register(reg: ToolRegistrar) -> None:
             }
             rows.append({k: v for k, v in row.items() if v})
         if not rows and dictionary:
+            # A vendor dictionary's reply-only (OUT) attributes are in no condition scope (e.g. a Viptela
+            # dictionary added in the GUI): read the dictionary itself before saying there is nothing.
+            whole = await _dictionary_rows(app, kind, dictionary, name)
+            if whole:
+                note = (
+                    f"No {dictionary} attributes in the {scope} condition scope; these are the "
+                    "dictionary's own attributes. Direction OUT means a reply attribute: use it in an "
+                    "authorization profile (av_pairs), not in a condition."
+                )
+                return list_result(
+                    page_of(whole, limit=limit, offset=offset), fmt=response_format, extra={"note": note}
+                )
             dicts = sorted(
                 {str(a.get("dictionaryName")) for a in await dictionary_attributes(app, kind, scope)}
             )

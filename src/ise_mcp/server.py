@@ -33,6 +33,7 @@ from ise_mcp.tools import (
     profiler_posture,
     pxgrid,
     radius,
+    sdwan_onboard,
     sessions,
     snapshot,
     sxp,
@@ -71,7 +72,8 @@ conditions are 'Dictionary:Attribute operator value' or library condition names
 admin (TACACS+): kind='device-admin' on the policy tools, plus ise_set_command_set /
 ise_set_shell_profile; the node needs the DeviceAdmin service. Catalyst SD-WAN Manager admins: sdwan_group
 on ise_create_authz_profile (RADIUS Viptela-Group-Name; ISE ships no Viptela dictionary, the preview names
-the GUI step) or ise_set_shell_profile (TACACS+). Quarantine: an authz rule on
+the GUI step) or ise_set_shell_profile (TACACS+); SD-WAN edges as NADs at their service-VPN loopbacks:
+prompt ise_onboard_sdwan_edges. Quarantine: an authz rule on
 'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Active Directory: ise_create_ad_join_point
 -> ise_join_ad -> ise_list_ad_groups -> ise_add_ad_groups, then rules on '<join point>:ExternalGroups
 equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_user (a user's groups) for
@@ -137,6 +139,7 @@ def create_server(
             pxgrid.register,
             dangerous.register,
             workflows.register,
+            sdwan_onboard.register,
             config_export.register,
             config_import.register,
             snapshot.register,
