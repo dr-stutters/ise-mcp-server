@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0 (2026-10-24)
+
+Wave 7 (SD-WAN cross-architecture): pre/post change snapshots on the suite's snapshot contract, per-NAD RADIUS statistics, and
+Viptela-Group-Name for Catalyst SD-WAN admin logins. Core 0.15.0 with the suite prompt pack. 150 tools (80 read, 52 write,
+18 dangerous) and five prompts.
+
+### Added
+- `ise_snapshot` / `ise_compare_snapshot` (I82, #81): pre/post change snapshot of failure % and timeouts per NAD (15-minute MnT
+  window), node state and pxGrid clients on the core snapshot contract; core 0.15.0 with the suite prompt pack
+  (`suite_change_check`).
+- `ise_nad_radius_stats` (I83, #79): per-NAD RADIUS attempts, timeouts, EAP/MAB response time and answering PSN from MnT history,
+  with outlier and previous-window comparison.
+- `ise_create_authz_profile` / `ise_update_authz_profile` take `sdwan_group` (Viptela-Group-Name for Catalyst SD-WAN admin logins)
+  and check `av_pairs` against ISE's dictionaries, with a blocker naming the GUI step when the Viptela dictionary is missing.
+  `ise_update_authz_profile` takes `av_pairs`, `ise_get_authz_profile` shows them, and `ise_set_shell_profile` takes
+  `sdwan_group` (viptela-group-name) (I80, #72, #80).
+
 ## 0.13.1 (2026-10-24)
 
 ### Security
