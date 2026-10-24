@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.1 (2026-10-24)
+
+### Security
+- fastmcp and fastmcp-slim 4.1.0 -> 4.1.3 (GHSA-7xgj-8392-5q4r, GHSA-vqqp-x5qm-5qp4). No tool changes.
+
 ## 0.13.0 (2026-10-22)
 
 On-demand configuration backups before Catalyst Center's group-based policy migration (I78, with catc D114): `ise_list_repositories` and the dangerous-tier `ise_create_backup` (preview-first, refuses without a writable repository or `ISE_BACKUP_ENCRYPTION_KEY`).
