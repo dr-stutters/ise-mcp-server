@@ -1,0 +1,15 @@
+{
+ "version": "1.0.0",
+ "response": [
+  {
+   "id": "00000000-0000-0000-0000-000000000001",
+   "directionType": "OUT",
+   "name": "Viptela-Group-Name",
+   "description": "SD-WAN user group (basic, netadmin, operator)",
+   "internalName": "Viptela-Group-Name",
+   "dataType": "STRING",
+   "dictionaryName": "Viptela",
+   "allowedValues": []
+  }
+ ]
+}

@@ -343,6 +343,7 @@ async def test_update_node_services(mock: respx.MockRouter) -> None:
 
 async def test_list_dictionary_attributes(mock: respx.MockRouter) -> None:
     mock.get(f"{NA}/dictionaries/authorization").respond(json={"response": ATTRS})
+    mock.get(f"{NA}/dictionaries/nope/attribute").respond(404, json={"message": "not found"})
     async with Client(make_server()) as c:
         r = await c.call_tool("ise_list_dictionary_attributes", {"dictionary": "radius"})
         data = r.structured_content

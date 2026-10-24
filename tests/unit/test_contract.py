@@ -37,10 +37,19 @@ PROMPT_SAMPLES = {
         "user": "alice",
         "minutes": "60",
     },
+    "ise_onboard_sdwan_edges": {
+        "site": "200",
+        "edges": "br1,br2",
+        "service_vpn": "10",
+        "loopback": "Loopback10",
+        "ise_address": "192.0.2.10",
+        "test_user": "alice",
+    },
 }
 # win = the Windows_Server MCP (no manifest: its references are checked for `uses` only).
-KNOWN = {"cml", "ise", "fmc", "catc", "win"}
-# Every fmc_*/catc_* tool a prompt references must exist in that server's manifest (tests/manifests/).
+KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win"}
+# Every fmc_*/catc_*/catsdwan_* tool a prompt references must exist in that server's manifest
+# (tests/manifests/).
 EXTERNAL = load_tool_manifests("tests/manifests")
 
 
@@ -63,7 +72,7 @@ async def test_contract_read_only() -> None:
 async def test_suite_pack() -> None:
     # Core's suite_* prompts (C48) are registered and this server's leg tools (ise_snapshot,
     # ise_compare_snapshot) exist. Pending: peer snapshot tools not in their committed manifests yet
-    # (catc D118, fmc F89); cat-sdwan has no manifest here, so its leg is not checked.
+    # (catc D118, fmc F89). cat-sdwan's manifest (0.4.0, I81) has catsdwan_snapshot, so its leg is checked.
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
     await assert_suite_pack(
         server,
