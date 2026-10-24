@@ -33,6 +33,10 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   decoded reason and NAD) and `ise_get_auth_list` (what authenticated in a window, by NAD or user).
 - **"Is it the network or ISE?"**: `ise_nad_radius_stats` (per-NAD attempts, timeouts, EAP/MAB response time and
   the PSN that answered; the NADs that stand out against the others or the previous window).
+- **Pre/post change check**: `ise_snapshot(site)` before a change, `ise_compare_snapshot` after it (core snapshot
+  contract: failure % and timeouts per NAD over 15 minutes, node state, pxGrid clients; the client holds the
+  blob). `site` is an NDG location or a NAD name prefix. Core's `suite_change_check` prompt runs it with the
+  SD-WAN, Catalyst Center and FMC servers.
 - **Prompt `ise_troubleshoot_endpoint_access`**: a guided pass from MAC/user/IP through ISE and the switch
   CLI (cml or catc server) to a diagnosis and a preview-only fix.
 - **Prompt `ise_quarantine_host`**: contain a host with ANC + CoA, verify the quarantine dACL/SGT on the switch,
@@ -269,16 +273,17 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-147 tools and 4 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 77 read tools plus `ise_api_call` (GET-only) are registered. Everything
+150 tools and 5 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 80 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (77)
+### Read (80)
 
 | Tool | What it does |
 |---|---|
 | `ise_admin_policy_explain` | Predict what a TACACS+ device-admin login gets, client-side (ISE has no evaluate API and no TACACS+ live-log REST API): which device-admin policy set the NAD and user select, the authentication rule (identity source), the authorization rule (with its hit count), the shell profile (priv-lvl etc.; Deny All Shell Profile means the login fails) and, for each `command`, the command-set verdict and the line that decided it. |
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
+| `ise_compare_snapshot` | Compare a ise_snapshot blob from before a change with one from after it (or, when `after` is empty, a fresh snapshot of the same scope taken now) and name what changed, most severe first: major = got unhealthy (session down, metric past its limit, healthy item gone), minor = changed but not clearly bad, info = recovered or improved. |
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
@@ -350,6 +355,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
+| `ise_snapshot` | Take a compact, versioned snapshot of Cisco ISE health for a pre/post change check: failure % and timeouts per NAD over the 15 minutes before the snapshot (MnT), node persona and sync state, pxGrid client states. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
@@ -436,7 +442,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_reprofile_endpoint` | Make ISE re-evaluate an endpoint's profile now: sends a CoA reauthenticate through the PSN that owns its session, so the NAD re-authenticates, fresh RADIUS / device-sensor attributes reach the profiler, and the authorization result applies the current profile. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (4)
+### Prompts (5)
 
 | Prompt | What it does |
 |---|---|
@@ -444,6 +450,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join and a user test), the Catalyst Center to ISE integration (policy server state and next action, Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source with name resolution. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
+| `suite_change_check` | Did anything else break? |
 
 ### Config export, diff and import
 

@@ -3,6 +3,7 @@ from fastmcp import Client
 
 from ise_mcp._core.testing import (
     assert_prompt_contract,
+    assert_suite_pack,
     assert_tool_contract,
     load_tool_manifests,
 )
@@ -56,6 +57,19 @@ async def test_contract_read_only() -> None:
     await assert_tool_contract(server, "ise")
     await assert_prompt_contract(
         server, "ise", samples=PROMPT_SAMPLES, known_prefixes=KNOWN, external_tools=EXTERNAL
+    )
+
+
+async def test_suite_pack() -> None:
+    # Core's suite_* prompts (C48) are registered and this server's leg tools (ise_snapshot,
+    # ise_compare_snapshot) exist. Pending: peer snapshot tools not in their committed manifests yet
+    # (catc D118, fmc F89); cat-sdwan has no manifest here, so its leg is not checked.
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
+    await assert_suite_pack(
+        server,
+        "ise",
+        "tests/manifests",
+        pending=["catc_snapshot", "catc_compare_snapshot", "fmc_snapshot", "fmc_compare_snapshot"],
     )
 
 
