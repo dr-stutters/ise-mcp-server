@@ -31,6 +31,8 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 - **`ise_endpoint_360`**: the endpoint record, live session, recent authentications and ANC state.
 - **Recent activity without a MAC**: `ise_recent_auth_failures` (who failed in the last N minutes, grouped by
   decoded reason and NAD) and `ise_get_auth_list` (what authenticated in a window, by NAD or user).
+- **"Is it the network or ISE?"**: `ise_nad_radius_stats` (per-NAD attempts, timeouts, EAP/MAB response time and
+  the PSN that answered; the NADs that stand out against the others or the previous window).
 - **Prompt `ise_troubleshoot_endpoint_access`**: a guided pass from MAC/user/IP through ISE and the switch
   CLI (cml or catc server) to a diagnosis and a preview-only fix.
 - **Prompt `ise_quarantine_host`**: contain a host with ANC + CoA, verify the quarantine dACL/SGT on the switch,
@@ -342,6 +344,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_sponsor_groups` | Sponsor groups: member groups (ISE identity groups, or AD groups as '<join point>:<domain>/<path>/<group>'), the guest types and locations their sponsors may use, which guests they manage (own / group / all), whether they may use the guest REST API (rest_access, needed by ISE_SPONSOR_USERNAME) and their other permissions. |
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
+| `ise_nad_radius_stats` | ISE's own view of each NAD's RADIUS traffic over a window, from MnT auth history (queried when called): attempts, failures, timeouts (the NAD or supplicant stopped answering: 5411, 5440, ...), average/median/worst response time overall and per method (EAP vs MAB), the PSN that answered, and the NADs that stand out against the others (or against the previous window with compare_previous=true). |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
 | `ise_profiler_status` | Profiler health and setup: which nodes run the Profiler service, each PSN's probes (enabled with their settings, and disabled), live profiler session count, custom profiling rule count, cloud profiler / telemetry state, and the feed service (GUI-only, said so). |
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
@@ -587,6 +590,10 @@ them those tests skip with a message naming what is missing. The live write test
 - MnT keeps auth history per MAC. `ise_recent_auth_failures` checks a capped set of candidate MACs
   (given, sessions in the window, endpoint database) and reports its coverage; RADIUS that ISE drops
   silently (unknown NAD, wrong secret) leaves no record. `ise_get_auth_list` windows are UTC.
+- ISE has no per-NAD RADIUS counters over REST (requests, retries, drops: GUI reports only).
+  `ise_nad_radius_stats` builds them from the same candidate MACs' MnT history: `response_time` per
+  attempt (EAP includes every round trip through the NAD, so it tracks the WAN delay to the PSN),
+  timeout failure reasons (5411, 5440, ...) and the answering PSN.
 - MnT's auth history leaves out repeated successful logins (ISE's "Suppress Repeated Successful
   Authentications", a RADIUS setting REST can't read). The session (`ise_find_session`) still shows the
   newest authentication, and `ise_why_auth_failed` reports it as `newest_login` when it is newer than every
