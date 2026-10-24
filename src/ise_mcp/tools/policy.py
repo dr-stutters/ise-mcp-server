@@ -200,8 +200,8 @@ def register(reg: ToolRegistrar) -> None:
         profile: Annotated[str, Field(description="Authorization profile name or id")],
     ) -> ToolResult:
         """Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth,
-        advanced RADIUS attributes (also as av_pairs, e.g. 'Viptela:Viptela-Group-Name=netadmin'), device
-        profile. Also lists which authorization rules (in which
+        advanced RADIUS attributes (also as av_pairs such as 'Viptela:Viptela-Group-Name=netadmin'),
+        device profile. Also lists which authorization rules (in which
         network-access policy sets) use it."""
         app: IseApp = get_client(ctx)
         obj = await ers_resolve(

@@ -287,7 +287,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
-| `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes (also as av_pairs, e.g. |
+| `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes (also as av_pairs such as 'Viptela:Viptela-Group-Name=netadmin'), device profile. |
 | `ise_get_backup_status` | Status of the last configuration backup (name, repository, start/end time, status, progress). |
 | `ise_get_dacl` | One downloadable ACL with its full ACE text (one ACE per line), IP version and description. |
 | `ise_get_definition` | Describe a Cisco ISE API operation (parameters, request fields, required fields) or a schema (fields with types and enums). |
