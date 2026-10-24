@@ -165,6 +165,54 @@ async def _endpoint_macs(app: IseApp, cap: int) -> tuple[list[str], bool]:
     return out[:cap], True
 
 
+class Candidates:
+    """MACs to read auth history for, with where each came from and whether the budget ran out."""
+
+    def __init__(self) -> None:
+        self.macs: dict[str, str] = {}
+        self.dropped = 0
+        self.more_in_db = False
+
+
+async def candidate_macs(
+    app: IseApp,
+    start: datetime,
+    end: datetime,
+    flt: NadFilter | None,
+    given: list[str] | None,
+    max_lookups: int,
+    *,
+    include_endpoint_db: bool,
+) -> Candidates:
+    """MnT history is per MAC only: the MACs given, then sessions authenticated in the window (through
+    the NAD when filtered), then the endpoint database, up to `max_lookups`."""
+    out = Candidates()
+
+    def add(mac: Any, source: str) -> None:
+        with contextlib.suppress(InvalidRequest):
+            m = normalize_mac(str(mac))
+            if m in out.macs:
+                return
+            if len(out.macs) < max_lookups:
+                out.macs[m] = source
+            else:
+                out.dropped += 1
+
+    for m in given or []:
+        normalize_mac(m)  # reject bad input loudly
+        add(m, "given")
+    for s in await auth_list(app, start, end):
+        if not flt or flt.matches(s.get("nas_ip_address")):
+            add(s.get("calling_station_id"), "auth_list")
+    # With the budget already spent, the endpoint database was not looked at: report it as capped.
+    out.more_in_db = include_endpoint_db and len(out.macs) >= max_lookups
+    if include_endpoint_db and len(out.macs) < max_lookups:
+        db_macs, out.more_in_db = await _endpoint_macs(app, max_lookups + len(out.macs))
+        for m in db_macs:
+            add(m, "endpoint_db")
+    return out
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Sessions authenticated in a time window")
     async def ise_get_auth_list(
@@ -273,33 +321,10 @@ def register(reg: ToolRegistrar) -> None:
         app: IseApp = get_client(ctx)
         start, end = window(since_minutes, None)
         flt = await nad_filter(app, nad)
-        candidates: dict[str, str] = {}
-        dropped = 0
-
-        def add(mac: Any, source: str) -> None:
-            nonlocal dropped
-            with contextlib.suppress(InvalidRequest):
-                m = normalize_mac(str(mac))
-                if m in candidates:
-                    return
-                if len(candidates) < max_lookups:
-                    candidates[m] = source
-                else:
-                    dropped += 1
-
-        for m in macs or []:
-            normalize_mac(m)  # reject bad input loudly
-            add(m, "given")
-        sessions = await auth_list(app, start, end)
-        for s in sessions:
-            if not flt or flt.matches(s.get("nas_ip_address")):
-                add(s.get("calling_station_id"), "auth_list")
-        # With the budget already spent, the endpoint database was not looked at: report it as capped.
-        more_in_db = include_endpoint_db and len(candidates) >= max_lookups
-        if include_endpoint_db and len(candidates) < max_lookups:
-            db_macs, more_in_db = await _endpoint_macs(app, max_lookups + len(candidates))
-            for m in db_macs:
-                add(m, "endpoint_db")
+        cand = await candidate_macs(
+            app, start, end, flt, macs, max_lookups, include_endpoint_db=include_endpoint_db
+        )
+        candidates, dropped, more_in_db = cand.macs, cand.dropped, cand.more_in_db
         lookup_errors: list[str] = []
 
         async def history(mac: str) -> list[dict[str, Any]]:

@@ -40,7 +40,7 @@ Setup: [deploying.md](deploying.md#guest-sponsor-guest-account-tools).
 |---|---|---|
 | External RESTful Services | GET only (ERS Operator) | `ise_list_nads`, `ise_get_nad`, `ise_list_internal_users`, `ise_list_identity_groups`, `ise_list_endpoint_groups`, `ise_list_sgts`, `ise_list_sgacls`, `ise_list_authz_profiles`, `ise_list_dacls`, `ise_list_anc_*` |
 | All OpenAPI read menus/data (Read Only Admin) | Read | `ise_list_policy_sets`, `ise_get_policy_set`, `ise_list_endpoints`, `ise_list_certificates`, `ise_get_license_status`, `ise_deployment_health`, `ise_list_sxp_*`, `ise_get_egress_matrix` |
-| Monitoring (MnT) | Read | `ise_list_active_sessions`, `ise_find_session`, `ise_get_auth_history`, `ise_why_auth_failed`, `ise_get_auth_list`, `ise_recent_auth_failures`, `ise_list_failure_reasons` |
+| Monitoring (MnT) | Read | `ise_list_active_sessions`, `ise_find_session`, `ise_get_auth_history`, `ise_why_auth_failed`, `ise_get_auth_list`, `ise_recent_auth_failures`, `ise_nad_radius_stats`, `ise_list_failure_reasons` |
 
 **AD lookups need ERS Admin.** ERS implements the Active Directory queries (group search, a user's groups,
 the join status) as PUT operations on the join point, even though they change nothing, so an ERS Operator

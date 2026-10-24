@@ -32,6 +32,7 @@ from ise_mcp.tools import (
     policy_explain,
     profiler_posture,
     pxgrid,
+    radius,
     sessions,
     sxp,
     system,
@@ -50,7 +51,8 @@ fails: it reports which surfaces answer (ERS is often disabled or firewalled).
 Start here: "why can't X connect?" -> ise_why_auth_failed (MAC preferred); "what is this device?" ->
 ise_endpoint_360; "who failed / what connected in the last hour?" -> ise_recent_auth_failures and
 ise_get_auth_list (by NAD or user, no MAC needed); "is the deployment healthy?" ->
-ise_deployment_health; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD names may be partial); "what does
+ise_deployment_health; "is it the network or ISE?" (per-NAD RADIUS latency and timeouts) ->
+ise_nad_radius_stats; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD names may be partial); "what does
 policy do?" -> ise_list_policy_sets then ise_get_policy_set; "which rule would a MAB/802.1X login from
 switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk to B?" ->
 ise_get_egress_matrix(source, destination); "why is this device profiled as X?" -> ise_explain_profile
@@ -109,6 +111,7 @@ def create_server(
             troubleshoot.register,
             sessions.register,
             activity.register,
+            radius.register,
             network.register,
             endpoints.register,
             identity.register,

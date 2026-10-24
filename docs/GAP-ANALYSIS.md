@@ -91,9 +91,9 @@ supportbundlestatus; telemetryinfo, deploymentinfo; filterpolicy (SXP filters); 
 | `Version` | status |
 | `Session/ActiveCount` | left out: `list_active_sessions` returns the total with the list |
 | `Session/ActiveList`, `PostureCount`, `ProfilerCount` | list_active_sessions, profiler_status, apply_anc, coa_disconnect |
-| `Session/AuthList/{start}/{end}` | get_auth_list, recent_auth_failures |
+| `Session/AuthList/{start}/{end}` | get_auth_list, recent_auth_failures, nad_radius_stats |
 | `Session/MACAddress`, `UserName`, `EndPointIPAddress`, `Active/SessionID` | find_session, endpoint_360, why_auth_failed, get_auth_list, apply_anc, coa_reauth, coa_disconnect, explain_profile, reprofile_endpoint |
-| `AuthStatus/MACAddress/{mac}/{seconds}/{records}/All` | get_auth_history, why_auth_failed, endpoint_360, recent_auth_failures |
+| `AuthStatus/MACAddress/{mac}/{seconds}/{records}/All` | get_auth_history, why_auth_failed, endpoint_360, recent_auth_failures, nad_radius_stats |
 | `FailureReasons` | list_failure_reasons and every tool that decodes a failure code |
 | `CoA/Reauth`, `CoA/Disconnect` | coa_reauth, coa_disconnect, reprofile_endpoint |
 
@@ -117,7 +117,7 @@ wraps, with the reason.
 | ANC | H | Policies list/create/delete; apply/clear with a check that an authz rule matches `Session:ANCPolicy` | ANC policy update (rare) |
 | Certificates and pxGrid | M | System and trusted certificates list; trusted import/delete; CSR generate/export/delete; signed certificate bind (dangerous for Admin usage); certificate auth profile; pxGrid clients list/approve/decline/delete, auto-approve, consumer key + CSR + signed bundle (I30) | System certificate import/export, self-signed generation, trusted-certificate usage update, OCSP/messaging renew, internal CA regenerate and intermediate CSR (11 operations; C4) |
 | Deployment: nodes, services, patches, backup, repositories, licensing | M | Nodes list; node services enable/disable; patches and hotpatches list; last backup status; repositories list; licence tiers, smart state, registration, evaluation; `ise_deployment_health` | Node details, node groups, interfaces and SXP interface (read: C6); register/deregister, promote, PAN HA, sync (dangerous, GUI); backup now/schedule/restore and repository CRUD (C8); patch install/rollback and the staged upgrade API (Not planned); licence registration (L) |
-| **MnT**: sessions, auth history, failure reasons, CoA | H | All 13 useful calls, plus the time-window views `ise_get_auth_list` / `ise_recent_auth_failures` | nothing |
+| **MnT**: sessions, auth history, failure reasons, CoA | H | All 13 useful calls, plus the time-window views `ise_get_auth_list` / `ise_recent_auth_failures` / `ise_nad_radius_stats` | per-NAD RADIUS counters (requests, retries, drops) are not on any REST surface; `ise_nad_radius_stats` derives latency and timeouts from auth history (I83) |
 | Network devices and NDGs | H | List/get/audit/create/update/delete NAD; NDGs list/create; export/import | Bulk NAD import (I49 builds it on the existing tools) |
 | Config as code | M–H | `ise_export_config` / `ise_diff_config` / `ise_import_config` across 13 sections (I42/I43) | Parametrised bundles (I50) |
 | Admin users and RBAC | L | Admin users listed (health) | Rbac Catalog (28 operations: admin users/groups, menu and data access, policy). A read-only slice would verify the least-privilege roles (C10) |
