@@ -295,3 +295,13 @@ One comment per existing issue ("Amended in Wave 6 (planned 2026-10-18): …"); 
 | `aaa accounting update newinfo periodic 1` on the lab switch (recipe change) | I75 byte counts in interim updates | ⏳ lab window |
 | A self-registration portal with sponsor approval (GUI change); the I48 sponsor account and group | I72 approval path | ⏳ owner (portal) / ✅ sponsor in place |
 | Owner: Data Connect enabled on the ISE and TCP 2484 open from the server host; a yes to reopening allowed-protocols writes | I77, I71 | ⏳ owner |
+
+## Waves 7–10 (planned 2026-10-23): Catalyst SD-WAN cross-architecture
+Suite plan: four waves of cross-architecture scenarios led by Catalyst SD-WAN, filed 2026-10-23 (draft `stutters-mcp-lab/planning/WAVE7-SDWAN-XARCH-DRAFT.md`). Waves: **7** foundation, identity and triage (Now) · **8** security and change safety · **9** topology and lifecycle (Next) · **10** reporting and reach (Later). Scenario epics in core: [C44](https://github.com/dr-stutters/stutters-mcp-core/issues/102), [C54](https://github.com/dr-stutters/stutters-mcp-core/issues/103), [C55](https://github.com/dr-stutters/stutters-mcp-core/issues/104), [C59](https://github.com/dr-stutters/stutters-mcp-core/issues/105), [C45](https://github.com/dr-stutters/stutters-mcp-core/issues/106), [C56](https://github.com/dr-stutters/stutters-mcp-core/issues/107), [C57](https://github.com/dr-stutters/stutters-mcp-core/issues/108), [C58](https://github.com/dr-stutters/stutters-mcp-core/issues/109), [C61](https://github.com/dr-stutters/stutters-mcp-core/issues/110), [C60](https://github.com/dr-stutters/stutters-mcp-core/issues/111).
+
+| # | Item | Wave | Milestone | Size | Scenario |
+|---|---|---|---|---|---|
+| [I80](https://github.com/dr-stutters/ise-mcp-server/issues/72) | **Viptela RADIUS dictionary and vendor attributes in authorization and shell profiles** | 7 | Now | S | [C44](https://github.com/dr-stutters/stutters-mcp-core/issues/102) |
+| [I81](https://github.com/dr-stutters/ise-mcp-server/issues/73) | **Prompt `ise_onboard_sdwan_edges`: SD-WAN edges as ISE network devices** | 7 | Now | M | [C44](https://github.com/dr-stutters/stutters-mcp-core/issues/102) |
+| [I82](https://github.com/dr-stutters/ise-mcp-server/issues/74) | **`ise_snapshot` for C53 pre/post checks** | 7 | Now | S | [C54](https://github.com/dr-stutters/stutters-mcp-core/issues/103) |
+| [I83](https://github.com/dr-stutters/ise-mcp-server/issues/75) | **Per-NAD RADIUS latency and timeouts for `catsdwan_network_or_ise`** | 7 | Now | S | [C54](https://github.com/dr-stutters/stutters-mcp-core/issues/103) |
