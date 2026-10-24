@@ -1,0 +1,1 @@
+{"response": [{"hostname": "ise", "fqdn": "ise.example.test", "ipAddress": "192.0.2.35", "roles": ["Standalone"], "services": ["Session", "Profiler", "SXP", "DeviceAdmin", "pxGrid"], "nodeStatus": "Connected"}], "version": "1.0.0"}

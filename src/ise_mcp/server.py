@@ -8,7 +8,7 @@ import httpx
 from fastmcp import FastMCP
 from fastmcp.server.auth import AuthProvider
 
-from ise_mcp._core import ServerSpec, build_server
+from ise_mcp._core import ServerSpec, build_server, suite
 from ise_mcp.client import IseApp
 from ise_mcp.config import Settings
 from ise_mcp.specs import spec_sources
@@ -34,6 +34,7 @@ from ise_mcp.tools import (
     pxgrid,
     radius,
     sessions,
+    snapshot,
     sxp,
     system,
     troubleshoot,
@@ -51,10 +52,11 @@ fails: it reports which surfaces answer (ERS is often disabled or firewalled).
 Start here: "why can't X connect?" -> ise_why_auth_failed (MAC preferred); "what is this device?" ->
 ise_endpoint_360; "who failed / what connected in the last hour?" -> ise_recent_auth_failures and
 ise_get_auth_list (by NAD or user, no MAC needed); "is the deployment healthy?" ->
-ise_deployment_health; "is it the network or ISE?" (per-NAD RADIUS latency and timeouts) ->
-ise_nad_radius_stats; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD names may be partial); "what does
-policy do?" -> ise_list_policy_sets then ise_get_policy_set; "which rule would a MAB/802.1X login from
-switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk to B?" ->
+ise_deployment_health; "did my change break anything?" -> ise_snapshot(site) before, ise_compare_snapshot
+after (suite_change_check across products); "is it the network or ISE?" (per-NAD RADIUS latency and
+timeouts) -> ise_nad_radius_stats; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD names may be partial);
+"what does policy do?" -> ise_list_policy_sets then ise_get_policy_set; "which rule would a MAB/802.1X
+login from switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk to B?" ->
 ise_get_egress_matrix(source, destination); "why is this device profiled as X?" -> ise_explain_profile
 (custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status). Everything is queried from
 ISE when called: MnT keeps per-MAC auth history (CoA results are labelled kind=coa, not logins) and has
@@ -137,6 +139,8 @@ def create_server(
             workflows.register,
             config_export.register,
             config_import.register,
+            snapshot.register,
+            suite.register,
         ],
         status=IseApp.status,
         spec_sources=spec_sources,
