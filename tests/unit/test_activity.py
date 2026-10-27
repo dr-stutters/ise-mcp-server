@@ -297,3 +297,63 @@ async def test_recent_failures_tolerates_lookup_errors_and_flags_truncation(mock
     assert out["coverage"]["truncated_macs"] == [busy]
     assert out["coverage"]["lookup_errors"][0].startswith("52:54:00:00:00:02")
     assert out["coverage"]["capped"] is False
+
+
+# MAC-less RADIUS (#84): router `test aaa` / device-admin logins have no Calling-Station-Id.
+EDGE_IP = "192.0.2.14"
+
+
+def mac_less_session(time: str, *, passed: bool) -> str:
+    """Shaped like tests/fixtures/mnt_session.xml with an empty calling_station_id (router login)."""
+    reason = "" if passed else "<failure_reason>22040 Wrong password</failure_reason>"
+    return xml(
+        f"<sessionParameters><passed>{int(passed)}</passed><failed>{int(not passed)}</failed>"
+        f"<user_name>mcp-probe</user_name><nas_ip_address>{EDGE_IP}</nas_ip_address>"
+        "<calling_station_id></calling_station_id><network_device_name>mcp-br1</network_device_name>"
+        f"<auth_acs_timestamp>{time}</auth_acs_timestamp>{reason}<message_code>5400</message_code>"
+        "<service_type>Login</service_type></sessionParameters>"
+    )
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+async def test_recent_failures_user_reads_mac_less_session(mock: respx.MockRouter) -> None:
+    mock.get("/admin/API/mnt/FailureReasons").respond(text=FAILURE_REASONS_XML)
+    mock.get(url__regex=r".*/Session/AuthList/.*").respond(text=EMPTY_LIST)
+    mock.get("/admin/API/mnt/Session/UserName/mcp-probe").respond(
+        text=mac_less_session(_now_iso(), passed=False)
+    )
+    mock.get("/ers/config/networkdevice").respond(json=ers_page([]))
+    out = body(
+        await call_tool(
+            make_server(),
+            "ise_recent_auth_failures",
+            {"user": "mcp-probe", "nad": EDGE_IP, "include_endpoint_db": False, "response_format": "json"},
+        )
+    )
+    assert out["failed_attempts"] == 1
+    [row] = out["results"]
+    assert row["user"] == "mcp-probe" and row["nas_ip"] == EDGE_IP and row.get("mac") is None
+    assert row["failure_reason"] == "22040 Wrong password"
+    assert out["by_nad"] == {"mcp-br1": 1}
+    assert out["coverage"]["users_checked"] == {"mcp-probe": "session in the window"}
+    assert "mac_less_radius" not in out["coverage"]
+
+
+async def test_recent_failures_user_session_passed_is_not_a_failure(mock: respx.MockRouter) -> None:
+    mock.get("/admin/API/mnt/FailureReasons").respond(text=FAILURE_REASONS_XML)
+    mock.get(url__regex=r".*/Session/AuthList/.*").respond(text=EMPTY_LIST)
+    mock.get("/admin/API/mnt/Session/UserName/mcp-probe").respond(
+        text=mac_less_session(_now_iso(), passed=True)
+    )
+    out = body(
+        await call_tool(
+            make_server(), "ise_recent_auth_failures", {"user": "mcp-probe", "include_endpoint_db": False}
+        )
+    )
+    assert out["failed_attempts"] == 0
+    note = out["coverage"]["mac_less_radius"]
+    assert "test aaa" in note and "Live Logs" in note
+    assert "mac_less_radius" in out["note"]

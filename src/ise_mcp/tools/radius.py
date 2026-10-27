@@ -35,7 +35,7 @@ from ise_mcp._core import (
 from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import gather_limited
-from ise_mcp.tools.activity import MNT_TIME, candidate_macs, nad_filter
+from ise_mcp.tools.activity import MAC_LESS_NOTE, MNT_TIME, candidate_macs, nad_filter, user_session_records
 from ise_mcp.tools.sessions import auth_history, is_coa_record
 
 MAX_WINDOW_MINUTES = 7 * 24 * 60
@@ -212,7 +212,10 @@ def compare(now: dict[str, dict[str, Any]], before: dict[str, dict[str, Any]]) -
 
 def verdict(rows: dict[str, dict[str, Any]], slow: list[dict[str, Any]], rose: list[dict[str, Any]]) -> str:
     if not rows:
-        return "No authentication record in the window: nothing to measure."
+        return (
+            "No authentication record in the window: nothing to measure. MAC-less RADIUS (device admin, "
+            "VPN, router 'test aaa') is not in MnT's per-MAC history: see coverage.mac_less_radius."
+        )
     lines: list[str] = []
     for s in slow:
         lines.append(
@@ -251,6 +254,13 @@ def register(reg: ToolRegistrar) -> None:
             list[str] | None,
             Field(description="MACs to read first (e.g. the branch's clients from 'show access-session')"),
         ] = None,
+        user: Annotated[
+            str | None,
+            Field(
+                description="Also read this exact username's latest MnT session: covers MAC-less RADIUS "
+                "(device admin, VPN, a router's 'test aaa') that the per-MAC history never shows"
+            ),
+        ] = None,
         max_lookups: Annotated[
             int, Field(ge=1, le=500, description="Most MACs to read history for (one MnT call each)")
         ] = 100,
@@ -279,7 +289,9 @@ def register(reg: ToolRegistrar) -> None:
         not shown: the NAD's retransmits and RADIUS that ISE drops silently (unknown NAD, wrong shared
         secret; check ise_audit_nads). MnT history is per MAC and leaves out repeated successful logins,
         so this reads a capped set of candidate MACs (given, sessions in the window, endpoint database)
-        and reports its coverage. The window always ends now."""
+        and reports its coverage. RADIUS without a MAC (device admin, VPN, a router's 'test aaa') is not
+        in that history: user= adds that user's latest MnT session, and the result says so when nothing
+        was found. The window always ends now."""
         app: IseApp = get_client(ctx)
         if compare_previous and since_minutes * 2 > MAX_WINDOW_MINUTES:
             raise InvalidRequest(
@@ -306,6 +318,13 @@ def register(reg: ToolRegistrar) -> None:
         mac_list = list(cand.macs)
         per_mac = await gather_limited(mac_list, history)
         truncated = [m for m, recs in zip(mac_list, per_mac, strict=True) if len(recs) >= RECORDS_PER_MAC]
+        by_user = (
+            await user_session_records(app, [user.strip()], prev_start, end, set(mac_list))
+            if user and user.strip()
+            else None
+        )
+        if by_user:
+            per_mac.append(by_user.records)
         current: list[dict[str, Any]] = []
         previous: list[dict[str, Any]] = []
         coa_skipped = 0
@@ -338,8 +357,13 @@ def register(reg: ToolRegistrar) -> None:
             )
         if truncated:
             coverage["truncated_macs"] = truncated[:20]
+        if by_user:
+            coverage["users_checked"] = by_user.found
+            lookup_errors += by_user.errors
         if lookup_errors:
             coverage["lookup_errors"] = lookup_errors[:10]
+        if not current:
+            coverage["mac_less_radius"] = MAC_LESS_NOTE
         extra: dict[str, Any] = {
             "window_utc": {"start": start.strftime(MNT_TIME), "end": end.strftime(MNT_TIME)},
             "verdict": verdict(rows, slow, rose),

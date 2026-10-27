@@ -213,6 +213,85 @@ async def candidate_macs(
     return out
 
 
+# RADIUS without a Calling-Station-Id MAC (device admin over RADIUS, VPN, a router's `test aaa`) never
+# reaches the per-MAC AuthStatus history; the only MnT read not keyed by MAC is the user's latest
+# session (Session/UserName). Seen live (Wave 7, 2026-10-24): an edge's `test aaa` Access-Reject left
+# no per-MAC record, and the failed user had no MnT session either.
+MAC_LESS_NOTE = (
+    "MAC-less RADIUS (device admin, VPN, a router's 'test aaa') carries no Calling-Station-Id MAC, so "
+    "MnT's per-MAC history never shows it. Pass user=<name> to read that user's latest MnT session "
+    "(Session/UserName; a failed login often has none), or look in the GUI live log (Operations > "
+    "RADIUS > Live Logs, filtered by the NAS IP or user)."
+)
+
+
+def mnt_timestamp(text: Any) -> datetime | None:
+    """An MnT ISO 8601 time ('2026-10-14T12:21:14.864Z') as aware UTC; None when absent or unparseable."""
+    try:
+        dt = datetime.fromisoformat(str(text or "").strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+def _flag(value: Any) -> bool | None:
+    text = str(value if value is not None else "").strip().lower()
+    if text in ("true", "1"):
+        return True
+    if text in ("false", "0"):
+        return False
+    return None
+
+
+def session_as_record(s: dict[str, Any]) -> dict[str, Any]:
+    """An MnT Session/UserName answer in the shape of an AuthStatus record (auth time, PASS/FAIL)."""
+    rec = dict(s)
+    rec["acs_timestamp"] = s.get("auth_acs_timestamp") or s.get("acs_timestamp")
+    failed = bool(str(s.get("failure_reason") or "").strip()) or _flag(s.get("failed")) is True
+    rec["passed"] = "false" if failed or _flag(s.get("passed")) is False else "true"
+    return rec
+
+
+class UserRecords:
+    """Records from users' latest MnT sessions, with what each lookup found."""
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+        self.found: dict[str, str] = {}
+        self.errors: list[str] = []
+
+
+async def user_session_records(
+    app: IseApp, users: list[str], start: datetime, end: datetime, skip_macs: set[str]
+) -> UserRecords:
+    """Each user's latest MnT session (Session/UserName/{user}) as an auth record when its
+    authentication falls in [start, end]. Skips a session whose MAC was already read per MAC."""
+    out = UserRecords()
+    for user in users:
+        try:
+            data = await app.mnt_get(f"Session/UserName/{quote(user, safe='')}")
+        except (UpstreamError, NotFound) as e:
+            out.errors.append(f"{user}: {str(e)[:120]}")
+            continue
+        if not isinstance(data, dict):
+            out.found[user] = "no MnT session"
+            continue
+        rec = session_as_record(data)
+        at = mnt_timestamp(rec.get("acs_timestamp"))
+        if at is None or not start <= at <= end:
+            when = rec.get("acs_timestamp") or "no auth time"
+            out.found[user] = f"latest session outside the window ({when})"
+            continue
+        mac = rec.get("calling_station_id")
+        with contextlib.suppress(InvalidRequest):
+            if mac and normalize_mac(str(mac)) in skip_macs:
+                out.found[user] = "session already read per MAC"
+                continue
+        out.found[user] = "session in the window"
+        out.records.append(rec)
+    return out
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="Sessions authenticated in a time window")
     async def ise_get_auth_list(
@@ -287,7 +366,13 @@ def register(reg: ToolRegistrar) -> None:
         nad: Annotated[
             str | None, Field(description="Only failures through this NAD: name, or a NAS IP")
         ] = None,
-        user: Annotated[str | None, Field(description="Filter: username contains (case-insensitive)")] = None,
+        user: Annotated[
+            str | None,
+            Field(
+                description="Filter: username contains (case-insensitive). Also reads this exact user's "
+                "latest MnT session, which covers MAC-less RADIUS (device admin, VPN, router 'test aaa')"
+            ),
+        ] = None,
         macs: Annotated[
             list[str] | None,
             Field(description="MACs to check first (e.g. from the switch's 'show access-session')"),
@@ -313,7 +398,9 @@ def register(reg: ToolRegistrar) -> None:
         switch X, and why?". MnT can only return failures per MAC, so this checks a capped set of
         candidate MACs: the ones you pass, then sessions authenticated in the window, then the endpoint
         database. The result says how many MACs were checked and whether more exist; a failing MAC
-        that ISE never stored is only found when you pass it. RADIUS from an unknown NAD or with a
+        that ISE never stored is only found when you pass it. RADIUS without a MAC (device admin, VPN,
+        a router's 'test aaa') is not in the per-MAC history: pass user= to also read that user's
+        latest MnT session; the result says so when nothing was found. RADIUS from an unknown NAD or with a
         wrong shared secret leaves no record at all (check ise_audit_nads). Repeated successful logins
         may be missing from MnT's history, so a MAC listed here may have passed since: ise_find_session
         has its newest authentication. The window always ends now. The list holds one row per failed
@@ -339,6 +426,13 @@ def register(reg: ToolRegistrar) -> None:
         truncated = [
             m for m, recs in zip(mac_list, records_per_mac, strict=True) if len(recs) >= RECORDS_PER_MAC
         ]
+        by_user = (
+            await user_session_records(app, [user.strip()], start, end, set(mac_list))
+            if user and user.strip()
+            else None
+        )
+        if by_user:
+            records_per_mac.append(by_user.records)
         failures: list[dict[str, Any]] = []
         coa_skipped = 0
         for recs in records_per_mac:
@@ -412,8 +506,13 @@ def register(reg: ToolRegistrar) -> None:
                 f"These MACs have {RECORDS_PER_MAC}+ records in the window, so older attempts were not read; "
                 "use ise_get_auth_history with a shorter window."
             )
+        if by_user:
+            coverage["users_checked"] = by_user.found
+            lookup_errors += by_user.errors
         if lookup_errors:
             coverage["lookup_errors"] = lookup_errors[:10]
+        if not failures:
+            coverage["mac_less_radius"] = MAC_LESS_NOTE
         extra: dict[str, Any] = {
             "window_utc": {"start": start.strftime(MNT_TIME), "end": end.strftime(MNT_TIME)},
             "failed_attempts": len(failures),
@@ -434,7 +533,8 @@ def register(reg: ToolRegistrar) -> None:
             extra["note"] = (
                 f"No failed attempt among the {len(candidates)} MACs checked in the last "
                 f"{since_minutes} minutes. Silent drops (unknown NAD 11007, wrong shared secret 11036) "
-                "leave no MnT record."
+                "leave no MnT record, and MAC-less RADIUS (device admin, VPN, router 'test aaa') is not "
+                "in the per-MAC history: see coverage.mac_less_radius."
             )
         rows = [
             {k: f.get(k) for k in ("time", "mac", "user", "nad", "nas_ip", "method", "failure_reason")}
