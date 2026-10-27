@@ -12,7 +12,7 @@ from ise_mcp._core import InvalidRequest
 from ise_mcp._core.formatting import MASK
 from ise_mcp.tools.policy_edit import condition_node
 from ise_mcp.tools.writes import masked_changes
-from tests.unit.conftest import BASE, ers_page, make_server
+from tests.unit.conftest import BASE, ers_page, fixture_json, make_server
 
 LIB = {"wired_mab": {"id": "c1", "name": "Wired_MAB"}}
 
@@ -329,3 +329,121 @@ async def test_create_authz_profile_bad_av_pair(mock: respx.MockRouter) -> None:
             raise_on_error=False,
         )
     assert res.is_error and "Dictionary:attribute=value" in res.content[0].text  # type: ignore[union-attr]
+
+
+# --- ise_update_nad remove_radius / remove_tacacs (I84) ----------------------------------------
+
+
+def mock_dual_nad(mock: respx.MockRouter, *, keep_on_put: str | None = None) -> tuple[dict[str, Any], Any]:
+    """The recorded NAD (RADIUS + TACACS+). A PUT replaces what GET returns next, unless keep_on_put names
+    a settings object ISE keeps anyway (to test the read-back)."""
+    nad = fixture_json("ers_networkdevice.json")["NetworkDevice"]
+    nad_id, name = nad["id"], nad["name"]
+    state: dict[str, Any] = {"nad": nad}
+
+    def put(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)["NetworkDevice"]
+        if keep_on_put:
+            sent[keep_on_put] = state["nad"][keep_on_put]
+        state["nad"] = {**sent, "link": nad["link"]}
+        return httpx.Response(200, json={"UpdatedFieldsList": {}})
+
+    mock.get("/ers/config/networkdevice", params={"filter": f"name.EQ.{name}"}).respond(
+        json=ers_page([{"id": nad_id, "name": name}])
+    )
+    mock.get(f"/ers/config/networkdevice/{nad_id}").mock(
+        side_effect=lambda _r: httpx.Response(200, json={"NetworkDevice": state["nad"]})
+    )
+    route = mock.put(f"/ers/config/networkdevice/{nad_id}").mock(side_effect=put)
+    return nad, route
+
+
+async def test_update_nad_remove_radius_keeps_tacacs(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock)
+    original_tacacs = json.dumps(nad["tacacsSettings"], sort_keys=True)
+    preview, applied = await two_step("ise_update_nad", {"device": nad["name"], "remove_radius": True})
+    assert preview["status"] == "preview"
+    assert preview["preview"]["removed"] == ["RADIUS removed (secret was set)"]
+    assert any("11007" in s and "192.0.2.50/32" in s for s in preview["side_effects"])
+    change = preview["preview"]["changes"]["authenticationSettings"]
+    assert change["removed"] is True and change["to"] is None
+    assert "REDACTED" not in json.dumps(preview)  # the stored keys never show
+    assert applied["status"] == "applied"
+    body = json.loads(put.calls.last.request.content)["NetworkDevice"]
+    assert "authenticationSettings" not in body
+    assert json.dumps(body["tacacsSettings"], sort_keys=True) == original_tacacs
+    assert body["snmpsettings"] == nad["snmpsettings"] and "link" not in body
+
+
+async def test_update_nad_remove_tacacs_keeps_radius(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock)
+    preview, applied = await two_step("ise_update_nad", {"device": nad["name"], "remove_tacacs": True})
+    assert preview["preview"]["removed"] == ["TACACS+ removed (secret was set)"]
+    assert any("TACACS+" in s and "local login" in s for s in preview["side_effects"])
+    assert applied["status"] == "applied"
+    body = json.loads(put.calls.last.request.content)["NetworkDevice"]
+    assert "tacacsSettings" not in body
+    assert body["authenticationSettings"] == nad["authenticationSettings"]
+
+
+async def test_update_nad_remove_last_protocol_blocked(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock)
+    preview, _ = await two_step(
+        "ise_update_nad", {"device": nad["name"], "remove_radius": True, "remove_tacacs": True}
+    )
+    assert preview["status"] == "blocked"
+    assert any("ise_delete_nad" in b for b in preview["blockers"])
+    assert not put.called
+
+
+async def test_update_nad_remove_only_protocol_blocked(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock)
+    del nad["tacacsSettings"]  # a RADIUS-only device
+    preview, _ = await two_step("ise_update_nad", {"device": nad["name"], "remove_radius": True})
+    assert preview["status"] == "blocked"
+    assert any("neither RADIUS nor TACACS+" in b and "ise_delete_nad" in b for b in preview["blockers"])
+    assert not put.called
+
+
+async def test_update_nad_switch_protocol_allowed(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock)
+    del nad["tacacsSettings"]
+    preview, applied = await two_step(
+        "ise_update_nad", {"device": nad["name"], "remove_radius": True, "tacacs_secret": "NewTac1"}
+    )
+    assert preview["status"] == "preview" and "NewTac1" not in json.dumps(preview)
+    body = json.loads(put.calls.last.request.content)["NetworkDevice"]
+    assert "authenticationSettings" not in body and body["tacacsSettings"]["sharedSecret"] == "NewTac1"
+
+
+@pytest.mark.parametrize(
+    ("flag", "secret_arg"), [("remove_radius", "radius_secret"), ("remove_tacacs", "tacacs_secret")]
+)
+async def test_update_nad_remove_with_secret_blocked(
+    mock: respx.MockRouter, flag: str, secret_arg: str
+) -> None:
+    nad, put = mock_dual_nad(mock)
+    preview, _ = await two_step("ise_update_nad", {"device": nad["name"], flag: True, secret_arg: "s3cret"})
+    assert preview["status"] == "blocked"
+    assert any(flag in b and secret_arg in b for b in preview["blockers"])
+    assert "s3cret" not in json.dumps(preview)
+    assert not put.called
+
+
+async def test_update_nad_remove_missing_protocol_blocked(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock)
+    del nad["tacacsSettings"]
+    preview, _ = await two_step("ise_update_nad", {"device": nad["name"], "remove_tacacs": True})
+    assert preview["status"] == "blocked"
+    assert any("no TACACS+ shared secret" in b for b in preview["blockers"])
+
+
+async def test_update_nad_remove_reports_when_ise_keeps_it(mock: respx.MockRouter) -> None:
+    nad, put = mock_dual_nad(mock, keep_on_put="authenticationSettings")
+    server = make_server(mcp_enable_writes=True)
+    async with Client(server) as c:
+        args = {"device": nad["name"], "remove_radius": True}
+        preview = (await c.call_tool("ise_update_nad", args)).structured_content
+        r = await c.call_tool("ise_update_nad", {**args, "confirm": preview["confirm"]}, raise_on_error=False)
+    assert put.called
+    assert r.is_error and "still has RADIUS" in r.content[0].text

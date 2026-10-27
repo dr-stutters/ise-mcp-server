@@ -202,6 +202,85 @@ async def ers_put(app: IseApp, resource: str, wrapper: str, obj: dict[str, Any])
     return await app.ers_request("PUT", f"/ers/config/{resource}/{obj['id']}", json={wrapper: put_body(obj)})
 
 
+def nad_has_radius(nad: dict[str, Any]) -> bool:
+    return bool((nad.get("authenticationSettings") or {}).get("radiusSharedSecret"))
+
+
+def nad_has_tacacs(nad: dict[str, Any]) -> bool:
+    return bool((nad.get("tacacsSettings") or {}).get("sharedSecret"))
+
+
+def nad_protocol_removals(
+    current: dict[str, Any],
+    desired: dict[str, Any],
+    *,
+    remove_radius: bool,
+    remove_tacacs: bool,
+    radius_secret: str | None,
+    tacacs_secret: str | None,
+    blockers: list[str],
+    side_effects: list[str],
+) -> list[str]:
+    """Apply remove_radius / remove_tacacs to `desired` (in place) and return the protocols removed.
+
+    The PUT body is built from ISE's own GET, so the protocol that stays keeps its stored key without it
+    passing through the tool arguments. Dropping the settings object is how ERS stores "protocol off"
+    (a TACACS-only NAD has no authenticationSettings)."""
+    removed: list[str] = []
+    name = current.get("name")
+    for flag, label, key, secret_arg, has in (
+        ("remove_radius", "RADIUS", "authenticationSettings", "radius_secret", nad_has_radius),
+        ("remove_tacacs", "TACACS+", "tacacsSettings", "tacacs_secret", nad_has_tacacs),
+    ):
+        wanted = remove_radius if label == "RADIUS" else remove_tacacs
+        secret = radius_secret if label == "RADIUS" else tacacs_secret
+        if not wanted:
+            continue
+        if secret is not None:
+            blockers.append(f"{flag} and {secret_arg} contradict each other: give one")
+        elif not has(current):
+            blockers.append(f"{name} has no {label} shared secret set: nothing to remove")
+        else:
+            desired.pop(key, None)
+            removed.append(label)
+    if removed and not nad_has_radius(desired) and not nad_has_tacacs(desired):
+        blockers.append(
+            f"This would leave {name} with neither RADIUS nor TACACS+; to take the device out of ISE use "
+            "ise_delete_nad (dangerous)"
+        )
+    ips = ", ".join(nad_ip_text(current)) or "its IPs"
+    if "RADIUS" in removed:
+        side_effects.append(
+            f"RADIUS from {ips} is dropped from now on (11007 in the live log): network access through "
+            "this device stops authenticating"
+        )
+    if "TACACS+" in removed:
+        side_effects.append(
+            f"TACACS+ from {ips} is no longer accepted: device admin logins through ISE fail (keep a "
+            "local login on the device)"
+        )
+    return removed
+
+
+def nad_ip_text(nad: dict[str, Any]) -> list[str]:
+    return [
+        f"{e.get('ipaddress')}/{e.get('mask', 32)}"
+        for e in nad.get("NetworkDeviceIPList") or []
+        if isinstance(e, dict)
+    ]
+
+
+async def check_protocols_removed(app: IseApp, nad_id: str, removed: list[str]) -> None:
+    """Read the NAD back: ERS PUT can keep a nested object it was not sent, so prove the removal took."""
+    after = await app.ers_get("networkdevice", nad_id)
+    still = [p for p in removed if (nad_has_radius(after) if p == "RADIUS" else nad_has_tacacs(after))]
+    if still:
+        raise UpstreamError(
+            f"ISE accepted the update but still has {' and '.join(still)} on the device: ERS kept the "
+            "settings it was not sent. Untick the protocol in the GUI (Network Devices > the device)"
+        )
+
+
 async def ers_post(app: IseApp, resource: str, wrapper: str, body: dict[str, Any]) -> dict[str, Any]:
     app.__dict__.pop("_nad_cache", None)
     return await app.ers_create(resource, {wrapper: body})
@@ -418,9 +497,25 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "device with PUSH ID (HTTPS) support (IOS XE 26.2.1+, REST API v3)"
             ),
         ] = None,
+        remove_radius: Annotated[
+            bool,
+            Field(
+                description="Switch RADIUS off on the device (e.g. back to TACACS+ only); the stored "
+                "TACACS+ key is kept without passing it. Not with radius_secret"
+            ),
+        ] = False,
+        remove_tacacs: Annotated[
+            bool,
+            Field(
+                description="Switch TACACS+ off on the device (RADIUS only); the stored RADIUS secret is "
+                "kept. Not with tacacs_secret"
+            ),
+        ] = False,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
-        """Change a network device: IPs, shared secrets, device groups, description, CoA port, name, or
+        """Change a network device: IPs, shared secrets, device groups, description, CoA port, name,
+        switch RADIUS or TACACS+ off (remove_radius / remove_tacacs, keeping the other protocol's stored
+        key), or
         TrustSec settings: device id/password (what the switch presents in 'cts credentials' to get a PAC
         and download environment data and policy; defaults for the refresh timers and CoA-based updates
         are set the first time), the HTTP REST API username/password for the HTTPS policy download
@@ -497,13 +592,35 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             patch["name"] = new_name
             if new_name != current.get("name") and await exists(app, "networkdevice", new_name):
                 blockers.append(f"A network device named {new_name!r} already exists")
-        if not patch:
+        if not patch and not remove_radius and not remove_tacacs:
             raise InvalidRequest("Nothing to change: give at least one field")
         desired = deep_merge(current, patch)
         side = ["RADIUS from this device fails until its secret matches"] if radius_secret is not None else []
+        removed = nad_protocol_removals(
+            current,
+            desired,
+            remove_radius=remove_radius,
+            remove_tacacs=remove_tacacs,
+            radius_secret=radius_secret,
+            tacacs_secret=tacacs_secret,
+            blockers=blockers,
+            side_effects=side,
+        )
+        details: dict[str, Any] = {
+            "changes": masked_changes(current, desired, replace=True)
+        }  # ERS PUT replaces
+        if removed:
+            details["removed"] = [f"{p} removed (secret was set)" for p in removed]
+
+        async def apply() -> Any:
+            result = await ers_put(app, "networkdevice", "NetworkDevice", desired)
+            if removed:
+                await check_protocols_removed(app, str(desired["id"]), removed)
+            return result
+
         plan = Plan(
             f"Update network device {current.get('name')}",
-            details={"changes": masked_changes(current, desired, replace=True)},  # ERS PUT replaces
+            details=details,
             fingerprint=fingerprint(current),
             side_effects=side,
             blockers=blockers,
@@ -526,10 +643,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "trustsec_rest_user": trustsec_rest_user,
                 "trustsec_rest_password": trustsec_rest_password,
                 "trustsec_push_id": trustsec_push_id,
+                "remove_radius": remove_radius,
+                "remove_tacacs": remove_tacacs,
             },
             confirm=confirm,
             plan=plan,
-            apply=lambda: ers_put(app, "networkdevice", "NetworkDevice", desired),
+            apply=apply,
         )
 
     @reg.write(title="Create network device group")
