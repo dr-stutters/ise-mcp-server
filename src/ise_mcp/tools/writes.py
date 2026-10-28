@@ -533,6 +533,10 @@ async def references(app: IseApp, kind: str, obj: dict[str, Any]) -> list[str]:
             listed = [x.strip().lower() for x in str(seq.get("serverList") or "").split(",")]
             if name.lower() in listed:
                 return [f"Listed in TACACS+ server sequence {seq.get('name')}"]
+    if kind in ("external_radius_server", "radius_server_sequence"):
+        from ise_mcp.tools.radius_proxy import proxy_references  # noqa: PLC0415 - it imports this module
+
+        return await proxy_references(app, kind, obj)
     return []
 
 
@@ -571,6 +575,8 @@ DELETE_KINDS = {
     "ad_join_point": "activedirectory",
     "tacacs_server": "tacacsexternalservers",
     "tacacs_sequence": "tacacsserversequence",
+    "external_radius_server": "externalradiusserver",
+    "radius_server_sequence": "radiusserversequence",
     "sponsor_group": "sponsorgroup",
     "guest_type": "guesttype",
     "allowed_protocols": "allowedprotocols",
@@ -2378,6 +2384,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "ad_join_point",
                 "tacacs_server",
                 "tacacs_sequence",
+                "external_radius_server",
+                "radius_server_sequence",
                 "sponsor_group",
                 "guest_type",
                 "allowed_protocols",
@@ -2396,12 +2404,14 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
         SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server
-        sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts:
-        ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or
-        TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself
-        is changed with ise_set_default_egress_rule, never deleted). Preview-first: shows
-        the object and what still references it (the ise_where_used scan: rules, profiles, sequences,
-        matrix cells, IP-SGT mappings, devices, members), which blocks the delete.
+        sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS
+        server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad),
+        sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service
+        (blocked while a policy set selects it) or TrustSec egress matrix cell (its SGT pair then falls to
+        the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never
+        deleted). Preview-first: shows the object and what still references it (the ise_where_used scan:
+        rules, profiles, sequences, matrix cells, IP-SGT mappings, devices, members), which blocks the
+        delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]

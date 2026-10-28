@@ -1072,6 +1072,10 @@
       "tier": "write",
       "title": "Create or update an endpoint"
     },
+    "ise_set_external_radius_server": {
+      "tier": "write",
+      "title": "Create or update an external RADIUS server"
+    },
     "ise_set_guest_type": {
       "tier": "write",
       "title": "Create or update a guest type"
@@ -1095,6 +1099,10 @@
     "ise_set_pxgrid_settings": {
       "tier": "write",
       "title": "Set the pxGrid approval settings"
+    },
+    "ise_set_radius_server_sequence": {
+      "tier": "write",
+      "title": "Create or update a RADIUS server sequence"
     },
     "ise_set_repository": {
       "tier": "write",
