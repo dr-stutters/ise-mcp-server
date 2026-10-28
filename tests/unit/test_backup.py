@@ -13,10 +13,11 @@ import respx
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from ise_mcp.tools.backup import NO_KEY, NO_REPOSITORY
+from ise_mcp._core.testing import call_tool
+from ise_mcp.tools.backup import KEY_RULES, NO_KEY, NO_REPOSITORY, backup_key_problems
 from tests.unit.conftest import make_server
 
-KEY = "Lab-Backup-Key-2026"
+KEY = "LabBackup_2026"  # meets ISE's rules (8-15 of [A-Za-z0-9_#], upper, lower, digit)
 LAST = "/api/v1/backup-restore/config/last-backup-status"
 NULLS = {
     k: None
@@ -207,6 +208,66 @@ async def test_blockers(
     out, _ = await two_step({"repository": name, "name": "pre-gbp"})
     assert out["status"] == "blocked" and not post.called
     assert any(blocker in b for b in out["blockers"]), out["blockers"]
+
+
+@pytest.mark.parametrize(
+    ("key", "problem"),
+    [
+        ("Ab1_x", "shorter than 8 characters"),
+        ("Ab1" + "x" * 13, "longer than 15 characters"),
+        ("Lab-Backup-26", "has a character outside [A-Za-z0-9_#]"),
+        ("labbackup_2026", "has no upper-case letter"),
+        ("LABBACKUP_2026", "has no lower-case letter"),
+        ("LabBackup_key", "has no digit"),
+        ("MyCiscoKey2026", "contains 'cisco'"),
+    ],
+)
+async def test_key_breaking_ise_rules_blocks(mock: respx.MockRouter, key: str, problem: str) -> None:
+    """#132: ISE 3.5 answers 400 for a key that breaks its rules, so the preview refuses it, naming the rule
+    and the key's length but never the key or its characters."""
+    mock.get("/api/v1/repository").respond(json={"response": [SFTP]})
+    mock.get(LAST).respond(json=status(NULLS))
+    post = mock.post("/api/v1/backup-restore/config/backup").respond(202, json={})
+    out, done = await two_step({"repository": "lab-sftp", "name": "pre-gbp"}, key=key)
+    assert out["status"] == "blocked" and done is None and not post.called
+    assert backup_key_problems(key) == [problem]
+    [blocker] = out["blockers"]
+    assert problem in blocker and f"is {len(key)} characters" in blocker and KEY_RULES in blocker
+    assert key not in json.dumps(out)
+
+
+def test_key_problems_all_at_once() -> None:
+    assert backup_key_problems("a-") == [
+        "shorter than 8 characters",
+        "has a character outside [A-Za-z0-9_#]",
+        "has no upper-case letter",
+        "has no digit",
+    ]
+    assert backup_key_problems("Ab1#_xyz") == [] and backup_key_problems("Ab1" + "x" * 12) == []
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        (None, {"configured": False}),
+        (KEY, {"configured": True, "length": len(KEY), "ok": True}),
+        ("x" * 32, {"configured": True, "length": 32, "ok": False}),
+    ],
+)
+async def test_status_checks_the_key(
+    mock: respx.MockRouter, key: str | None, expected: dict[str, Any]
+) -> None:
+    extra: dict[str, Any] = {"backup_encryption_key": key} if key else {}
+    out = await call_tool(make_server(**extra), "ise_status", {})
+    got = out["ise"]["backup_key"]
+    assert {k: got[k] for k in expected} == expected
+    if key:
+        assert key not in json.dumps(out)
+    if expected.get("ok") is False:
+        assert got["problems"] == ["longer than 15 characters", "has no upper-case letter", "has no digit"]
+        assert got["rules"] == KEY_RULES
+    elif expected.get("ok"):
+        assert "problems" not in got
 
 
 async def test_errors_never_carry_the_key(mock: respx.MockRouter) -> None:
