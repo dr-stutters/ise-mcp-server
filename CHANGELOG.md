@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.0 (2026-10-28)
+
+`ise_where_used` (references to an ISE object), prompt `ise_onboard_nad` (day-1 switch onboarding), MAC-less RADIUS in the
+per-NAD statistics and RADIUS/TACACS+ removal on a NAD. Core stays 0.15.0. 151 tools (81 read, 52 write, 18 dangerous) and
+seven prompts.
+
+### Added
+- `ise_where_used(kind, name)` (I64, #42, #104): which policy sets, rules, profiles, sequences, egress cells and NADs reference
+  an ISE object; `ise_delete_object` now blocks on rules that still match the object.
+- Prompt `ise_onboard_nad` (I45, #11, #103): onboard an access switch into ISE (NDGs, NAD, switch AAA preview via cml/catc, test
+  login, session, recorded undo, site coverage check).
+
+### Changed
+- `ise_nad_radius_stats` and `ise_recent_auth_failures` cover MAC-less RADIUS (router/admin logins) via `user=` (MnT
+  Session/UserName) and say plainly when it is not visible (#84, #88).
+- `ise_update_nad` can switch RADIUS or TACACS+ off on a network device (`remove_radius` / `remove_tacacs`) and keeps the other
+  protocol's stored key (I84, #87).
+
 ## 0.14.1 (2026-10-24)
 
 Prompt `ise_onboard_sdwan_edges` for Catalyst SD-WAN edge AAA. Core stays 0.15.0. 150 tools and six prompts.

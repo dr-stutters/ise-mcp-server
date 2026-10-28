@@ -857,10 +857,14 @@
       "tier": "write",
       "title": "Update policy set"
     },
+    "ise_where_used": {
+      "tier": "read",
+      "title": "Where is an ISE object used"
+    },
     "ise_why_auth_failed": {
       "tier": "read",
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.14.1"
+  "version": "0.15.0"
 }
