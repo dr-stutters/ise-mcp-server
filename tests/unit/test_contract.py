@@ -59,7 +59,11 @@ PROMPT_SAMPLES = {
         "ise_address": "192.0.2.10",
         "test_user": "alice",
     },
+    "ise_deployment_health_review": {"cert_warn_days": "60", "site": "Global/SYD/Bldg-1", "role": "ACCESS"},
 }
+# Prompts under the core snapshot kit (tests/snapshots/prompts/<name>.md). The kit reports any other
+# snapshot file as stale, so each snapshot test compares this whole set.
+SNAPSHOT_PROMPTS = ("ise_onboard_nad", "ise_deployment_health_review")
 # win = the Windows_Server MCP (no manifest: its references are checked for `uses` only).
 KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win"}
 # Every fmc_*/catc_*/catsdwan_* tool a prompt references must exist in that server's manifest
@@ -86,13 +90,14 @@ async def test_contract_read_only() -> None:
 async def test_suite_pack() -> None:
     # Core's suite_* prompts (C48) are registered and this server's leg tools (ise_snapshot,
     # ise_compare_snapshot) exist. Pending: peer snapshot tools not in their committed manifests yet
-    # (catc D118, fmc F89). cat-sdwan's manifest (0.4.0, I81) has catsdwan_snapshot, so its leg is checked.
+    # (catc D118). cat-sdwan's manifest (0.4.0, I81) has catsdwan_snapshot and fmc's (0.17.2, F89)
+    # fmc_snapshot, so their legs are checked.
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
     await assert_suite_pack(
         server,
         "ise",
         "tests/manifests",
-        pending=["catc_snapshot", "catc_compare_snapshot", "fmc_snapshot", "fmc_compare_snapshot"],
+        pending=["catc_snapshot", "catc_compare_snapshot"],
     )
 
 
