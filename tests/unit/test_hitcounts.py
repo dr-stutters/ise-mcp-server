@@ -144,7 +144,8 @@ async def test_policy_sets_scope_with_global_exceptions(mock: respx.MockRouter) 
     assert counts["policy_sets"] == {"total_hits": 4, "policy_sets": [{"name": "Default", "hits": 4}]}
     assert counts["global_exception"]["total_hits"] == authz_total()
     assert preview["preview"]["hits_lost"] == 4 + authz_total()
-    assert "ise_snapshot does not record" in " ".join(preview["side_effects"])
+    side = " ".join(preview["side_effects"])
+    assert "ise_snapshot and ise_export_config do not record hit counts" in side
     assert applied["result"]["reset"] == 2
     assert sets.called and glob.called
 

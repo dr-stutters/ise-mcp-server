@@ -128,8 +128,9 @@ def register(reg: ToolRegistrar) -> None:
         scope='policy_set' zeroes one set's authentication, authorization, local exception and/or MFA
         rule counters; 'global_exception' in `sections` adds the global exceptions. Only counters
         change (no policy, no sessions), but they cannot be restored: the preview lists every current
-        count that will be lost, so keep it (ise_export_config also records hitCounts). MFA sections
-        this ISE does not have are skipped. Preview-first; blast radius = counter tables reset."""
+        count that will be lost, so keep it (ise_snapshot and ise_export_config do not record hit
+        counts). MFA sections this ISE does not have are skipped. Preview-first; blast radius =
+        counter tables reset."""
         app: IseApp = get_client(ctx)
         want = list(dict.fromkeys(sections or ([] if scope == "policy_sets" else SET_SECTIONS)))
         blockers: list[str] = []
@@ -212,8 +213,8 @@ def register(reg: ToolRegistrar) -> None:
             ),
             side_effects=[
                 f"{lost} recorded hit(s) are zeroed and cannot be restored (counters only; policy and "
-                "sessions are untouched). Keep this preview, or run ise_export_config first, if the "
-                "current counts matter. ise_snapshot does not record hit counts",
+                "sessions are untouched). Keep this preview if the current counts matter: it is the only "
+                "record. ise_snapshot and ise_export_config do not record hit counts",
                 "ISE counters carry no timestamp: note the reset time to read zero-hit rules later "
                 "(ise_policy_audit after a full business cycle)",
             ],
