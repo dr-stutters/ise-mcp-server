@@ -15,6 +15,7 @@ from ise_mcp._core import NotFound, ToolRegistrar, UpstreamError, get_client, ob
 from ise_mcp.client import IseApp
 from ise_mcp.tools import admin_audit
 from ise_mcp.tools._common import gather_limited, openapi_all
+from ise_mcp.tools.lsd import lsd_state
 from ise_mcp.tools.system import _cert_row, _parse_date, _response
 
 BACKUP_MAX_AGE_DAYS = 7
@@ -354,7 +355,8 @@ def register(reg: ToolRegistrar) -> None:
         cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags
         evaluation licences and days left); AD join points; and the server's own ISE admin account
         and RBAC groups, flagged when more privileged than the enabled tiers need (I16); and an admins
-        review (Super Admin count, disabled, never-disabled, external; I74). Use it weekly
+        review (Super Admin count, disabled, never-disabled, external; I74); settings: endpoint
+        ownership and RCM (random MAC detection; 'unknown' when unreadable). Use it weekly
         or before a change.
         Details: ise_list_nodes, ise_list_patches, ise_get_backup_status, ise_list_certificates,
         ise_get_license_status."""
@@ -373,11 +375,12 @@ def register(reg: ToolRegistrar) -> None:
         )
         node_rows = check_nodes(nodes, pan_ha, f)
         hosts = [str(n["hostname"]) for n in node_rows if n.get("hostname")]
-        certs, ad, privilege, admins = await asyncio.gather(
+        certs, ad, privilege, admins, lsd = await asyncio.gather(
             system_certs(app, hosts, f),
             check_ad(app, f),
             check_admin_privilege(app, f),
             admin_audit.health_section(app, f),
+            lsd_state(app),
         )
         if not hosts:
             f.add("medium", "certificates", "System certificates were not checked: no node list.")
@@ -390,6 +393,8 @@ def register(reg: ToolRegistrar) -> None:
             "active_directory": ad,
             "server_privilege": privilege,
             "admins": admins,
+            # I89: random and changing MAC detection and endpoint ownership (Light Session Directory).
+            "settings": {"mac_randomization": lsd},
         }
         sections["certificates_checked"] = len(certs)
         summary = f.summary()

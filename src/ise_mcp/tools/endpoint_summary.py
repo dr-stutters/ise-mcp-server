@@ -28,7 +28,7 @@ from pydantic import Field
 from ise_mcp._core import NotFound, ToolRegistrar, UpstreamError, get_client, object_result
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_name_map, openapi_all
-from ise_mcp.tools.endpoints import profile_name
+from ise_mcp.tools.endpoints import is_randomized, profile_name
 from ise_mcp.tools.network import all_nads, covering
 from ise_mcp.xmlutil import as_list
 
@@ -62,18 +62,6 @@ def device_type_counts(data: Any) -> Counter[str]:
             name = str(e.get("deviceType") or "unknown").strip() or "unknown"
             out[name] += _int(e.get("total"))
     return out
-
-
-def is_randomized(mac: Any) -> bool:
-    """A locally administered unicast MAC (second hex digit 2, 6, A or E): a private / randomized MAC."""
-    text = str(mac or "").replace(":", "").replace("-", "").replace(".", "")
-    if len(text) < 2:
-        return False
-    try:
-        first = int(text[:2], 16)
-    except ValueError:
-        return False
-    return bool(first & 0x02) and not first & 0x01
 
 
 def ndg_label(group: str) -> str:

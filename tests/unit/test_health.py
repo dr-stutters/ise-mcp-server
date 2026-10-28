@@ -13,6 +13,8 @@ def _d(days: int) -> str:
     return (datetime.now(UTC) + timedelta(days=days)).strftime("%a %b %d %H:%M:%S UTC %Y")
 
 
+LSD = "/api/v1/lsd/updateLsdSettings"
+
 NODES = [
     {
         "hostname": "pan1",
@@ -69,6 +71,7 @@ def mock_deployment(mock: respx.MockRouter) -> None:
     )
     mock.get("/api/v1/repository").respond(json={"response": [{"name": "sftp-repo"}]})
     mock.get("/api/v1/rbac/admin-user").respond(json={"adminUserList": []})  # I74 admins section
+    mock.get(LSD).respond(json={"enableEPO": True, "enableRCM": False})  # I89 settings section
     mock.get("/api/v1/license/system/tier-state").respond(
         json=[
             {"name": "ESSENTIAL", "status": "ENABLED", "compliance": "COMPLIANT"},
@@ -163,6 +166,7 @@ async def test_health_standalone_evaluation_no_backup(mock: respx.MockRouter) ->
     mock.get("/ers/config/activedirectory").respond(json=ers_page([]))
     mock_adminuser(mock, "Super Admin")
     mock.get("/api/v1/rbac/admin-user").respond(json={"adminUserList": []})
+    mock.get(LSD).respond(404, json={"message": "not found"})  # older release: no LSD settings
     out = await call_tool(make_server(), "ise_deployment_health")
     out = out if isinstance(out, dict) else json.loads(str(out))
     text = json.dumps(out["findings"])
@@ -191,6 +195,7 @@ async def test_health_survives_area_errors(mock: respx.MockRouter) -> None:
     mock.get("/ers/config/activedirectory/ad1").respond(500, json={})
     mock.get("/ers/config/adminuser").respond(500, json={})
     mock.get("/api/v1/rbac/admin-user").respond(500, json={})
+    mock.get(LSD).respond(500, json={"message": "down"})
     out = await call_tool(make_server(), "ise_deployment_health")
     out = out if isinstance(out, dict) else json.loads(str(out))
     assert out["summary"]["high"] >= 1
@@ -220,3 +225,20 @@ async def test_health_privilege_ok_when_dangerous_enabled(mock: respx.MockRouter
     assert out["server_privilege"]["tiers_enabled"] == ["read", "write", "dangerous"]
     priv = [f for f in out["findings"] if f["area"] == "privilege"]
     assert priv and priv[0]["severity"] == "info"
+
+
+async def test_health_settings_mac_randomization(mock: respx.MockRouter) -> None:
+    """I89: endpoint ownership and RCM appear in the settings section."""
+    mock_deployment(mock)
+    out = await call_tool(make_server(), "ise_deployment_health")
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["settings"]["mac_randomization"] == {"endpoint_ownership": True, "rcm": False}
+
+
+async def test_health_settings_unknown_when_unreadable(mock: respx.MockRouter) -> None:
+    mock_deployment(mock)
+    mock.get(LSD).respond(500, json={"message": "down"})
+    out = await call_tool(make_server(), "ise_deployment_health")
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["settings"]["mac_randomization"] == {"endpoint_ownership": "unknown", "rcm": "unknown"}
+    assert out["nodes"]  # the rest of the check still ran
