@@ -337,9 +337,17 @@
       "tier": "write",
       "title": "Bulk create, update or delete endpoints"
     },
+    "ise_bulk_internal_users": {
+      "tier": "write",
+      "title": "Bulk create, update or delete internal users"
+    },
     "ise_clear_anc": {
       "tier": "dangerous",
       "title": "Clear ANC policy from an endpoint"
+    },
+    "ise_coa_bulk": {
+      "tier": "dangerous",
+      "title": "Bulk CoA by scope"
     },
     "ise_coa_disconnect": {
       "tier": "dangerous",
@@ -441,6 +449,10 @@
       "tier": "write",
       "title": "Delete a pxGrid client"
     },
+    "ise_delete_session": {
+      "tier": "dangerous",
+      "title": "Delete a stale MnT session"
+    },
     "ise_delete_trustsec_object": {
       "tier": "write",
       "title": "Delete an IP-SGT mapping or SXP connection"
@@ -484,6 +496,10 @@
     "ise_generate_csr": {
       "tier": "write",
       "title": "Generate a CSR"
+    },
+    "ise_get_accounting": {
+      "tier": "read",
+      "title": "RADIUS accounting totals for a MAC"
     },
     "ise_get_ad_join_point": {
       "tier": "read",
@@ -757,6 +773,10 @@
       "tier": "read",
       "title": "Per-NAD RADIUS latency and timeouts"
     },
+    "ise_policy_audit": {
+      "tier": "read",
+      "title": "Audit ISE policy hygiene"
+    },
     "ise_policy_explain": {
       "tier": "read",
       "title": "Explain which policy rule a request would hit"
@@ -792,6 +812,10 @@
     "ise_search_spec": {
       "tier": "read",
       "title": "Search the Cisco ISE API spec"
+    },
+    "ise_set_allowed_protocols": {
+      "tier": "write",
+      "title": "Create or harden an allowed-protocols service"
     },
     "ise_set_cert_auth_profile": {
       "tier": "write",
@@ -889,6 +913,10 @@
       "tier": "read",
       "title": "TrustSec policy status per device"
     },
+    "ise_unused_objects": {
+      "tier": "read",
+      "title": "Find unused ISE objects"
+    },
     "ise_update_authz_profile": {
       "tier": "write",
       "title": "Update authorization profile"
@@ -926,5 +954,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.15.0"
+  "version": "0.16.0"
 }
