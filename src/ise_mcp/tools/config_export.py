@@ -44,6 +44,7 @@ RULE_SECTIONS = (
 )  # (API path, export key), in evaluation order
 SECTIONS = (
     "policy_sets",
+    "conditions",
     "allowed_protocols",
     "authz_profiles",
     "dacls",
@@ -60,7 +61,7 @@ SECTIONS = (
 )
 ALIASES = {
     "all": SECTIONS,
-    "policy": ("policy_sets", "allowed_protocols", "authz_profiles", "dacls"),
+    "policy": ("policy_sets", "conditions", "allowed_protocols", "authz_profiles", "dacls"),
     "network": ("nads", "ndgs"),
     "groups": ("identity_groups", "endpoint_groups"),
     "trustsec": ("sgts", "sgacls", "egress_matrix"),
@@ -91,8 +92,8 @@ DEFAULT_MAX_OBJECTS = 5000
 Scope = Annotated[
     list[str] | None,
     Field(
-        description="Sections to export (default: all): policy_sets, allowed_protocols, authz_profiles, "
-        "dacls, nads, ndgs, "
+        description="Sections to export (default: all): policy_sets, conditions, allowed_protocols, "
+        "authz_profiles, dacls, nads, ndgs, "
         "identity_groups, endpoint_groups, custom_attributes, sgts, sgacls, egress_matrix, command_sets, "
         "shell_profiles; or the groups policy, network, groups, trustsec, device_admin"
     ),
@@ -306,6 +307,8 @@ class Export:
         self.raw_rules: dict[str, list[dict[str, Any]]] = {}  # OpenAPI rule-table path -> rules
         self.sgt_names: dict[str, str] = {}  # id -> name, read for the egress matrix
         self.acl_names: dict[str, str] = {}
+        # kind -> {library, time, network} reusable conditions as ISE returned them
+        self.raw_conditions: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
     async def ers_all(self, section: str, resource: str) -> list[dict[str, Any]]:
         """Every object of an ERS collection with full details (paged, bounded concurrency)."""
@@ -363,6 +366,7 @@ class Export:
     async def section(self, name: str) -> Any:
         fetch: dict[str, Callable[[], Awaitable[Any]]] = {
             "policy_sets": self.policy_sets,
+            "conditions": self._conditions,
             "allowed_protocols": lambda: self._simple(name, "allowedprotocols", clean),
             "authz_profiles": lambda: self._simple(name, "authorizationprofile", clean),
             "dacls": lambda: self._simple(name, "downloadableacl", norm_dacl),
@@ -378,6 +382,23 @@ class Export:
             "shell_profiles": lambda: self._simple(name, "tacacsprofile", clean),
         }
         return await fetch[name]()
+
+    async def _conditions(self) -> list[dict[str, Any]]:
+        """Library, time-and-date and network conditions of both policy kinds, as ise_set_condition's
+        arguments (kind, type, name, description, conditions/match | time | network)."""
+        from ise_mcp.tools.conditions import condition_view, read_conditions  # noqa: PLC0415 - cycle
+
+        rows: list[dict[str, Any]] = []
+        for kind in KINDS:
+            try:
+                existing = await read_conditions(self.app, kind)
+            except (UpstreamError, NotFound) as e:
+                self.skipped[f"conditions.{kind}"] = str(e)[:200]  # device admin off
+                continue
+            self.raw_conditions[kind] = existing
+            for ctype, items in existing.items():
+                rows += [{"kind": kind, **condition_view(ctype, c)} for c in items]
+        return sorted(rows, key=lambda r: (r["kind"], _name_key(r)))
 
     async def _simple(
         self, section: str, resource: str, norm: Callable[[dict[str, Any]], Any]
@@ -542,6 +563,8 @@ def _keyed(section: str, objs: list[dict[str, Any]]) -> dict[str, dict[str, Any]
         return {f"{o.get('source')} -> {o.get('destination')}": o for o in objs}
     if section == "custom_attributes":
         return {str(o.get("attributeName")): o for o in objs}
+    if section == "conditions":
+        return {f"{o.get('kind')}/{o.get('name')}": o for o in objs}
     return {str(o.get("name")): o for o in objs}
 
 
@@ -738,12 +761,13 @@ def register(reg: ToolRegistrar) -> None:
         ] = DEFAULT_MAX_OBJECTS,
     ) -> ToolResult:
         """Export ISE configuration as reviewable YAML: policy sets with their authentication,
-        authorization and local exception rules (network access and device admin), allowed-protocols
-        services, authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities
-        masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec
-        egress matrix, TACACS+ command sets and shell profiles. References are names, not ids; rules keep
-        their rank and everything else is sorted by name; ids, links, hit counts and timestamps are left
-        out, so two exports of an unchanged ISE differ only in the header's exported_at. Keep one as a
+        authorization and local exception rules (network access and device admin), reusable library,
+        time-and-date and network conditions, allowed-protocols services, authorization profiles, dACLs,
+        NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint
+        custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell
+        profiles. References are names, not ids; rules keep their rank and everything else is sorted by
+        name; ids, links, hit counts and timestamps are left out, so two exports of an unchanged ISE
+        differ only in the header's exported_at. Keep one as a
         baseline and compare later with ise_diff_config. Large deployments: one GET per object (NADs!), so
         narrow `scope` or use `path` for a full export."""
         app: IseApp = get_client(ctx)

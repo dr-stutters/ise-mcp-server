@@ -295,7 +295,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-171 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+173 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 92 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -396,7 +396,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (56)
+### Write (58)
 
 | Tool | What it does |
 |---|---|
@@ -416,6 +416,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
 | `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
+| `ise_delete_condition` | Delete a library, time-and-date or network condition. |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_guest_user` | Delete a guest account as the sponsor. |
 | `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted). |
@@ -431,6 +432,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_allowed_protocols` | Create an allowed-protocols service (the one a policy set selects) from a hardening preset, or harden or adjust an existing one. |
 | `ise_set_cert_auth_profile` | A certificate authentication profile tells ISE how to read an EAP-TLS client certificate: which field is the username, and optionally which identity store to look it up in. |
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
+| `ise_set_condition` | Create a reusable policy condition, or replace one of the same name: a library condition (attribute checks in the rule tools' 'Dictionary:Attribute operator value' syntax, AND/OR, nested blocks), a time-and-date condition (week days, hours, dates and exceptions, such as business hours for guest or contractor access) or a network condition (NADs by name, IP/subnet or device group, a NAD port, or end-station IPs/MACs/CLI-DNIS: scoping device admin to some devices). |
 | `ise_set_custom_attribute` | Create an endpoint custom attribute definition (so endpoints can carry a value that policy matches as 'EndPoints:<name>'), or delete one. |
 | `ise_set_dacl` | Create a downloadable ACL, or replace an existing one's ACEs. |
 | `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply, the final catch-all, and the cell status (ENABLED, MONITOR or DISABLED). |

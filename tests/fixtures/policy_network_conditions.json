@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "response": [
+    {
+      "conditionType": "DeviceCondition",
+      "name": "mcp-test-lab-nads",
+      "id": "00000000-0000-4000-8000-000000000083",
+      "description": "",
+      "deviceList": [
+        "mcp-test-radius-client"
+      ],
+      "ipAddrList": [
+        "192.0.2.0/24"
+      ],
+      "deviceGroupList": [
+        "Location,All Locations"
+      ],
+      "link": {
+        "rel": "self",
+        "href": "https://192.0.2.10/api/v1/policy/network-access/network-condition/00000000-0000-4000-8000-000000000083",
+        "type": "application/json"
+      }
+    }
+  ]
+}

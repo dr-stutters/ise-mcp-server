@@ -26,10 +26,33 @@ from ise_mcp.tools.config_export import (
     to_yaml,
 )
 from tests.unit.conftest import BASE, ers_page, fixture_json, make_server, make_settings, xml
+from tests.unit.test_policy_edit import ATTRS
 
 NA = "/api/v1/policy/network-access/policy-set"
 NOW = dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.UTC)
 SECRETS = ("REDACTED-radius-secret", "tacacs-secret-xyz", "community-ro-xyz")
+
+
+CONDITION_FIXTURES = {
+    "condition": "policy_conditions.json",
+    "time-condition": "policy_time_conditions.json",
+    "network-condition": "policy_network_conditions.json",
+}
+COND_ATTRS = [
+    *ATTRS,
+    {
+        "dictionaryName": "Radius",
+        "name": "Service-Type",
+        "dataType": "INT",
+        "allowedValues": [{"key": "Outbound", "value": "5"}, {"key": "Framed", "value": "2"}],
+    },
+    {
+        "dictionaryName": "Normalised Radius",
+        "name": "RadiusFlowType",
+        "dataType": "INT",
+        "allowedValues": [{"key": "Wired802_1x", "value": "1"}, {"key": "WiredMAB", "value": "2"}],
+    },
+]
 
 
 def _uuid(n: int) -> str:
@@ -147,6 +170,9 @@ def lab_objects() -> dict[str, list[dict[str, Any]]]:
                 "link": {"rel": "self", "href": "https://192.0.2.10/ers/config/allowedprotocols/x"},
             },
         ],
+        # Reusable conditions (OpenAPI, served under /api/v1/policy/network-access/<resource>): the two
+        # built-ins as ISE 3.5 returns them, plus custom ones shaped by the 3.5 OpenAPI schema.
+        **{f"na:{r}": fixture_json(f)["response"] for r, f in CONDITION_FIXTURES.items()},
         "tacacsprofile": [
             {
                 "id": _uuid(17),
@@ -162,6 +188,9 @@ def lab_objects() -> dict[str, list[dict[str, Any]]]:
 def serve(mock: respx.MockRouter, objects: dict[str, list[dict[str, Any]]], *, shuffle: bool = False) -> None:
     rnd = random.Random(42)
     for resource, objs in objects.items():
+        if resource.startswith("na:"):
+            mock.get(f"/api/v1/policy/network-access/{resource[3:]}").respond(json={"response": objs})
+            continue
         listed = [{"id": o["id"], "name": o.get("name"), "description": o.get("description")} for o in objs]
         if shuffle:
             rnd.shuffle(listed)
@@ -181,6 +210,12 @@ def serve(mock: respx.MockRouter, objects: dict[str, list[dict[str, Any]]], *, s
     mock.get(f"{NA}/{ps_id}/exception").respond(json={"response": []})
     mock.get(f"{NA}/global-exception").respond(json={"response": []})
     mock.get("/api/v1/policy/device-admin/policy-set").respond(404, json={"message": "Device Admin is off"})
+    for resource in ("condition", "time-condition", "network-condition"):
+        mock.get(f"/api/v1/policy/device-admin/{resource}").respond(
+            404, json={"message": "Device Admin is off"}
+        )
+    for scope in ("authorization", "authentication", "policyset"):
+        mock.get(f"/api/v1/policy/network-access/dictionaries/{scope}").respond(json={"response": COND_ATTRS})
     mock.get("/api/v1/endpoint-custom-attribute").respond(
         json={
             "response": [
