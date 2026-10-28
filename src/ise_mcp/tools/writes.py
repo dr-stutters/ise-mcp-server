@@ -348,8 +348,12 @@ WHERE_USED_KINDS = {
     "command_set",
     "shell_profile",
     "ad_join_point",
+    "allowed_protocols",
 }
 
+
+# ISE ships these and refuses to delete them.
+DEFAULT_SERVICES = {"default network access", "default device admin"}
 
 DELETE_KINDS = {
     "endpoint": "endpoint",
@@ -369,6 +373,7 @@ DELETE_KINDS = {
     "tacacs_sequence": "tacacsserversequence",
     "sponsor_group": "sponsorgroup",
     "guest_type": "guesttype",
+    "allowed_protocols": "allowedprotocols",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -2154,6 +2159,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "tacacs_sequence",
                 "sponsor_group",
                 "guest_type",
+                "allowed_protocols",
             ],
             Field(description="What to delete"),
         ],
@@ -2162,8 +2168,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
         SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server
-        sequence, AD join point (after ise_leave_ad), sponsor group or guest type (guest accounts:
-        ise_delete_guest_user). Preview-first: shows
+        sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts:
+        ise_delete_guest_user) or allowed-protocols service (blocked while a policy set selects it).
+        Preview-first: shows
         the object and what still references it (the ise_where_used scan: rules, profiles, sequences,
         matrix cells, devices, members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
@@ -2197,6 +2204,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             side.append("Its members can no longer sponsor guests (existing guest accounts stay)")
         if kind == "guest_type":
             side.append("Sponsors can no longer create this type; ISE refuses while guest accounts use it")
+        if kind == "allowed_protocols" and name.lower() in DEFAULT_SERVICES:
+            blockers.append(f"{name} is one of ISE's default allowed-protocols services and can't be deleted")
         if kind in WHERE_USED_KINDS:
             from ise_mcp.tools.where_used import delete_blockers, find_references  # noqa: PLC0415 - cycle
 

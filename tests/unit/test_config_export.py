@@ -130,6 +130,23 @@ def lab_objects() -> dict[str, list[dict[str, Any]]]:
                 "commands": {"commandList": [{"grant": "PERMIT", "command": "show", "arguments": ".*"}]},
             },
         ],
+        "allowedprotocols": [
+            {
+                "id": _uuid(18),
+                "name": "mcp-eap-tls-only",
+                "description": "",
+                "eapTls": {
+                    "allowEapTlsAuthOfExpiredCerts": False,
+                    "eapTlsEnableStatelessSessionResume": False,
+                },
+                "processHostLookup": False,
+                "allowPapAscii": False,
+                "allowEapTls": True,
+                "allowPeap": False,
+                "requireMessageAuth": True,
+                "link": {"rel": "self", "href": "https://192.0.2.10/ers/config/allowedprotocols/x"},
+            },
+        ],
         "tacacsprofile": [
             {
                 "id": _uuid(17),
@@ -272,6 +289,17 @@ def test_condition_text() -> None:
     assert condition_text(attr) == "Radius:NAS-Port-Type equals Ethernet"
     block = {"conditionType": "LibraryConditionOrBlock", "isNegate": True, "children": [ref, attr]}
     assert condition_text(block) == {"not": {"or": ["NOT Wired_MAB", "Radius:NAS-Port-Type equals Ethernet"]}}
+
+
+async def test_export_allowed_protocols_section(mock: respx.MockRouter) -> None:
+    data = load_export(await _export(mock, ["allowed_protocols"]))
+    assert data[HEADER]["sections"] == ["allowed_protocols"]
+    assert data[HEADER]["counts"] == {"allowed_protocols": 1}
+    (svc,) = data["allowed_protocols"]
+    assert svc["name"] == "mcp-eap-tls-only" and svc["allowEapTls"] is True and svc["allowPeap"] is False
+    assert svc["eapTls"]["allowEapTlsAuthOfExpiredCerts"] is False and svc["requireMessageAuth"] is True
+    assert "id" not in svc and "link" not in svc and "peap" not in svc
+    assert "allowed_protocols" in resolve_scope(["policy"]) and "allowed_protocols" in resolve_scope(None)
 
 
 def test_resolve_scope() -> None:

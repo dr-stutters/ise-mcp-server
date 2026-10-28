@@ -310,7 +310,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
 | `ise_explain_profile` | Why an endpoint has its profile: the profiling policy it matched and its parent chain (e.g. |
-| `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
+| `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), allowed-protocols services, authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_accounting` | RADIUS accounting totals for an endpoint MAC from MnT ("how much did this host move?"): packets and bytes in/out and session time per session, as the NAD last reported them (accounting Interim-Update or Stop), plus the sum over the window. |
@@ -414,7 +414,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_guest_user` | Delete a guest account as the sponsor. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group or guest type (guest accounts: ise_delete_guest_user). |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user) or allowed-protocols service (blocked while a policy set selects it). |
 | `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
@@ -495,7 +495,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 
 ### Config export, diff and import
 
-`ise_export_config` writes policy sets and rules, authorization profiles, dACLs, NADs and NDGs (secrets
+`ise_export_config` writes policy sets and rules, allowed-protocols services, authorization profiles, dACLs, NADs and NDGs (secrets
 masked), identity and endpoint groups, custom attributes, SGTs, SGACLs, the egress matrix, command sets and
 shell profiles as YAML: names instead of ids, rules in rank order and everything else sorted by name, with
 ids, links, hit counts and timestamps left out, so an unchanged ISE exports the same bytes every time (apart

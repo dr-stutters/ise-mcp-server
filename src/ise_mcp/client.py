@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 ERS_JSON = {"Accept": "application/json", "Content-Type": "application/json"}
 SURFACES = ("openapi", "ers", "mnt")
 # ERS resources with GET .../name/{name} but no name filter: look them up directly.
-ERS_NAME_PATH = {"authorizationprofile"}
+ERS_NAME_PATH = {"authorizationprofile", "allowedprotocols"}  # no name filter on 3.5 (400)
 SAFE_MNT_PATH = re.compile(r"^[A-Za-z0-9_\-/.:@%+]+$")
 SAFE_RESOURCE = re.compile(r"^[a-z]+$")
 SPONSOR_AUTH_HINT = (
