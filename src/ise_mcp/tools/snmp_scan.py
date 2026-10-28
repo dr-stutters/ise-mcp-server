@@ -512,7 +512,9 @@ def register(reg: ToolRegistrar) -> None:
         schedule_day: Annotated[
             str | None, Field(description="Weekly: Sunday..Saturday; monthly: day of the month 1-31")
         ] = None,
-        description: Annotated[str | None, Field(max_length=1024)] = None,
+        description: Annotated[
+            str | None, Field(max_length=1024, description="Free-text note on the scan")
+        ] = None,
         enabled: Annotated[
             bool | None,
             Field(description="Enable or disable the scan (a disabled scan never runs, even on schedule)"),
