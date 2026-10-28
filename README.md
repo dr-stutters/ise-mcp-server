@@ -207,14 +207,14 @@ enabled tiers need.
 On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_TOOLS`,
 `MCP_MAX_BLAST_RADIUS`, `MCP_TWO_PERSON_TOOLS`; see core `docs/PRODUCTION.md`), this server adds:
 
-- **Protect-lists** (`ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS`): a CoA, ANC apply/clear
-  or NAD delete targeting a protected endpoint, user or device is blocked in the preview.
+- **Protect-lists** (`ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS`): a CoA, ANC apply/clear,
+  MnT session delete or NAD delete targeting a protected endpoint, user or device is blocked in the preview.
 - **Shared-port CoA guard**: `ise_coa_disconnect` with `port_bounce`/`port_shutdown` counts the live
   sessions on the target switch port; if more than one shares it (an uplink or trunk) the action is
   blocked unless `ISE_COA_ALLOW_SHARED_PORT=true`.
 - **Blast radius** (bound with `MCP_MAX_BLAST_RADIUS` / `MCP_BLAST_RADIUS_OVERRIDES`): reported by
-  `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_apply_anc` / `ise_clear_anc`
-  (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
+  `ise_coa_reauth` (1), `ise_delete_session` (1), `ise_coa_disconnect` (sessions on the port),
+  `ise_apply_anc` / `ise_clear_anc` (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
   certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
 ## Multi-node deployments
@@ -279,11 +279,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-151 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 81 read tools plus `ise_api_call` (GET-only) are registered. Everything
+153 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 82 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (81)
+### Read (82)
 
 | Tool | What it does |
 |---|---|
@@ -298,6 +298,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
+| `ise_get_accounting` | RADIUS accounting totals for an endpoint MAC from MnT ("how much did this host move?"): packets and bytes in/out and session time per session, as the NAD last reported them (accounting Interim-Update or Stop), plus the sum over the window. |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
 | `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes (also as av_pairs such as 'Viptela:Viptela-Group-Name=netadmin'), device profile. |
@@ -426,7 +427,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (18)
+### Dangerous (19)
 
 | Tool | What it does |
 |---|---|
@@ -441,6 +442,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_nad` | Delete a network device. |
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
 | `ise_delete_policy_set` | Delete a whole policy set with all its rules. |
+| `ise_delete_session` | Delete an endpoint's stale session record from ISE MnT, the classic fix when a session the switch already dropped still shows the host online or blocks CoA/ANC. |
 | `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
 | `ise_import_config` | Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans one step per object, matched by name, in dependency order (device and identity groups, custom attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets and shell profiles, NADs, then policy sets and their rules in rank order). |
 | `ise_join_ad` | Join one or all ISE nodes to the join point's AD domain (creates the computer account). |
