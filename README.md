@@ -57,6 +57,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   certificates (expired/expiring/self-signed), evaluation licences and AD join points.
 - **Endpoint bulk work**: `ise_bulk_endpoints` (create/update/delete up to 500 per call as one ISE task) and
   endpoint custom attributes that policy can match (`EndPoints:<name>`).
+- **Internal user lifecycle**: expiry date, change password at first login, password never expires, an
+  AD/LDAP-backed password and a TACACS+ enable password on the user tools; `ise_bulk_internal_users`
+  creates, updates or deletes up to 500 users with one preview and a result per user.
 - **Policy editing with validation**: create/update policy sets and authentication/authorization rules for
   network access and device admin (TACACS+). Conditions are written as `Dictionary:Attribute operator value`
   and checked against ISE's dictionaries in the preview ("did you mean ...?").
@@ -85,7 +88,7 @@ You need: an ISE admin account for the server (read-only is enough to start: adm
 has a wheel with stutters-mcp-core bundled in; it needs only PyPI dependencies.
 
 ```bash
-WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.14.1/ise_mcp_server-0.14.1-py3-none-any.whl
+WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.15.0/ise_mcp_server-0.15.0-py3-none-any.whl
 export ISE_URL=https://ise.example.com ISE_USERNAME=mcp-ro ISE_PASSWORD='...'
 uvx --from "$WHEEL" ise-mcp-server check            # preflight: surfaces, TLS, login, admin groups, version
 claude mcp add ise -e ISE_URL=$ISE_URL -e ISE_USERNAME=$ISE_USERNAME -e ISE_PASSWORD="$ISE_PASSWORD" \
@@ -99,7 +102,7 @@ Claude Desktop (`claude_desktop_config.json`), same idea:
   "mcpServers": {
     "ise": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.14.1/ise_mcp_server-0.14.1-py3-none-any.whl", "ise-mcp-server"],
+      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.15.0/ise_mcp_server-0.15.0-py3-none-any.whl", "ise-mcp-server"],
       "env": {"ISE_URL": "https://ise.example.com", "ISE_USERNAME": "mcp-ro", "ISE_PASSWORD": "..."}
     }
   }
@@ -224,7 +227,7 @@ On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_T
   blocked unless `ISE_COA_ALLOW_SHARED_PORT=true`.
 - **Blast radius** (bound with `MCP_MAX_BLAST_RADIUS` / `MCP_BLAST_RADIUS_OVERRIDES`): reported by
   `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_apply_anc` / `ise_clear_anc`
-  (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
+  (1), `ise_bulk_endpoints` (endpoints changed), `ise_bulk_internal_users` (users changed) and `ise_update_node_services` (1). Node-service and
   certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
 ## Multi-node deployments
@@ -289,11 +292,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-155 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 85 read tools plus `ise_api_call` (GET-only) are registered. Everything
+157 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 87 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (85)
+### Read (87)
 
 | Tool | What it does |
 |---|---|
@@ -370,6 +373,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
 | `ise_nad_radius_stats` | ISE's own view of each NAD's RADIUS traffic over a window, from MnT auth history (queried when called): attempts, failures, timeouts (the NAD or supplicant stopped answering: 5411, 5440, ...), average/median/worst response time overall and per method (EAP vs MAB), the PSN that answered, and the NADs that stand out against the others (or against the previous window with compare_previous=true). |
+| `ise_policy_audit` | Policy hygiene audit, for a pre-audit, a quarterly clean-up or an inherited ISE: ranked findings (high, medium, low, info), each with where it is and the tool that fixes it. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
 | `ise_profiler_status` | Profiler health and setup: which nodes run the Profiler service, each PSN's probes (enabled with their settings, and disabled), live profiler session count, custom profiling rule count, cloud profiler / telemetry state, and the feed service (GUI-only, said so). |
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
@@ -380,16 +384,18 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
 | `ise_trustsec_device_report` | Which network devices have downloaded ISE's current TrustSec policy: per device the last step of the ISE <-> switch exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device last reported, whether it is current, and what to check when it is not (PAC, CTS credentials, CoA, 'cts refresh policy'). |
+| `ise_unused_objects` | Objects nothing references, for a clean-up: authorization profiles, dACLs, SGTs, SGACLs, identity and endpoint groups, network device groups for which the ise_where_used scan (policy sets and rules, library conditions, profiles, identity sequences, egress matrix, devices, group members) finds no use, each with its ise_delete_object call. |
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (52)
+### Write (53)
 
 | Tool | What it does |
 |---|---|
 | `ise_add_ad_groups` | Make AD groups usable in policy: after this, '<join point>:ExternalGroups EQUALS <group name>' conditions accept them (ise_create_authz_rule). |
 | `ise_approve_pxgrid_client` | Approve a pending pxGrid client so it can look up and subscribe to ISE's pxGrid services (sessions, TrustSec, ANC). |
 | `ise_bulk_endpoints` | Create, update or delete many endpoints in one ISE bulk task (e.g. |
+| `ise_bulk_internal_users` | Create, update or delete many internal users with one preview, such as a batch of contractor accounts with an expiry date or a cleanup. |
 | `ise_create_ad_join_point` | Create an Active Directory join point (the definition only; no node joins yet). |
 | `ise_create_anc_policy` | Create an Adaptive Network Control policy that ise_apply_anc can put on endpoints. |
 | `ise_create_authn_rule` | Add an authentication rule to a policy set: conditions -> identity source, with what to do when authentication fails, the user isn't found, or the store is unreachable. |
@@ -397,7 +403,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_authz_rule` | Add an authorization rule (or local exception) to a policy set: conditions -> result. |
 | `ise_create_group` | Create a user identity group or an endpoint identity group, for policy to match on and for users/endpoints to be placed in. |
 | `ise_create_guest_user` | Create a guest account as the sponsor (ISE_SPONSOR_USERNAME), like the sponsor portal does. |
-| `ise_create_internal_user` | Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given identity groups. |
+| `ise_create_internal_user` | Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given identity groups, with optional lifecycle settings: an account expiry date, change password at first login, password never expires, an AD/LDAP-backed password, and a TACACS+ enable password. |
 | `ise_create_nad` | Add a network access device (switch, WLC, VPN) so ISE accepts its RADIUS and/or TACACS+ requests. |
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
@@ -435,7 +441,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_suspend_guest_user` | Suspend a guest account as the sponsor: logins fail until ise_reinstate_guest_user. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain, description or advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group). |
 | `ise_update_guest_user` | Change a guest's contact or visit details as the sponsor. |
-| `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
+| `ise_update_internal_user` | Enable/disable an internal user, reset their password or enable password, set or remove the account expiry date, force a password change at next login, or change groups, names, email, description, password store and custom attributes. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port, name, switch RADIUS or TACACS+ off (remove_radius / remove_tacacs, keeping the other protocol's stored key), or TrustSec settings: device id/password (what the switch presents in 'cts credentials' to get a PAC and download environment data and policy; defaults for the refresh timers and CoA-based updates are set the first time), the HTTP REST API username/password for the HTTPS policy download ('cts policy-server' on IOS-XE) and push id support (the device reports its downloads, which is what ise_trustsec_device_report shows). |
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
