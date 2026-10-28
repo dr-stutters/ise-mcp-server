@@ -157,7 +157,9 @@ to deny.
    enforced, so its pair counts too), counts the live sessions per SGT from MnT, and warns when
    TrustSec_Devices -> TrustSec_Devices (SGT 2, network device traffic) has no enabled cell or when the default was never in monitor. `sgacls` replaces the default cell's SGACL list:
    `[]` leaves only the catch-all (a `Permit IP` SGACL in front of `DENY_IP` would still permit
-   everything). Undo: `ise_set_default_egress_rule(rule="PERMIT_IP", sgacls=["Permit IP"])` and push.
+   everything). Undo: `ise_set_default_egress_rule(rule="PERMIT_IP")` and push. ISE lists the catch-all as
+   an SGACL too (the ANY-ANY cell reads `defaultRule: PERMIT_IP`, `sgacls: [<Permit IP>]`): the tools treat
+   `Permit IP`/`Deny IP` in `sgacls` as the rule and never send them in the list.
 
 ## 4. When enforcement does not happen
 
@@ -172,7 +174,7 @@ Work down the list; `ise_trustsec_device_report` names the failing step and the 
 | Cell present, counters stay at 0 | The switch has no SGT for the source or destination IP: `show cts role-based sgt-map all` lacks the client (`show access-session ... details` says `IPv4 Address: Unknown`: no device-tracking policy on the port, so the session's SGT is never bound to an IP) or the DC (no static map / SXP / deploy) | attach a `device-tracking policy` with `tracking enable` to the access ports (section 2); add the destination mapping (`cts role-based sgt-map`, `ise_set_ip_sgt` + SXP, or `ise_deploy_ip_sgt`) |
 | Counters increase on the wrong cell | The session got a different SGT: `ise_get_auth_history(mac)` / `show access-session interface ... details` show the SGT the rule returned | fix the authorization rule or the AD group, then CoA reauth (`ise_coa_reauth`) |
 | Enforcement off | `cts role-based enforcement` (and `vlan-list` for SVI traffic) missing from `show run | include cts role-based` | add it |
-| ISE rejects the cell: "can not change cell to multiple sgacls" | `allowMultipleSGACLs` is off in ISE's TrustSec general settings and the cell names an SGACL plus a `PERMIT_IP`/`DENY_IP` catch-all | one SGACL with `default_rule="NONE"`, or turn the setting on (`PUT /api/v1/trustsec/general-settings`) |
+| ISE rejects the cell: "Only one Catch All Rule SGACL ... can not change cell to multiple sgacls" | `allowMultipleSGACLs` is off in ISE's TrustSec general settings and the cell names an SGACL plus a `PERMIT_IP`/`DENY_IP` catch-all, or the built-in catch-all SGACL ISE reads back (`Permit IP` on ANY-ANY) was sent with the rule | the write previews block this now; one SGACL with `default_rule="NONE"`, only the catch-all, or turn the setting on (`ise_set_trustsec_settings(multiple_sgacls=True)`) |
 | Device present on the switch (`show cts pacs` or `show cts policy-server statistics all` with HTTP 200s, policy downloaded) but missing from `ise_trustsec_device_report` | The report holds devices that report their downloads back (PUSH ID, IOS XE 26.2.1+ with REST API v3); RADIUS/PAC downloads and HTTPS downloads from a 17.x image are not reported | expected; verify on the switch (section 2b) |
 | `ise_set_trustsec_settings(https_server=True)` fails with ISE HTTP 500 "failed to update Trustsec General Settings" | ISE's TrustSec HTTPS server list (`ise_get_trustsec_settings` -> `https_servers`) is empty; the GUI makes you add the PSNs first | the tool adds every TrustSec node on port 9063 before the PUT; if the list is empty and the PUT still fails, add one with `ise_api_call POST /api/v1/trustsec/https-server` |
 | `show cts policy-server statistics all`: "TCP or TLS handshake error" counts up, no HTTP 200 | ISE's HTTPS server is off (9063 closed: `ise_get_trustsec_settings`), or the switch's trustpoint does not hold the certificate ISE serves on 9063 | `ise_set_trustsec_settings(https_server=True)`; re-import the certificate from `openssl s_client -connect <ise>:9063` into the trustpoint |

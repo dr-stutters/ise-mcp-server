@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 import respx
 
 from ise_mcp._core.testing import call_tool
@@ -186,7 +187,9 @@ async def test_default_rule_deny_preview_and_apply(mock: respx.MockRouter) -> No
     assert d["pairs_without_cell_list"][0].startswith("Employees (4) -> ")
     assert "Employees (4) -> Servers (16)" not in d["pairs_without_cell_list"]
     assert d["sessions"] == {"active_sessions": 1, "by_sgt": {"Employees": 1}}
-    assert d["from"] == {"default_rule": "PERMIT_IP", "sgacls": ["Permit IP"], "status": "MONITOR"}
+    # ISE's 'Permit IP' entry is the PERMIT_IP catch-all, not an SGACL (#131).
+    assert d["from"] == {"default_rule": "PERMIT_IP", "sgacls": [], "status": "MONITOR"}
+    assert "sgacls" not in d["changes"]
     side = " ".join(preview["side_effects"])
     assert "8 SGT pair(s) without an explicit cell is DENIED" in side
     assert "TrustSec_Devices" in side and "ise_push_trustsec_matrix" in side
@@ -209,7 +212,7 @@ async def test_default_rule_monitor_and_warnings(mock: respx.MockRouter) -> None
     side = " ".join(preview["side_effects"])
     assert "is counted (MONITOR) but passes" in side
     assert "TrustSec_Devices -> TrustSec_Devices cell" not in side
-    assert preview["preview"]["to"]["sgacls"] == ["Deny IP"]
+    assert preview["preview"]["to"]["sgacls"] == []  # 'Deny IP' is the DENY_IP catch-all itself
     # Straight to ENABLED from an enforced PERMIT default: the preview says MONITOR comes first.
     preview, _ = await two_step("ise_set_default_egress_rule", {"rule": "DENY_IP"}, mcp_enable_dangerous=True)
     assert "not in MONITOR first" in " ".join(preview["side_effects"])
@@ -253,3 +256,190 @@ async def test_default_rule_disabled_cell_counts_as_uncovered(mock: respx.MockRo
     assert "Employees (4) -> Servers (16)" in d["pairs_without_cell_list"]
     assert "2 DISABLED cell(s)" in d["disabled_cells_note"]
     assert "No enabled TrustSec_Devices" in " ".join(preview["side_effects"])
+
+
+# --- #131: the built-in catch-all SGACLs are the rule, never sent in the list ---------------------
+
+# What ISE 3.5 answered on the PUT when the ANY-ANY list was sent back as read (issue #131).
+MULTI_SGACL_400 = (
+    "Validation Error - Illegal values: [Only one Catch All Rule SGACL can exsits [None,Permit IP,Deny IP! , "
+    "can not change cell to multiple sgacls as it set to disable in trust sec global settings !]"
+)
+REAL_ACL = "b0000000-0000-4000-8000-000000000003"
+WEB_ACL = "b0000000-0000-4000-8000-000000000004"
+
+
+def mock_acls_and_settings(mock: respx.MockRouter, *, multiple: bool = False) -> None:
+    mock.get("/ers/config/sgacl").respond(
+        json=ers_page(
+            [
+                {"id": DENY_ACL, "name": "Deny IP"},
+                {"id": PERMIT_ACL, "name": "Permit IP"},
+                {"id": REAL_ACL, "name": "mcp-allow-dns"},
+                {"id": WEB_ACL, "name": "mcp-allow-web"},
+            ]
+        )
+    )
+    mock.get("/api/v1/trustsec/general-settings").respond(
+        json={"allowMultipleSGACLs": multiple, "httpsServerConfig": {"enableHttps": False}}
+    )
+
+
+async def test_default_rule_permit_ip_listed_status_change_clean_body(mock: respx.MockRouter) -> None:
+    # The live ANY-ANY shape: defaultRule PERMIT_IP, sgacls [Permit IP id], ENABLED.
+    mock_matrix(mock, [any_any()])
+    mock_acls_and_settings(mock)
+    put = mock.put(f"/ers/config/egressmatrixcell/{DEFAULT_CELL}").respond(400, text=MULTI_SGACL_400)
+    put.side_effect = lambda request: (
+        httpx.Response(400, text=MULTI_SGACL_400)
+        if json.loads(request.content)["EgressMatrixCell"]["sgacls"]
+        else httpx.Response(200, json={})
+    )
+    preview, applied = await two_step(
+        "ise_set_default_egress_rule",
+        {"rule": "PERMIT_IP", "sgacls": ["Permit IP"], "status": "MONITOR"},
+        mcp_enable_dangerous=True,
+    )
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["changes"] == {"matrixCellStatus": {"from": "ENABLED", "to": "MONITOR"}}
+    assert preview["preview"]["to"]["sgacls"] == []
+    assert applied is not None and "error" not in str(applied).lower()
+    body = json.loads(put.calls.last.request.content)["EgressMatrixCell"]
+    assert (
+        body["sgacls"] == [] and body["defaultRule"] == "PERMIT_IP" and body["matrixCellStatus"] == "MONITOR"
+    )
+
+
+async def test_default_rule_empty_list_no_false_diff(mock: respx.MockRouter) -> None:
+    mock_matrix(mock, [any_any()])
+    preview, _ = await two_step(
+        "ise_set_default_egress_rule",
+        {"rule": "PERMIT_IP", "sgacls": [], "status": "MONITOR"},
+        mcp_enable_dangerous=True,
+    )
+    d = preview["preview"]
+    assert "sgacls" not in d["changes"], d["changes"]  # no 'Permit IP -> []'
+    assert d["from"]["sgacls"] == [] and d["to"]["sgacls"] == []
+    # And the unchanged list plus unchanged status is the no-op, with [] or the catch-all named.
+    for listed in ([], ["Permit IP"], ["permit ip"]):
+        preview, applied = await two_step(
+            "ise_set_default_egress_rule", {"rule": "PERMIT_IP", "sgacls": listed}, mcp_enable_dangerous=True
+        )
+        assert preview["status"] == "blocked" and "already PERMIT_IP" in preview["blockers"][0], listed
+        assert applied is None
+
+
+async def test_default_rule_catch_all_conflict_blocked(mock: respx.MockRouter) -> None:
+    mock_matrix(mock, [any_any()])
+    preview, applied = await two_step(
+        "ise_set_default_egress_rule",
+        {"rule": "PERMIT_IP", "sgacls": ["Deny IP"], "status": "MONITOR"},
+        mcp_enable_dangerous=True,
+    )
+    assert preview["status"] == "blocked"
+    assert "'Deny IP' (DENY_IP) but the rule is PERMIT_IP" in preview["blockers"][0]
+    assert not any("already" in b for b in preview["blockers"])
+    assert applied is None
+
+
+async def test_default_rule_real_sgacl_blocked_when_multiple_off(mock: respx.MockRouter) -> None:
+    mock_matrix(mock, [any_any()])
+    mock_acls_and_settings(mock)
+    preview, applied = await two_step(
+        "ise_set_default_egress_rule",
+        {"rule": "PERMIT_IP", "sgacls": ["Permit IP", "mcp-allow-dns"]},
+        mcp_enable_dangerous=True,
+    )
+    assert preview["status"] == "blocked"
+    assert "1 SGACL(s) plus the PERMIT_IP catch-all" in preview["blockers"][0]
+    assert "multiple sgacls" in preview["blockers"][0]
+    assert applied is None
+
+
+async def test_default_rule_real_sgacl_allowed_when_multiple_on(mock: respx.MockRouter) -> None:
+    mock_matrix(mock, [any_any()])
+    mock_acls_and_settings(mock, multiple=True)
+    put = mock.put(f"/ers/config/egressmatrixcell/{DEFAULT_CELL}").respond(json={})
+    preview, applied = await two_step(
+        "ise_set_default_egress_rule",
+        {"rule": "PERMIT_IP", "sgacls": ["mcp-allow-dns"]},
+        mcp_enable_dangerous=True,
+    )
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["changes"]["sgacls"] == {"from": [], "to": [REAL_ACL]}
+    assert applied is not None
+    assert json.loads(put.calls.last.request.content)["EgressMatrixCell"]["sgacls"] == [REAL_ACL]
+
+
+def mock_emp_srv(mock: respx.MockRouter, current: dict[str, Any] | None) -> respx.Route:
+    mock.get("/ers/config/sgt", params={"filter": "name.EQ.Employees"}).respond(
+        json=ers_page([{"id": EMP_ID, "name": "Employees"}])
+    )
+    mock.get("/ers/config/sgt", params={"filter": "name.EQ.Servers"}).respond(
+        json=ers_page([{"id": SRV_ID, "name": "Servers"}])
+    )
+    mock.get(
+        "/ers/config/egressmatrixcell",
+        params={"filter": ["sgtSrcName.EQ.Employees", "sgtDstName.EQ.Servers"]},
+    ).respond(json=ers_page([{"id": EMP_SRV_CELL, "name": "Employees-Servers"}] if current else []))
+    if current:
+        return mock.put(f"/ers/config/egressmatrixcell/{EMP_SRV_CELL}").respond(json={})
+    return mock.post("/ers/config/egressmatrixcell").respond(201, headers={"Location": "x/new"})
+
+
+async def test_set_egress_policy_strips_catch_all(mock: respx.MockRouter) -> None:
+    # An existing cell as ISE reads it: DENY_IP spelled as the 'Deny IP' entry too.
+    current = cell(EMP_SRV_CELL, "Employees-Servers", EMP_ID, SRV_ID, "ENABLED", "DENY_IP", [DENY_ACL])
+    mock_matrix(mock, [any_any(), current], sessions=False)
+    mock_acls_and_settings(mock)
+    put = mock_emp_srv(mock, current)
+    args = {
+        "source_sgt": "Employees",
+        "destination_sgt": "Servers",
+        "sgacls": ["Deny IP"],
+        "default_rule": "DENY_IP",
+        "status": "MONITOR",
+    }
+    preview, applied = await two_step("ise_set_egress_policy", args)
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["changes"] == {"matrixCellStatus": {"from": "ENABLED", "to": "MONITOR"}}
+    assert applied is not None
+    assert json.loads(put.calls.last.request.content)["EgressMatrixCell"]["sgacls"] == []
+
+
+async def test_set_egress_policy_one_sgacl_with_none_kept(mock: respx.MockRouter) -> None:
+    # 'Deny IP' with catch-all NONE is the cell's one SGACL (ISE's form with multiple SGACLs off).
+    current = cell(EMP_SRV_CELL, "Employees-Servers", EMP_ID, SRV_ID, "ENABLED", "NONE", [DENY_ACL])
+    mock_matrix(mock, [any_any(), current], sessions=False)
+    mock_acls_and_settings(mock)
+    put = mock_emp_srv(mock, current)
+    preview, applied = await two_step(
+        "ise_set_egress_policy",
+        {"source_sgt": "Employees", "destination_sgt": "Servers", "sgacls": ["Deny IP"], "status": "MONITOR"},
+    )
+    assert preview["status"] == "preview", preview
+    assert "sgacls" not in preview["preview"]["changes"]
+    assert applied is not None
+    assert json.loads(put.calls.last.request.content)["EgressMatrixCell"]["sgacls"] == [DENY_ACL]
+
+
+async def test_set_egress_policy_conflict_and_multiple_blocked(mock: respx.MockRouter) -> None:
+    mock_matrix(mock, [any_any()], sessions=False)
+    mock_acls_and_settings(mock)
+    mock_emp_srv(mock, None)
+    base = {"source_sgt": "Employees", "destination_sgt": "Servers"}
+    preview, applied = await two_step(
+        "ise_set_egress_policy", {**base, "sgacls": ["Deny IP"], "default_rule": "PERMIT_IP"}
+    )
+    assert preview["status"] == "blocked" and "but the rule is PERMIT_IP" in preview["blockers"][0]
+    assert applied is None
+    # Two real SGACLs, or one plus a PERMIT_IP/DENY_IP catch-all, with multiple SGACLs off.
+    for acls, rule in ((["mcp-allow-dns", "mcp-allow-web"], "NONE"), (["mcp-allow-dns"], "DENY_IP")):
+        preview, applied = await two_step(
+            "ise_set_egress_policy", {**base, "sgacls": acls, "default_rule": rule}
+        )
+        assert preview["status"] == "blocked", (acls, rule)
+        assert "multiple sgacls" in preview["blockers"][0] and applied is None
+    # One real SGACL and NONE is fine.
+    preview, _ = await two_step("ise_set_egress_policy", {**base, "sgacls": ["mcp-allow-dns"]})
+    assert preview["status"] == "preview", preview

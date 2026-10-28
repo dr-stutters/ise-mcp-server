@@ -40,6 +40,7 @@ from ise_mcp.tools._common import ers_name_map, ers_resolve, gather_limited, is_
 from ise_mcp.tools.endpoint_bulk import check_custom_values, custom_attribute_defs
 from ise_mcp.tools.network import resolve_nad
 from ise_mcp.tools.policy import av_pair_text, rules_using_profile
+from ise_mcp.tools.trustsec import GENERAL_SETTINGS
 
 # --- helpers ------------------------------------------------------------------------------------
 
@@ -317,6 +318,75 @@ async def group_ids(app: IseApp, resource: str, names: list[str], what: str, lis
         else:
             raise NotFound(f"No {what} named {n!r}; see {list_tool}.", 404)
     return ids
+
+
+# --- egress cells: the built-in catch-all SGACLs (#131) --------------------------------------------
+
+# ISE spells a cell's defaultRule as a built-in SGACL in its `sgacls` list too: the ANY-ANY cell reads
+# defaultRule PERMIT_IP with sgacls [<id of 'Permit IP'>]. Sending that list back is refused when
+# multiple SGACLs per cell are off (the default): "Only one Catch All Rule SGACL can exsits [None,Permit
+# IP,Deny IP! , can not change cell to multiple sgacls ...". An empty list leaves ISE's own entry alone.
+CATCH_ALL_SGACLS = {"permit ip": "PERMIT_IP", "deny ip": "DENY_IP", "none": "NONE"}
+MULTIPLE_SGACLS_REASON = (
+    "ISE allows one SGACL per cell, counting a PERMIT_IP/DENY_IP catch-all as one: multiple SGACLs are "
+    "off in the TrustSec settings (ISE: 'can not change cell to multiple sgacls as it set to disable in "
+    "trust sec global settings'). Use one SGACL with catch-all NONE, only the catch-all, or turn the "
+    "setting on with ise_set_trustsec_settings(multiple_sgacls=True)"
+)
+
+
+def catch_all_rule(name: Any) -> str | None:
+    """The defaultRule a built-in catch-all SGACL name stands for ('Permit IP' -> PERMIT_IP), else None."""
+    return CATCH_ALL_SGACLS.get(str(name).strip().lower())
+
+
+def cell_sgacl_ids(cell: dict[str, Any], acl_names: dict[str, str]) -> list[str]:
+    """A cell's SGACL ids as read, minus the built-in entry that only repeats its defaultRule (and the
+    'None' placeholder): what the cell applies before its catch-all."""
+    rule = str(cell.get("defaultRule") or "NONE").upper()
+    out = []
+    for a in cell.get("sgacls") or []:
+        implied = catch_all_rule(acl_names.get(str(a), ""))
+        if implied == "NONE" or (implied is not None and implied == rule):
+            continue
+        out.append(str(a))
+    return out
+
+
+def split_catch_all(sgacls: list[str], rule: str) -> tuple[list[str], list[str]]:
+    """(SGACL names to send, blockers) for the caller's `sgacls` against the cell's catch-all `rule`. A
+    built-in catch-all that names `rule` is the rule, not an SGACL, and is dropped. One naming another
+    catch-all contradicts `rule` and blocks; with rule NONE, 'Permit IP'/'Deny IP' stay as the cell's
+    one SGACL (ISE's form when multiple SGACLs are off)."""
+    keep: list[str] = []
+    blockers: list[str] = []
+    for n in sgacls:
+        implied = catch_all_rule(n)
+        if implied is None or (rule == "NONE" and implied != "NONE"):
+            keep.append(n)
+        elif implied == "NONE" or implied == rule:
+            continue  # the catch-all itself ('None' adds nothing)
+        else:
+            blockers.append(
+                f"sgacls names the catch-all {n!r} ({implied}) but the rule is {rule}: give the catch-all "
+                f"once, as the rule (rule={implied}), and leave it out of sgacls"
+            )
+    return keep, blockers
+
+
+async def multiple_sgacls_blocker(app: IseApp, sgacl_count: int, rule: str) -> str | None:
+    """ISE's refusal, in the preview, for a cell with more than one SGACL (a PERMIT_IP/DENY_IP catch-all
+    counts as one) while multiple SGACLs per cell are off in the TrustSec settings."""
+    if sgacl_count + (0 if rule == "NONE" else 1) <= 1:
+        return None
+    try:
+        settings = await app.openapi.get(GENERAL_SETTINGS)
+    except UpstreamError:
+        return None  # unreadable: ISE decides on the PUT
+    if isinstance(settings, dict) and settings.get("allowMultipleSGACLs") is False:
+        what = f"{sgacl_count} SGACL(s)" + ("" if rule == "NONE" else f" plus the {rule} catch-all")
+        return f"{what}: {MULTIPLE_SGACLS_REASON}"
+    return None
 
 
 async def exists(app: IseApp, resource: str, name: str) -> bool:
@@ -2057,7 +2127,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             raise NotFound(
                 f"Unknown SGT {source_sgt if not src else destination_sgt!r}; see ise_list_sgts.", 404
             )
-        acl_ids = await group_ids(app, "sgacl", sgacls, "SGACL", "ise_list_sgacls")
+        # A built-in catch-all named in sgacls is the rule itself, not an SGACL (#131).
+        real_names, blockers = split_catch_all(sgacls, default_rule)
+        acl_ids = await group_ids(app, "sgacl", real_names, "SGACL", "ise_list_sgacls")
+        multi = await multiple_sgacls_blocker(app, len(acl_ids), default_rule)
+        if multi:
+            blockers.append(multi)
         body: dict[str, Any] = {
             "sourceSgtId": src["id"],
             "destinationSgtId": dst["id"],
@@ -2087,11 +2162,15 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "enabled": enabled,
         }
         summary = (
-            f"{source_sgt} -> {destination_sgt}: {', '.join(sgacls) or '(no SGACL)'} then {default_rule}"
+            f"{source_sgt} -> {destination_sgt}: {', '.join(real_names) or '(no SGACL)'} then {default_rule}"
             f" ({body['matrixCellStatus']})"
         )
         if current:
             desired = deep_merge(current, body)
+            # ISE's own catch-all entry is not an SGACL: leave it out of the diff (an empty list sent
+            # leaves it in place, so the read-back still lists it).
+            acl_names = await ers_name_map(app, "sgacl")
+            shown = {**current, "sgacls": cell_sgacl_ids(current, acl_names)}
             side = []
             was, now = current.get("matrixCellStatus"), body["matrixCellStatus"]
             if was != now:
@@ -2104,8 +2183,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             side.append(PUSH_REMINDER)
             plan = Plan(
                 f"Update egress cell {summary}",
-                details={"changes": field_changes(current, desired, replace=True)},
+                details={"changes": field_changes(shown, desired, replace=True)},
                 fingerprint=fingerprint(current),
+                blockers=blockers,
                 side_effects=side,
             )
             return await preview_or_apply(
@@ -2121,7 +2201,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             tool="ise_set_egress_policy",
             args=args,
             confirm=confirm,
-            plan=Plan(f"Create egress cell {summary}", details=body, side_effects=[PUSH_REMINDER]),
+            plan=Plan(
+                f"Create egress cell {summary}", details=body, blockers=blockers, side_effects=[PUSH_REMINDER]
+            ),
             apply=lambda: ers_post(app, "egressmatrixcell", "EgressMatrixCell", body),
         )
 
