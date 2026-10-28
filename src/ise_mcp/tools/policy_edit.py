@@ -458,6 +458,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         protocols, move it or rename it. Only the given fields change. Disabling or narrowing a set sends
         its traffic to the next matching set (often Default). The Default set's name, rank and condition
         are fixed. Preview-first with a field diff."""
+        if all(x is None for x in (state, conditions, allowed_protocols, rank, new_name, description)):
+            raise InvalidRequest(
+                "Nothing to change: give state, conditions, allowed_protocols, rank, new_name or description"
+            )
         app: IseApp = get_client(ctx)
         ps = await resolve_policy_set(app, kind, policy_set)
         current = strip_links(_resp(await app.openapi.get(f"/api/v1/policy/{kind}/policy-set/{q(ps['id'])}")))
@@ -492,8 +496,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 blockers.append(f"A {kind} policy set named {new_name!r} already exists")
         if description is not None:
             desired["description"] = description
-        if desired == current:
-            raise InvalidRequest("Nothing to change: give at least one field that differs")
+        # C71 (#151): a re-send of the state the set already has is "no change", not an error.
+        noop = desired == current
         if current.get("default") and any(x is not None for x in (conditions, rank, new_name)):
             blockers.append("The Default policy set's name, rank and condition can't be changed")
         changes = field_changes(current, desired, replace=True)
@@ -504,7 +508,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "to": render_condition(desired.get("condition")),
             }
         side = []
-        if state in ("disabled",) or conditions is not None:
+        if not noop and (state in ("disabled",) or conditions is not None):
             side.append("Requests this set no longer matches fall through to the next policy set")
         plan = Plan(
             f"Update {kind} policy set {ps['name']}",
@@ -512,6 +516,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             fingerprint=fingerprint(current),
             blockers=blockers,
             side_effects=side,
+            noop=noop,
+            noop_reason=f"{kind} policy set {ps['name']} already as requested" if noop else None,
         )
         return await preview_or_apply(
             ctx,
@@ -753,6 +759,23 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         identity source). Only the given fields change. The Default rule's name, rank and condition are
         fixed, but its result can change. Preview-first with a field diff; takes effect at the next
         authentication (use ise_coa_reauth to apply it to a live session now)."""
+        given = (
+            state,
+            rank,
+            new_name,
+            conditions,
+            profiles,
+            sgt,
+            command_sets,
+            shell_profile,
+            identity_source,
+            if_user_not_found,
+        )
+        if all(x is None for x in given):
+            raise InvalidRequest(
+                "Nothing to change: give state, rank, new_name, conditions or a result field "
+                "(profiles, sgt, command_sets, shell_profile, identity_source, if_user_not_found)"
+            )
         app: IseApp = get_client(ctx)
         ps = await resolve_policy_set(app, kind, policy_set)
         rules = await section_rules(app, kind, str(ps["id"]), section)
@@ -799,8 +822,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             if identity_source is not None or if_user_not_found is not None:
                 raise InvalidRequest("identity_source/if_user_not_found only apply to authentication rules")
             blockers += await _results(app, kind, desired, profiles, sgt, command_sets, shell_profile)
-        if desired == current:
-            raise InvalidRequest("Nothing to change: give at least one field that differs")
+        # C71 (#151): a re-run (a rollout phase whose Default already denies) is "no change", not an error.
+        noop = desired == current
         changes = field_changes(current, desired, replace=True)
         if any(k.startswith("rule.condition") for k in changes):
             changes = {k: v for k, v in changes.items() if not k.startswith("rule.condition")}
@@ -809,8 +832,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "to": render_condition(r.get("condition")),
             }
         side = []
-        if state == "disabled" or conditions is not None:
+        if not noop and (state == "disabled" or conditions is not None):
             side.append("Requests this rule no longer matches fall through to the next rule")
+        rule_name = (current.get("rule") or {}).get("name")
+        noop_reason = f"{section} rule {rule_name} in {ps['name']} already as requested"
         return await preview_or_apply(
             ctx,
             tool="ise_update_policy_rule",
@@ -833,11 +858,13 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             },
             confirm=confirm,
             plan=Plan(
-                f"Update {section} rule {(current.get('rule') or {}).get('name')} in {ps['name']}",
+                f"Update {section} rule {rule_name} in {ps['name']}",
                 details={"changes": changes},
                 fingerprint=fingerprint(current),
                 blockers=blockers,
                 side_effects=side,
+                noop=noop,
+                noop_reason=noop_reason if noop else None,
             ),
             apply=lambda: _updated(app.openapi.put(path, desired), rule_view),
         )
