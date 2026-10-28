@@ -60,7 +60,10 @@ async def test_prompt_renders_the_full_flow() -> None:
     assert "{{aaa_source_if}}" in text
     assert "`catsdwan_deploy_config_group`" in text and "never pass confirm yourself" in text
     # Test logins checked in ISE.
-    assert '`ise_get_auth_list` with nad=<edge>, since_minutes=15, user="alice"' in text
+    # A 'test aaa' login has no MnT record (#114): the edge's answer and the GUI live log are the proof.
+    assert "`ise_get_auth_list` with nad=" not in text
+    assert "MnT keeps no record of it, passed or failed" in " ".join(text.split())
+    assert "Operations > RADIUS > Live Logs" in text
     assert "Operations > TACACS > Live Logs" in text
     assert "VPN 512" in text  # never the NAD address
 

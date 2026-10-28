@@ -95,9 +95,12 @@ fine when ISE is reachable on the management network: then set vrf="Mgmt-vrf". N
 6. Test the login.
    - RADIUS: the user types on the switch console (never here):
        test aaa group ISE-RADIUS alice <password> new-code
-     Then `ise_get_auth_list` with nad="syd-acc-sw01", since_minutes=15, user="alice": the attempt
-     with NAS IP 192.0.2.21. A reject still proves the path and the secret; nothing at all: `ise_recent_auth_failures` with nad="syd-acc-sw01", then
-     'show aaa servers' (requests rising, no responses = the secret, the source address or the route).
+     The switch's answer is the proof: "User successfully authenticated" or "User rejected" both
+     prove the path and the secret. A 'test aaa' login sends no RADIUS accounting, so MnT keeps no
+     record of it, passed or failed: `ise_get_auth_list` and `ise_recent_auth_failures` stay empty, and the
+     rule it hit is only in the GUI (Operations > RADIUS > Live Logs, NAS IP 192.0.2.21). No answer
+     at all: 'show aaa servers' (requests rising, no responses = the secret, the source address or
+     the route).
    - TACACS+: the user opens a NEW SSH session to 192.0.2.21 with
      alice (keep the current session open until it works).
      `ise_admin_policy_explain` with user="alice", nad="syd-acc-sw01" shows the

@@ -15,6 +15,7 @@ import respx
 from fastmcp.exceptions import ToolError
 
 from ise_mcp._core.testing import call_tool
+from ise_mcp.tools.activity import MAC_LESS_NOTE
 from ise_mcp.tools.radius import compare, slow_nads, summarise, timeout_reason
 from tests.unit.conftest import FAILURE_REASONS_XML, ers_page, make_server, xml
 
@@ -269,7 +270,9 @@ async def test_nothing_found_says_mac_less_radius_is_not_covered(mock: respx.Moc
     mock_mnt(mock, {}, auth_list())
     out = body(await call_tool(make_server(), "ise_nad_radius_stats", {"include_endpoint_db": False}))
     note = out["coverage"]["mac_less_radius"]
+    assert note == MAC_LESS_NOTE
     assert "test aaa" in note and "user=" in note and "Live Logs" in note
+    assert "only when the NAD also sent RADIUS accounting" in note and "leaves no MnT record" in note
     assert "mac_less_radius" in out["verdict"]
     assert "users_checked" not in out["coverage"]
 
@@ -310,3 +313,4 @@ async def test_user_session_outside_window_or_missing(mock: respx.MockRouter) ->
     route.respond(500, text=MISSING_SESSION)
     out = body(await call_tool(make_server(), "ise_nad_radius_stats", args))
     assert out["coverage"]["users_checked"] == {PROBE: "no MnT session"}
+    assert out["coverage"]["mac_less_radius"] == MAC_LESS_NOTE

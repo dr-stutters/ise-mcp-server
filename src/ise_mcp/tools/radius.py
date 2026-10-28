@@ -257,8 +257,9 @@ def register(reg: ToolRegistrar) -> None:
         user: Annotated[
             str | None,
             Field(
-                description="Also read this exact username's latest MnT session: covers MAC-less RADIUS "
-                "(device admin, VPN, a router's 'test aaa') that the per-MAC history never shows"
+                description="Also read this exact username's latest MnT session: finds MAC-less RADIUS "
+                "only when the NAD sent accounting (VPN); a 'test aaa' or device-admin RADIUS login "
+                "leaves no MnT record"
             ),
         ] = None,
         max_lookups: Annotated[
@@ -290,8 +291,9 @@ def register(reg: ToolRegistrar) -> None:
         secret; check ise_audit_nads). MnT history is per MAC and leaves out repeated successful logins,
         so this reads a capped set of candidate MACs (given, sessions in the window, endpoint database)
         and reports its coverage. RADIUS without a MAC (device admin, VPN, a router's 'test aaa') is not
-        in that history: user= adds that user's latest MnT session, and the result says so when nothing
-        was found. The window always ends now."""
+        in that history: user= adds that user's latest MnT session, which exists only when the NAD sent
+        RADIUS accounting (VPN). A 'test aaa' or device-admin RADIUS login leaves no MnT record (only the
+        GUI live log shows it), and the result says so when nothing was found. The window always ends now."""
         app: IseApp = get_client(ctx)
         if compare_previous and since_minutes * 2 > MAX_WINDOW_MINUTES:
             raise InvalidRequest(

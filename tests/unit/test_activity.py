@@ -10,8 +10,8 @@ from fastmcp.exceptions import ToolError
 
 from ise_mcp._core import InvalidRequest
 from ise_mcp._core.testing import call_tool
-from ise_mcp.tools.activity import is_coa_record, parse_until
-from tests.unit.conftest import FAILURE_REASONS_XML, ers_page, make_server, xml
+from ise_mcp.tools.activity import MAC_LESS_NOTE, is_coa_record, parse_until
+from tests.unit.conftest import FAILURE_REASONS_XML, MISSING_SESSION, ers_page, make_server, xml
 
 SW_IP = "192.0.2.154"
 NAD_ID = "11111111-2222-3333-4444-555555555555"
@@ -355,5 +355,30 @@ async def test_recent_failures_user_session_passed_is_not_a_failure(mock: respx.
     )
     assert out["failed_attempts"] == 0
     note = out["coverage"]["mac_less_radius"]
-    assert "test aaa" in note and "Live Logs" in note
+    assert note == MAC_LESS_NOTE
     assert "mac_less_radius" in out["note"]
+
+
+def test_mac_less_note_says_test_aaa_leaves_no_mnt_record() -> None:
+    # #114: live, even an accepted 'test aaa' had no MnT session; user= only helps when the NAD sent
+    # accounting, and the GUI live log is the only place a router or device-admin login shows up.
+    assert "only when the NAD also sent RADIUS accounting" in MAC_LESS_NOTE
+    assert "'test aaa' or device-admin RADIUS login, passed or failed" in MAC_LESS_NOTE
+    assert "leaves no MnT record at all" in MAC_LESS_NOTE
+    assert "only the GUI live log (Operations > RADIUS > Live Logs" in MAC_LESS_NOTE
+    assert "often has none" not in MAC_LESS_NOTE
+
+
+async def test_recent_failures_test_aaa_login_no_session_shows_note(mock: respx.MockRouter) -> None:
+    # #114 live shape: the user's Session/UserName answers "no session" after an accepted test aaa.
+    mock.get("/admin/API/mnt/FailureReasons").respond(text=FAILURE_REASONS_XML)
+    mock.get(url__regex=r".*/Session/AuthList/.*").respond(text=EMPTY_LIST)
+    mock.get("/admin/API/mnt/Session/UserName/mcp-probe").respond(500, text=MISSING_SESSION)
+    out = body(
+        await call_tool(
+            make_server(), "ise_recent_auth_failures", {"user": "mcp-probe", "include_endpoint_db": False}
+        )
+    )
+    assert out["failed_attempts"] == 0
+    assert out["coverage"]["users_checked"] == {"mcp-probe": "no MnT session"}
+    assert out["coverage"]["mac_less_radius"] == MAC_LESS_NOTE
