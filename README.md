@@ -294,7 +294,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-162 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+163 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 88 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -321,7 +321,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_backup_status` | Status of the last configuration backup (name, repository, start/end time, status, progress). |
 | `ise_get_dacl` | One downloadable ACL with its full ACE text (one ACE per line), IP version and description. |
 | `ise_get_definition` | Describe a Cisco ISE API operation (parameters, request fields, required fields) or a schema (fields with types and enums). |
-| `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status. |
+| `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status (ENABLED, MONITOR: hits counted, traffic passes, or DISABLED). |
 | `ise_get_guest_locations` | Guest locations (each carries a time zone in the GUI; guest dates are in that local time) and the guest SSIDs sponsors can pick. |
 | `ise_get_guest_user` | One guest account: status (with what it means), guest type, validity window, location/SSID, sponsor, contact details, visit reason. |
 | `ise_get_internal_user` | One internal user: enabled state, identity group names, names/email, password store, expiry, created/modified dates and custom attributes. |
@@ -428,7 +428,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
 | `ise_set_custom_attribute` | Create an endpoint custom attribute definition (so endpoints can carry a value that policy matches as 'EndPoints:<name>'), or delete one. |
 | `ise_set_dacl` | Create a downloadable ACL, or replace an existing one's ACEs. |
-| `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply and the final catch-all. |
+| `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply, the final catch-all, and the cell status (ENABLED, MONITOR or DISABLED). |
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
 | `ise_set_guest_type` | Create a guest type, or change one: account duration (default and maximum, in days, hours or minutes, optionally from first login), login and device limits, the identity group guests get, and the sponsor groups that may use it. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
@@ -450,7 +450,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (20)
+### Dangerous (21)
 
 | Tool | What it does |
 |---|---|
@@ -473,8 +473,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_leave_ad` | Take one or all ISE nodes out of the AD domain: AD-backed logins through this join point stop working there at once. |
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
 | `ise_reprofile_endpoint` | Make ISE re-evaluate an endpoint's profile now: sends a CoA reauthenticate through the PSN that owns its session, so the NAD re-authenticates, fresh RADIUS / device-sensor attributes reach the profiler, and the authorization result applies the current profile. |
+| `ise_set_default_egress_rule` | Change the TrustSec matrix default (the ANY-ANY egress cell): the catch-all, SGACLs and status that apply to every source/destination SGT pair without an explicit cell. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
-
 ### Prompts (8)
 
 | Prompt | What it does |
@@ -588,6 +588,10 @@ Switches can download environment data and policy over ISE's TrustSec HTTPS serv
 empty), `ise_update_nad(trustsec_rest_user=, trustsec_rest_password=)` for the credentials `cts
 policy-server` sends, and `docs/trustsec.md` for the switch side. `ise_trustsec_device_report` shows the
 devices that report their downloads back (PUSH ID support, IOS XE 26.2.1+); others are checked on the switch.
+Staged enforcement: `ise_set_egress_policy(status='MONITOR')` per cell (devices count SGACL hits, traffic
+passes), `ise_get_egress_matrix(status='MONITOR')` lists what is left to enforce, then `status='ENABLED'`.
+Default-deny comes last: `ise_set_default_egress_rule(rule='DENY_IP')` (dangerous) changes the ANY-ANY cell;
+its preview lists the SGT pairs without an explicit cell and the live sessions per SGT.
 
 ### Backups
 Before a risky change (Catalyst Center's group-based policy migration makes ISE's TrustSec objects read-only;

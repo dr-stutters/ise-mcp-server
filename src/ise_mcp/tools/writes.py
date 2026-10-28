@@ -44,6 +44,22 @@ from ise_mcp.tools.policy import av_pair_text, rules_using_profile
 # --- helpers ------------------------------------------------------------------------------------
 
 
+CellStatus = Literal["ENABLED", "DISABLED", "MONITOR"]
+PUSH_REMINDER = (
+    "Devices apply matrix changes at their next policy refresh; ise_push_trustsec_matrix sends the "
+    "TrustSec CoA so they download it now"
+)
+
+
+def resolve_cell_status(status: str | None, enabled: bool | None) -> str | None:
+    """An egress cell's matrixCellStatus from `status`, or the deprecated `enabled` flag; None when
+    neither is given (a new cell is ENABLED, an existing one keeps its status)."""
+    legacy = None if enabled is None else ("ENABLED" if enabled else "DISABLED")
+    if status and legacy and status != legacy:
+        raise InvalidRequest(f"status={status} contradicts enabled={enabled}; pass status only")
+    return status or legacy
+
+
 def fingerprint(obj: Any) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -1727,13 +1743,33 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         default_rule: Annotated[
             Literal["NONE", "PERMIT_IP", "DENY_IP"], Field(description="Catch-all after the SGACLs")
         ] = "NONE",
-        enabled: Annotated[bool, Field(description="Cell status ENABLED or DISABLED")] = True,
+        status: Annotated[
+            CellStatus | None,
+            Field(
+                description="Cell status: ENABLED (enforced), MONITOR (devices count SGACL hits but let the "
+                "traffic through: the step before enforcing) or DISABLED. Default: ENABLED for a new "
+                "cell, unchanged for an existing one"
+            ),
+        ] = None,
+        enabled: Annotated[
+            bool | None,
+            Field(description="Deprecated: use status. true = ENABLED, false = DISABLED"),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which
-        SGACLs apply and the final catch-all. Creates the cell or replaces it. Devices enforce it after
-        they refresh policy (or a TrustSec CoA push). Preview-first with a diff."""
+        SGACLs apply, the final catch-all, and the cell status (ENABLED, MONITOR or DISABLED). Creates the
+        cell or replaces it. A TrustSec rollout sets cells to MONITOR first, reads the monitored hits
+        ('show cts role-based counters'), then ENABLED; the ANY-ANY default is ise_set_default_egress_rule.
+        Devices enforce it after they refresh policy (or ise_push_trustsec_matrix). Preview-first with a
+        diff."""
         app: IseApp = get_client(ctx)
+        cell_status = resolve_cell_status(status, enabled)
+        if source_sgt.strip().upper() == "ANY" and destination_sgt.strip().upper() == "ANY":
+            raise InvalidRequest(
+                "ANY -> ANY is the matrix default; change it with ise_set_default_egress_rule "
+                "(dangerous tier)"
+            )
         src = await app.ers_find("sgt", source_sgt)
         dst = await app.ers_find("sgt", destination_sgt)
         if not src or not dst:
@@ -1744,7 +1780,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         body: dict[str, Any] = {
             "sourceSgtId": src["id"],
             "destinationSgtId": dst["id"],
-            "matrixCellStatus": "ENABLED" if enabled else "DISABLED",
+            "matrixCellStatus": cell_status or "ENABLED",
             "defaultRule": default_rule,
             "sgacls": acl_ids,
         }
@@ -1759,22 +1795,37 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             full = await app.ers_get("egressmatrixcell", str(c["id"]))
             if full.get("sourceSgtId") == src["id"] and full.get("destinationSgtId") == dst["id"]:
                 current = full
+        if current and cell_status is None:
+            body["matrixCellStatus"] = current.get("matrixCellStatus") or "ENABLED"
         args = {
             "source_sgt": source_sgt,
             "destination_sgt": destination_sgt,
             "sgacls": sgacls,
             "default_rule": default_rule,
+            "status": status,
             "enabled": enabled,
         }
         summary = (
             f"{source_sgt} -> {destination_sgt}: {', '.join(sgacls) or '(no SGACL)'} then {default_rule}"
+            f" ({body['matrixCellStatus']})"
         )
         if current:
             desired = deep_merge(current, body)
+            side = []
+            was, now = current.get("matrixCellStatus"), body["matrixCellStatus"]
+            if was != now:
+                side.append(f"Cell status {was} -> {now}")
+                if now == "MONITOR":
+                    side.append(
+                        "Devices stop enforcing this cell: SGACL hits are counted ('show cts role-based "
+                        "counters') and the traffic passes until the cell is ENABLED"
+                    )
+            side.append(PUSH_REMINDER)
             plan = Plan(
                 f"Update egress cell {summary}",
                 details={"changes": field_changes(current, desired, replace=True)},
                 fingerprint=fingerprint(current),
+                side_effects=side,
             )
             return await preview_or_apply(
                 ctx,
@@ -1789,7 +1840,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             tool="ise_set_egress_policy",
             args=args,
             confirm=confirm,
-            plan=Plan(f"Create egress cell {summary}", details=body),
+            plan=Plan(f"Create egress cell {summary}", details=body, side_effects=[PUSH_REMINDER]),
             apply=lambda: ers_post(app, "egressmatrixcell", "EgressMatrixCell", body),
         )
 
