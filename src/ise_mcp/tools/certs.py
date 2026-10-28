@@ -8,6 +8,7 @@ OpenSSL or step-ca lab CA, or a public CA.
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
+import asyncio
 import base64
 import hashlib
 import os
@@ -39,7 +40,10 @@ from ise_mcp._core import (
     preview_or_apply,
 )
 from ise_mcp._core.http import page_of
+from ise_mcp._core.inbound_auth import current_caller
 from ise_mcp._core.secrets import register_secret
+from ise_mcp._core.targets import target_name
+from ise_mcp._core.writes import get_previews
 from ise_mcp.client import IseApp
 from ise_mcp.config import Settings
 from ise_mcp.tools._common import list_result, openapi_all
@@ -251,7 +255,7 @@ def cert_dns_names(cert: x509.Certificate) -> list[str]:
         names += [str(n) for n in san.get_values_for_type(x509.DNSName)]
     except x509.ExtensionNotFound:
         pass
-    return names
+    return list(dict.fromkeys(names))  # the SAN usually repeats the CN: list each name once
 
 
 def public_der(key: Any) -> bytes:
@@ -295,8 +299,33 @@ TRUST_BOOLS = (
     "rejectIfNoStatusFromOCSP",
     "rejectIfUnreachableFromOCSP",
 )
+# ISE refuses a PUT with any of these true while downloadCRL is false ("... can only be set true if
+# downloadCRL parameter is set to be true"), though its GET reports automaticCRLUpdate 'on' on stock CAs
+# with CRL download off (#159).
+CRL_ONLY = (
+    "automaticCRLUpdate",
+    "authenticateBeforeCRLReceived",
+    "ignoreCRLExpiration",
+    "enableServerIdentityCheck",
+)
+CRL_ONLY_REASON = "ISE requires this off while CRL download is off"
+# A confirm whose re-read shows nothing to do after a preview that had a diff waits this long and reads
+# again once: ISE can briefly serve a stale trusted-certificate read (#159).
+STALE_READ_RETRY_SECONDS = 3.0
 TRUST_INTS = ("automaticCRLUpdatePeriod", "nonAutomaticCRLUpdatePeriod", "crlDownloadFailureRetries")
 TRUST_UNITS = ("automaticCRLUpdateUnits", "nonAutomaticCRLUpdateUnits", "crlDownloadFailureRetriesUnits")
+
+
+def previewed_change(ctx: Context, confirm: str) -> bool:
+    """True when `confirm` is this caller's live token for an ise_set_trusted_cert preview. Tokens are
+    only issued for previews that had a change, so a token means the preview saw a diff."""
+    target = target_name()
+    pending = get_previews(ctx).peek(confirm)
+    return (
+        pending is not None
+        and pending.tool == ("ise_set_trusted_cert" if target is None else f"ise_set_trusted_cert@{target}")
+        and (pending.caller == current_caller() or pending.two_person)
+    )
 
 
 def on(value: Any) -> bool:
@@ -896,7 +925,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         the preview diffs ISE's current settings against the PUT and is a no_change when nothing would.
         Disabling a CA that issued a node's in-use Admin or EAP certificate is blocked. Turning on CRL
         checking without crl_bypass_if_not_received rejects this CA's client certificates until the first
-        CRL arrives (the preview says so). Preview-first."""
+        CRL arrives (the preview says so). With CRL download off, ISE refuses the CRL-only flags
+        (auto update, bypass, ignore expiration, server identity check): asking for one is blocked, and
+        one ISE's read reports on is sent off and shown under required_by_ise. Preview-first."""
         app: IseApp = get_client(ctx)
         if description is not None and not SAFE_TEXT.fullmatch(description):
             raise InvalidRequest(
@@ -918,106 +949,163 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             )
         cert_id = str(hits[0]["id"])
         path = f"/api/v1/certs/trusted-certificate/{quote(cert_id, safe='')}"
-        got = await app.openapi.get(path)
-        raw_cur = (
-            got.get("response") if isinstance(got, dict) and isinstance(got.get("response"), dict) else got
-        )
-        if not isinstance(raw_cur, dict):
-            raise NotFound(f"Trusted certificate {cert_id} vanished", 404)
-        current, unknown = trust_settings(raw_cur)
-        desired = dict(current)
-        blockers: list[str] = []
-        side: list[str] = []
-        if trust_for is not None:
-            for flag in TRUST_FIELDS.values():
-                desired[flag] = False
-            for t in trust_for:
-                desired[TRUST_FIELDS[t]] = True
-            if unknown:
-                side.append(
-                    f"ISE also lists trust usages this tool does not set ({', '.join(unknown)}): "
-                    "they are replaced"
+        crl_asks = {  # PUT field -> (argument, value given)
+            "automaticCRLUpdate": ("crl_auto_update", crl_auto_update),
+            "authenticateBeforeCRLReceived": ("crl_bypass_if_not_received", crl_bypass_if_not_received),
+            "ignoreCRLExpiration": ("ignore_crl_expiration", ignore_crl_expiration),
+            "enableServerIdentityCheck": ("server_identity_check", server_identity_check),
+        }
+
+        async def build() -> tuple[Plan, dict[str, Any]]:
+            got = await app.openapi.get(path)
+            raw_cur = (
+                got.get("response")
+                if isinstance(got, dict) and isinstance(got.get("response"), dict)
+                else got
+            )
+            if not isinstance(raw_cur, dict):
+                raise NotFound(f"Trusted certificate {cert_id} vanished", 404)
+            current, unknown = trust_settings(raw_cur)
+            desired = dict(current)
+            blockers: list[str] = []
+            side: list[str] = []
+            if trust_for is not None:
+                for flag in TRUST_FIELDS.values():
+                    desired[flag] = False
+                for t in trust_for:
+                    desired[TRUST_FIELDS[t]] = True
+                if unknown:
+                    side.append(
+                        f"ISE also lists trust usages this tool does not set ({', '.join(unknown)}): "
+                        "they are replaced"
+                    )
+            elif unknown:
+                blockers.append(
+                    f"ISE lists trust usages this tool does not know ({', '.join(unknown)}): give trust_for "
+                    "explicitly so the PUT doesn't drop them silently"
                 )
-        elif unknown:
-            blockers.append(
-                f"ISE lists trust usages this tool does not know ({', '.join(unknown)}): give trust_for "
-                "explicitly so the PUT doesn't drop them silently"
+            if status is not None:
+                desired["status"] = "Enabled" if status == "enabled" else "Disabled"
+            if description is not None:
+                desired["description"] = description
+            for key, val in (
+                ("downloadCRL", crl_download),
+                ("automaticCRLUpdate", crl_auto_update),
+                ("authenticateBeforeCRLReceived", crl_bypass_if_not_received),
+                ("ignoreCRLExpiration", ignore_crl_expiration),
+                ("rejectIfUnreachableFromOCSP", ocsp_reject_unreachable),
+                ("rejectIfNoStatusFromOCSP", ocsp_reject_no_status),
+                ("enableServerIdentityCheck", server_identity_check),
+            ):
+                if val is not None:
+                    desired[key] = val
+            # ISE refuses the CRL-only flags while CRL download is off, though its GET can report them on:
+            # ask for one and the preview blocks; one ISE reports is sent off and shown apart (#159).
+            required: dict[str, Any] = {}
+            if not desired["downloadCRL"]:
+                asked = [arg for arg, val in crl_asks.values() if val]
+                if asked:
+                    blockers.append(
+                        f"{', '.join(asked)} need CRL download on (ISE refuses them while it is off): "
+                        "give crl_download=true and crl_url"
+                    )
+                for key in CRL_ONLY:
+                    if crl_asks[key][1] is None and current[key]:
+                        required[key] = {"from": True, "to": False, "reason": CRL_ONLY_REASON}
+                    desired[key] = False
+            if crl_url is not None:
+                desired["crlDistributionUrl"] = crl_url
+            auto = desired["automaticCRLUpdate"]
+            if crl_update_period is not None:
+                desired["automaticCRLUpdatePeriod" if auto else "nonAutomaticCRLUpdatePeriod"] = (
+                    crl_update_period
+                )
+            if crl_update_units is not None:
+                desired["automaticCRLUpdateUnits" if auto else "nonAutomaticCRLUpdateUnits"] = (
+                    crl_update_units
+                )
+            if ocsp_service is not None:
+                desired["selectedOCSPService"] = ocsp_service
+                desired["enableOCSPValidation"] = bool(ocsp_service)
+            if desired["downloadCRL"] and not desired["crlDistributionUrl"]:
+                blockers.append("CRL download needs a distribution URL: give crl_url")
+            if not desired["enableOCSPValidation"] and (ocsp_reject_unreachable or ocsp_reject_no_status):
+                blockers.append("The OCSP reject options need OCSP on: give ocsp_service")
+            # Which in-use Admin / EAP certificates did this CA issue?
+            issued = str(raw_cur.get("issuedTo") or "")
+            in_use = []
+            for host in await node_names(app):
+                for c in await openapi_all(app, f"/api/v1/certs/system-certificate/{quote(host, safe='')}"):
+                    used = str((c or {}).get("usedBy") or "") if isinstance(c, dict) else ""
+                    roles = [r for r in ("Admin", "EAP Authentication") if r in used]
+                    if roles and issued and str(c.get("issuedBy")) == issued:
+                        in_use.append(f"{host} {'/'.join(roles)} certificate {c.get('friendlyName')}")
+            if in_use and current["status"] == "Enabled" and desired["status"] == "Disabled":
+                blockers.append(
+                    f"{current['name']} issued certificates in use: {'; '.join(in_use)}. Disabling it breaks "
+                    "them: move those roles to another certificate first"
+                )
+            if in_use and current["trustForIseAuth"] and not desired["trustForIseAuth"]:
+                side.append(
+                    f"ise_auth (Infrastructure) is turned off on the CA of {'; '.join(in_use)}: nodes and "
+                    "clients validating those certificates against ISE's store may fail"
+                )
+            if current["trustForClientAuth"] and not desired["trustForClientAuth"]:
+                side.append(
+                    "EAP-TLS client certificates this CA issued stop being accepted (client_auth off)"
+                )
+            if (
+                desired["status"] == "Disabled"
+                and current["status"] == "Enabled"
+                and raw_cur.get("isReferredInPolicy")
+            ):
+                side.append(f"{current['name']} is referenced in policy: rules relying on it stop matching")
+            if (
+                desired["downloadCRL"]
+                and not current["downloadCRL"]
+                and not desired["authenticateBeforeCRLReceived"]
+            ):
+                side.append(
+                    "CRL checking on without crl_bypass_if_not_received: client certificates this CA issued "
+                    "are rejected until ISE has downloaded the first CRL"
+                )
+            # The user's diff is against ISE's settings as ISE would accept them back.
+            changes = field_changes({**current, **{k: False for k in required}}, desired)
+            details: dict[str, Any] = {"id": cert_id, "changes": changes}
+            if required and changes:
+                details["required_by_ise"] = required
+            noop = unchanged(changes)
+            plan = Plan(
+                f"Update trusted certificate {current['name']}",
+                details=details,
+                fingerprint=fingerprint(raw_cur),
+                blockers=blockers,
+                side_effects=side,
+                noop=noop,
+                noop_reason=f"{current['name']} already has these settings" if noop else None,
             )
-        if status is not None:
-            desired["status"] = "Enabled" if status == "enabled" else "Disabled"
-        if description is not None:
-            desired["description"] = description
-        for key, val in (
-            ("downloadCRL", crl_download),
-            ("automaticCRLUpdate", crl_auto_update),
-            ("authenticateBeforeCRLReceived", crl_bypass_if_not_received),
-            ("ignoreCRLExpiration", ignore_crl_expiration),
-            ("rejectIfUnreachableFromOCSP", ocsp_reject_unreachable),
-            ("rejectIfNoStatusFromOCSP", ocsp_reject_no_status),
-            ("enableServerIdentityCheck", server_identity_check),
-        ):
-            if val is not None:
-                desired[key] = val
-        if crl_url is not None:
-            desired["crlDistributionUrl"] = crl_url
-        auto = desired["automaticCRLUpdate"]
-        if crl_update_period is not None:
-            desired["automaticCRLUpdatePeriod" if auto else "nonAutomaticCRLUpdatePeriod"] = crl_update_period
-        if crl_update_units is not None:
-            desired["automaticCRLUpdateUnits" if auto else "nonAutomaticCRLUpdateUnits"] = crl_update_units
-        if ocsp_service is not None:
-            desired["selectedOCSPService"] = ocsp_service
-            desired["enableOCSPValidation"] = bool(ocsp_service)
-        if desired["downloadCRL"] and not desired["crlDistributionUrl"]:
-            blockers.append("CRL download needs a distribution URL: give crl_url")
-        if not desired["enableOCSPValidation"] and (ocsp_reject_unreachable or ocsp_reject_no_status):
-            blockers.append("The OCSP reject options need OCSP on: give ocsp_service")
-        # Which in-use Admin / EAP certificates did this CA issue?
-        issued = str(raw_cur.get("issuedTo") or "")
-        in_use = []
-        for host in await node_names(app):
-            for c in await openapi_all(app, f"/api/v1/certs/system-certificate/{quote(host, safe='')}"):
-                used = str((c or {}).get("usedBy") or "") if isinstance(c, dict) else ""
-                roles = [r for r in ("Admin", "EAP Authentication") if r in used]
-                if roles and issued and str(c.get("issuedBy")) == issued:
-                    in_use.append(f"{host} {'/'.join(roles)} certificate {c.get('friendlyName')}")
-        if in_use and current["status"] == "Enabled" and desired["status"] == "Disabled":
-            blockers.append(
-                f"{current['name']} issued certificates in use: {'; '.join(in_use)}. Disabling it breaks "
-                "them: move those roles to another certificate first"
-            )
-        if in_use and current["trustForIseAuth"] and not desired["trustForIseAuth"]:
-            side.append(
-                f"ise_auth (Infrastructure) is turned off on the CA of {'; '.join(in_use)}: nodes and "
-                "clients validating those certificates against ISE's store may fail"
-            )
-        if current["trustForClientAuth"] and not desired["trustForClientAuth"]:
-            side.append("EAP-TLS client certificates this CA issued stop being accepted (client_auth off)")
-        if (
-            desired["status"] == "Disabled"
-            and current["status"] == "Enabled"
-            and raw_cur.get("isReferredInPolicy")
-        ):
-            side.append(f"{current['name']} is referenced in policy: rules relying on it stop matching")
-        if (
-            desired["downloadCRL"]
-            and not current["downloadCRL"]
-            and not desired["authenticateBeforeCRLReceived"]
-        ):
-            side.append(
-                "CRL checking on without crl_bypass_if_not_received: client certificates this CA issued are "
-                "rejected until ISE has downloaded the first CRL"
-            )
-        changes = field_changes(current, desired)
-        plan = Plan(
-            f"Update trusted certificate {current['name']}",
-            details={"id": cert_id, "changes": changes},
-            fingerprint=fingerprint(raw_cur),
-            blockers=blockers,
-            side_effects=side,
-            noop=unchanged(changes),
-            noop_reason=f"{current['name']} already has these settings" if unchanged(changes) else None,
-        )
+            return plan, desired
+
+        plan, desired = await build()
+        if confirm is not None and plan.noop and not plan.blockers and previewed_change(ctx, confirm):
+            # The preview behind this token had a diff and now there is none: ISE can briefly serve a
+            # stale read (#159). Read once more before calling the target already done.
+            await asyncio.sleep(STALE_READ_RETRY_SECONDS)
+            plan, desired = await build()
+            if plan.noop:
+                return {
+                    "status": "read_disagrees",
+                    "action": plan.summary,
+                    "summary": (
+                        "ISE's read of this certificate disagrees with the preview: the preview had a "
+                        "change, two reads since show none. Nothing was changed."
+                    ),
+                    "details": plan.details,
+                    "note": (
+                        "ISE may be serving a stale read. Run it again: preview again (or retry this "
+                        "confirm) in a minute, and check the certificate with ise_list_certificates."
+                    ),
+                }
         return await preview_or_apply(
             ctx,
             tool="ise_set_trusted_cert",

@@ -276,6 +276,26 @@ async def name_list(app: IseApp, path: str) -> list[str]:
     return [str(x.get("name")) for x in data if isinstance(x, dict) and x.get("name")]
 
 
+async def service_types(app: IseApp, kind: str) -> dict[str, str]:
+    """The kind's service names (allowed protocols and server sequences) with their serviceType."""
+    data = _resp(await app.openapi.get(f"/api/v1/policy/{kind}/service-names")) or []
+    return {
+        str(x["name"]): str(x.get("serviceType") or "allowedProtocols")
+        for x in data
+        if isinstance(x, dict) and x.get("name")
+    }
+
+
+def is_proxy(types: dict[str, str], service: str) -> bool:
+    """#158: a policy set on a server sequence must say isProxy=true (and false otherwise), or ISE answers
+    400 'Mismatch between proxy attribute to service name'."""
+    by_lower = {k.lower(): v for k, v in types.items()}
+    return by_lower.get(service.lower()) == "serverSequence"
+
+
+PROXY_NOTE = "The set proxies its requests to the RADIUS/TACACS server sequence {0} (isProxy)"
+
+
 def missing(wanted: list[str], known: list[str], what: str, tool: str) -> list[str]:
     lower = {k.lower() for k in known}
     out = []
@@ -388,7 +408,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         condition, blockers = await build_condition(app, kind, "policyset", conditions, match)
         if condition is None:
             raise InvalidRequest("Give at least one condition (a policy set without one never matches)")
-        services = await name_list(app, f"/api/v1/policy/{kind}/service-names")
+        types = await service_types(app, kind)
+        services = list(types)
         blockers += missing(
             [service], services, "allowed protocols / server sequence", "ise_list_allowed_protocols"
         )
@@ -401,13 +422,14 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "rank": rank,
             "serviceName": canonical([service], services)[0],
             "condition": condition,
-            "isProxy": False,
+            "isProxy": is_proxy(types, service),
         }
         details = {
             "kind": kind,
             "name": name,
             "condition": render_condition(condition),
             "allowed_protocols": body["serviceName"],
+            "proxy": body["isProxy"],
             "state": state,
             "rank": rank,
             **landing(names, rank),
@@ -432,7 +454,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 details=details,
                 blockers=blockers,
                 fingerprint=fingerprint([str(p.get("name")) for p in existing]),
-                side_effects=["Matching requests stop reaching the policy sets below it"],
+                side_effects=[
+                    "Matching requests stop reaching the policy sets below it",
+                    *([PROXY_NOTE.format(body["serviceName"])] if body["isProxy"] else []),
+                ],
             ),
             apply=lambda: _created(app.openapi.post(f"/api/v1/policy/{kind}/policy-set", body)),
         )
@@ -448,7 +473,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             Field(description="Replace the conditions (same syntax as ise_create_policy_set)"),
         ] = None,
         match: Match = "all",
-        allowed_protocols: Annotated[str | None, Field(description="New allowed protocols service")] = None,
+        allowed_protocols: Annotated[
+            str | None,
+            Field(description="New allowed protocols service or RADIUS/TACACS server sequence"),
+        ] = None,
         rank: Annotated[int | None, Field(ge=0, description="Move to this position (0 = first)")] = None,
         new_name: Annotated[str | None, Field(description="Rename the policy set")] = None,
         description: Annotated[str | None, Field(description="New description")] = None,
@@ -478,11 +506,19 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             blockers += cond_blockers
             desired["condition"] = cond
         if allowed_protocols is not None:
-            services = await name_list(app, f"/api/v1/policy/{kind}/service-names")
+            types = await service_types(app, kind)
+            services = list(types)
             blockers += missing(
-                [allowed_protocols], services, "allowed protocols service", "ise_list_allowed_protocols"
+                [allowed_protocols],
+                services,
+                "allowed protocols service / server sequence",
+                "ise_list_allowed_protocols",
             )
             desired["serviceName"] = canonical([allowed_protocols], services)[0]
+            # #158: isProxy follows the service, both ways (sequence -> true, allowed protocols -> false).
+            proxy = is_proxy(types, allowed_protocols)
+            if bool(current.get("isProxy")) != proxy:
+                desired["isProxy"] = proxy
         if rank is not None:
             desired["rank"] = rank
         if new_name is not None:
@@ -510,6 +546,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         side = []
         if not noop and (state in ("disabled",) or conditions is not None):
             side.append("Requests this set no longer matches fall through to the next policy set")
+        if not noop and allowed_protocols is not None and desired.get("isProxy"):
+            side.append(PROXY_NOTE.format(desired["serviceName"]))
+        elif not noop and current.get("isProxy") and desired.get("isProxy") is False:
+            side.append("The set stops proxying: ISE authenticates its requests itself")
         plan = Plan(
             f"Update {kind} policy set {ps['name']}",
             details={"changes": changes},

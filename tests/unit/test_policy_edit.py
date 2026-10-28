@@ -208,6 +208,67 @@ async def test_create_policy_set(mock: respx.MockRouter) -> None:
     assert blocked["status"] == "blocked"
 
 
+SERVICES = [
+    {"name": "Default Network Access", "serviceType": "allowedProtocols", "isLocalAuthorization": None},
+    {"name": "mcp_r96_seq", "serviceType": "serverSequence", "isLocalAuthorization": False},
+]
+
+
+async def test_create_policy_set_on_server_sequence_proxies(mock: respx.MockRouter) -> None:
+    # #158: ISE answers 400 "Mismatch between proxy attribute to service name" unless isProxy follows it.
+    policy_mocks(mock)
+    mock.get(f"{NA}/service-names").respond(json=SERVICES)
+    post = mock.post(f"{NA}/policy-set").respond(
+        201, json={"response": {"id": "n2", "name": "mcp_proxy_set", "rank": 0}}
+    )
+    preview, applied = await two_step(
+        "ise_create_policy_set",
+        {"name": "mcp_proxy_set", "conditions": ["Wired_MAB"], "allowed_protocols": "MCP_R96_SEQ"},
+    )
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["proxy"] is True
+    assert any("proxies" in s and "mcp_r96_seq" in s for s in preview["side_effects"])
+    body = json.loads(post.calls.last.request.content)
+    assert body["serviceName"] == "mcp_r96_seq" and body["isProxy"] is True
+    assert applied["status"] == "applied"
+    # An allowed-protocols service stays a non-proxy set.
+    await two_step("ise_create_policy_set", {"name": "mcp_local_set", "conditions": ["Wired_MAB"]})
+    assert json.loads(post.calls.last.request.content)["isProxy"] is False
+
+
+async def test_update_policy_set_service_switches_is_proxy_both_ways(mock: respx.MockRouter) -> None:
+    policy_mocks(mock)
+    mock.get(f"{NA}/service-names").respond(json=SERVICES)
+    ps = {
+        "id": "s1",
+        "name": "Wired",
+        "rank": 0,
+        "state": "enabled",
+        "serviceName": "Default Network Access",
+        "isProxy": False,
+    }
+    get = mock.get(f"{NA}/policy-set/s1").respond(json={"response": ps})
+    put = mock.put(f"{NA}/policy-set/s1").respond(json={"response": ps})
+    preview, applied = await two_step(
+        "ise_update_policy_set", {"policy_set": "Wired", "allowed_protocols": "mcp_r96_seq"}
+    )
+    assert preview["preview"]["changes"]["isProxy"] == {"from": False, "to": True}
+    assert any("proxies" in s for s in preview["side_effects"])
+    sent = json.loads(put.calls.last.request.content)
+    assert sent["serviceName"] == "mcp_r96_seq" and sent["isProxy"] is True
+    assert applied["status"] == "applied"
+    # And back: a proxy set moved to an allowed-protocols service sends isProxy false.
+    proxied = {**ps, "serviceName": "mcp_r96_seq", "isProxy": True}
+    get.respond(json={"response": proxied})
+    preview, _ = await two_step(
+        "ise_update_policy_set", {"policy_set": "Wired", "allowed_protocols": "Default Network Access"}
+    )
+    assert preview["preview"]["changes"]["isProxy"] == {"from": True, "to": False}
+    assert any("stops proxying" in s for s in preview["side_effects"])
+    sent = json.loads(put.calls.last.request.content)
+    assert sent["serviceName"] == "Default Network Access" and sent["isProxy"] is False
+
+
 async def test_create_authn_rule(mock: respx.MockRouter) -> None:
     policy_mocks(mock)
     mock.get(f"{NA}/identity-stores").respond(json=[{"name": "Internal Endpoints"}])

@@ -112,6 +112,49 @@ async def test_create_server_from_env_secret(mock: respx.MockRouter, monkeypatch
     assert ENV_KEY not in json.dumps(applied)
 
 
+async def test_create_server_sends_empty_key_fields(mock: respx.MockRouter) -> None:
+    # #158: ISE 3.5 answers 502 to a create without encryptionKey/authenticatorKey, even with key wrap off.
+    routes = fake_ers(mock, store())
+    args = {"name": "mcp_nps3", "host": "192.0.2.63", "shared_secret": NPS_KEY}
+    preview, applied = await two_step("ise_set_external_radius_server", args)
+    assert preview["status"] == "preview" and applied["status"] == "applied"
+    body = sent(routes["post_server"], "ExternalRadiusServer")
+    assert body["enableKeyWrap"] is False and body["keyInputFormat"] == "ASCII"
+    assert body["encryptionKey"] == "" and body["authenticatorKey"] == ""
+
+
+async def test_create_server_with_key_wrap_sends_the_keys(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ISE_RADIUS_SECRET_ENC", WRAP_ENC)
+    monkeypatch.setenv("ISE_RADIUS_SECRET_AUTH", WRAP_AUTH)
+    routes = fake_ers(mock, store())
+    args = {
+        "name": "mcp_nps4",
+        "host": "192.0.2.64",
+        "shared_secret": NPS_KEY,
+        "key_wrap": True,
+        "encryption_key_env": "ISE_RADIUS_SECRET_ENC",
+        "authenticator_key_env": "ISE_RADIUS_SECRET_AUTH",
+    }
+    preview, applied = await two_step("ise_set_external_radius_server", args)
+    assert preview["status"] == "preview" and applied["status"] == "applied"
+    body = sent(routes["post_server"], "ExternalRadiusServer")
+    assert body["enableKeyWrap"] is True
+    assert body["encryptionKey"] == WRAP_ENC and body["authenticatorKey"] == WRAP_AUTH
+
+
+@pytest.mark.parametrize("bad", ["mcp-r96-radius", "nps.1", "nps 1", ""])
+async def test_server_name_is_letters_digits_underscore(mock: respx.MockRouter, bad: str) -> None:
+    # #158: ISE refuses '-' (and '.', ' ') at confirm time; refuse it before the preview.
+    routes = fake_ers(mock, store())
+    server = make_server(mcp_enable_writes=True)
+    with pytest.raises(Exception, match="letters, digits and '_'"):
+        args = {"name": bad, "host": "192.0.2.65", "shared_secret": "x"}
+        await call_tool(server, "ise_set_external_radius_server", args)
+    assert not routes["post_server"].called
+
+
 async def test_create_server_needs_host_and_secret(mock: respx.MockRouter) -> None:
     fake_ers(mock, store())
     out, _ = await two_step("ise_set_external_radius_server", {"name": "half", "host": "192.0.2.62"})

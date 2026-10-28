@@ -90,28 +90,34 @@ PASS = {"SUCCESS", "SUCCESSFUL", "SUCCEEDED", "PASS", "PASSED", "OK", "COMPLETED
 WARN = {"WARNING", "WARN", "WARNINGS"}
 FAIL = {"FAILED", "FAILURE", "FAIL", "ERROR", "ABORTED"}
 RUNNING = {"IN_PROGRESS", "INPROGRESS", "RUNNING", "STARTED", "NOT_STARTED", "PENDING", "QUEUED", "INITIATED"}
+INITIATED = "precheck execution initiated"  # ISE's message on a check that has only just started
 
 
 def _response(data: Any) -> Any:
     return data.get("response", data) if isinstance(data, dict) else data
 
 
-def verdict(status: Any, on_failure: Any = None, check_type: Any = None) -> str:
-    """pass / warn / fail / running for one check or node status. A failed check ISE marks as only a
-    warning on failure (onFailure WARN..., or an optional checkType) is a warn: it doesn't block."""
-    s = str(status or "").strip().upper().replace(" ", "_")
+def verdict(status: Any, on_failure: Any = None, check_type: Any = None, message: Any = None) -> str:
+    """pass / warn / fail / running / unknown for one check or node status. A failed check ISE marks as only a
+    warning on failure (onFailure WARN... or INFO, or an optional checkType) is a warn: it doesn't block.
+    ISE 3.5 answers 'in-progress' (hyphen) with the message '<node>-precheck execution initiated' while a
+    check runs (lab, 2026-10-28); a status this server doesn't know is 'unknown', never a pass."""
+    s = str(status or "").strip().upper().replace(" ", "_").replace("-", "_")
     if s in PASS:
         return "pass"
-    if s in WARN:
-        return "warn"
     if s in FAIL:
         soft = str(on_failure or "").upper()
-        if "WARN" in soft or "CONTINUE" in soft or "OPTIONAL" in str(check_type or "").upper():
+        if (
+            any(w in soft for w in ("WARN", "CONTINUE", "INFO"))
+            or "OPTIONAL" in str(check_type or "").upper()
+        ):
             return "warn"
         return "fail"
-    if s in RUNNING or not s:
+    if s in RUNNING or not s or INITIATED in str(message or "").lower():
         return "running"
-    return "warn"  # a status this server doesn't know: shown raw, never counted as a pass
+    if s in WARN:
+        return "warn"
+    return "unknown"
 
 
 def _check_rows(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -122,7 +128,7 @@ def _check_rows(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict
         if not isinstance(c, dict):
             continue
         name = str(c.get("displayname") or c.get("name") or "?")
-        result = verdict(c.get("status"), c.get("onFailure"), c.get("checkType"))
+        result = verdict(c.get("status"), c.get("onFailure"), c.get("checkType"), c.get("message"))
         fix = c.get("remediationMsg") if result in ("fail", "warn") else None
         row: dict[str, Any] = {
             "check": name,
@@ -136,14 +142,16 @@ def _check_rows(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict
         nodes = [n for n in c.get("nodes") or [] if isinstance(n, dict)]
         if nodes:
             bad = [
-                n for n in nodes if verdict(n.get("status"), c.get("onFailure"), c.get("checkType")) != "pass"
+                n
+                for n in nodes
+                if verdict(n.get("status"), c.get("onFailure"), c.get("checkType"), n.get("msg")) != "pass"
             ]
             row["nodes"] = f"{len(nodes) - len(bad)}/{len(nodes)} ok"
             if bad:
                 row["failing_nodes"] = [str(n.get("name")) for n in bad]
         checks.append({k: v for k, v in row.items() if v not in (None, "")})
         for n in nodes or [{"name": "deployment", "status": c.get("status"), "msg": None}]:
-            node_result = verdict(n.get("status"), c.get("onFailure"), c.get("checkType"))
+            node_result = verdict(n.get("status"), c.get("onFailure"), c.get("checkType"), n.get("msg"))
             node_row = {
                 "node": n.get("name") or "?",
                 "check": name,
@@ -152,49 +160,77 @@ def _check_rows(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict
                 "fix": c.get("remediationMsg") if node_result in ("fail", "warn") else None,
             }
             per_node.append({k: v for k, v in node_row.items() if v not in (None, "")})
-    order = {"fail": 0, "warn": 1, "running": 2, "pass": 3}
+    order = {"fail": 0, "unknown": 1, "warn": 2, "running": 3, "pass": 4}
     checks.sort(key=lambda r: order.get(r["result"], 9))
     per_node.sort(key=lambda r: (str(r["node"]), order.get(r["result"], 9)))
     return checks, per_node
 
 
 def finished(report: dict[str, Any]) -> bool:
-    """The report is final: ISE's overall status is no longer running and no check is still running."""
+    """The report is final: ISE's overall status is no longer running and every check has a pass / warn /
+    fail verdict (a running or unknown check keeps the poll going)."""
     checks = [c for c in report.get("preChecks") or [] if isinstance(c, dict)]
     overall = str(report.get("status") or "").strip().upper()
     if overall in RUNNING:
         return False
     if not checks:
         return bool(overall)
-    return all(verdict(c.get("status")) != "running" for c in checks)
+    return all(
+        verdict(c.get("status"), c.get("onFailure"), c.get("checkType"), c.get("message"))
+        in ("pass", "warn", "fail")
+        for c in checks
+    )
+
+
+def _is_valid(report: dict[str, Any]) -> bool:
+    flag = report.get("isValid")
+    return flag is True or str(flag).strip().lower() == "true"
 
 
 def render(kind: str, report: dict[str, Any], *, complete: bool = True) -> dict[str, Any]:
     checks, per_node = _check_rows(report)
     counts = Counter(c["result"] for c in checks)
-    fails, warns, running = counts.get("fail", 0), counts.get("warn", 0), counts.get("running", 0)
-    ready = complete and not fails and not running and bool(checks)
+    passes, fails, warns = counts.get("pass", 0), counts.get("fail", 0), counts.get("warn", 0)
+    running, unknown = counts.get("running", 0), counts.get("unknown", 0)
+    valid = _is_valid(report)
+    done = complete and not running and not unknown
+    ready = done and not fails and valid and bool(checks)
     if not checks:
         summary = f"ISE returned no {WHAT[kind]} pre-checks (status {report.get('status')!r})."
     elif ready:
-        summary = f"Ready for the {WHAT[kind]}: {len(checks)} pre-checks passed" + (
-            f", {warns} with a warning to review." if warns else "."
+        summary = f"Ready for the {WHAT[kind]}: {passes} pre-checks passed" + (
+            f", {warns} warned (review them)." if warns else "."
         )
     elif fails:
         summary = (
             f"Not ready for the {WHAT[kind]}: {fails} pre-check(s) failed"
+            + (f", {passes} passed" if passes else "")
             + (f", {warns} warned" if warns else "")
+            + (f", {running} still running" if running else "")
             + ". Fix them (see 'fix') and run the pre-checks again."
         )
-    else:
+    elif unknown and not running:
+        summary = (
+            f"No verdict: {unknown} pre-check(s) are in a status this server doesn't know (see 'status'). "
+            "Check them in Administration > System > Maintenance before the change window."
+        )
+    elif running or not complete:
         summary = (
             f"Pre-checks still running ({running} of {len(checks)} not finished): no verdict yet. "
             f"Read the report again with ise_get_patch_readiness(kind={kind!r}, report_id=...)."
         )
+    else:
+        summary = (
+            f"Not ready for the {WHAT[kind]}: no pre-check failed, but ISE marks the report not valid "
+            f"(isValid {report.get('isValid')!r}). Run the pre-checks again and check the report in ISE."
+        )
+    tallies = {k: counts.get(k, 0) for k in ("pass", "warn", "fail", "running")}
+    if unknown:
+        tallies["unknown"] = unknown
     out: dict[str, Any] = {
         "kind": kind,
         "ready": ready,
-        "complete": complete and not running,
+        "complete": done,
         "summary": summary,
         "report_id": report.get("preCheckReportID"),
         "status": report.get("status"),
@@ -202,7 +238,7 @@ def render(kind: str, report: dict[str, Any], *, complete: bool = True) -> dict[
         "ise_version": report.get("iseVersion"),
         "patch": report.get("patchNo"),
         "node_count": report.get("nodecount"),
-        "counts": {k: counts.get(k, 0) for k in ("pass", "warn", "fail", "running")},
+        "counts": tallies,
         "checks": checks,
         "nodes": per_node,
         "out_of_scope": OUT_OF_SCOPE,

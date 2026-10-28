@@ -554,7 +554,11 @@ password in a server variable `ISE_CERT_<NAME>`, and run
 on the node this server's `ISE_URL` points at. `ise_set_trusted_cert` changes a trusted CA afterwards:
 `trust_for` (the 'Trust for client authentication' fix for EAP-TLS 'unknown CA'), status, and revocation
 checking (`crl_download` + `crl_url`, `crl_bypass_if_not_received`, `ocsp_service`); disabling a CA that
-issued an in-use Admin or EAP certificate is blocked.
+issued an in-use Admin or EAP certificate is blocked. With CRL download off, ISE refuses the CRL-only
+flags (auto update, bypass, ignore expiration, server identity check): asking for one is blocked, and one
+ISE's read reports on (stock CAs show auto update on) is sent off and listed under `required_by_ise`.
+A confirm whose re-read shows nothing left to do after a preview that had a change reads once more, then
+answers `read_disagrees` (ISE served a stale read: run it again) rather than `no_change`.
 
 Tested with two CAs:
 - **Windows AD CS (the lab's Enterprise Root `mitchcloud-CA`).** The EAP CSR is signed with the
