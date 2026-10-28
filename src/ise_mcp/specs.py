@@ -269,9 +269,11 @@ async def load_ers(app: IseApp) -> dict[str, Any]:
 # --- MnT ----------------------------------------------------------------------------------------
 
 
-def _mnt_op(op_id: str, summary: str, params: list[str] | None = None) -> dict[str, Any]:
+def _mnt_op(
+    op_id: str, summary: str, params: list[str] | None = None, *, method: str = "get"
+) -> dict[str, Any]:
     return {
-        "get": {
+        method: {
             "operationId": op_id,
             "summary": summary + " (MnT; XML response)",
             "tags": ["MnT"],
@@ -312,6 +314,18 @@ MNT_DOC: dict[str, Any] = {
             "mntAuthStatus",
             "Authentication attempts for a MAC in the last N seconds",
             ["mac", "seconds", "records"],
+        ),
+        "/admin/API/mnt/AcctStatus/MACAddress/{mac}/{seconds}": _mnt_op(
+            "mntAcctStatus",
+            "RADIUS accounting totals for a MAC's sessions in the last N seconds: packets and bytes in/out,"
+            " session time (from Interim-Update/Stop; an unknown MAC returns an empty acctStatusList)",
+            ["mac", "seconds"],
+        ),
+        "/admin/API/mnt/Session/Delete/MACAddress/{mac}": _mnt_op(
+            "mntSessionDeleteByMac",
+            "Delete a MAC's session record from MnT (clears a stale/ended session); disruptive",
+            ["mac"],
+            method="delete",
         ),
         "/admin/API/mnt/FailureReasons": _mnt_op(
             "mntFailureReasons", "Catalog of authentication failure reasons"
