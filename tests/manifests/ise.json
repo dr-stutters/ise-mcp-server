@@ -449,6 +449,10 @@
       "tier": "write",
       "title": "Delete a pxGrid client"
     },
+    "ise_delete_repository": {
+      "tier": "dangerous",
+      "title": "Delete a backup repository"
+    },
     "ise_delete_session": {
       "tier": "dangerous",
       "title": "Delete a stale MnT session"
@@ -837,6 +841,10 @@
       "tier": "write",
       "title": "Create or update a downloadable ACL"
     },
+    "ise_set_default_egress_rule": {
+      "tier": "dangerous",
+      "title": "Set the ANY-ANY default egress rule"
+    },
     "ise_set_egress_policy": {
       "tier": "write",
       "title": "Set an egress matrix cell"
@@ -864,6 +872,10 @@
     "ise_set_pxgrid_settings": {
       "tier": "write",
       "title": "Set the pxGrid approval settings"
+    },
+    "ise_set_repository": {
+      "tier": "write",
+      "title": "Create or update a backup repository"
     },
     "ise_set_sgt": {
       "tier": "write",
@@ -958,5 +970,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.16.0"
+  "version": "0.17.0"
 }

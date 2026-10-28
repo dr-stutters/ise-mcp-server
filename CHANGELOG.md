@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.17.0 (2026-10-28)
+
+Policy hit-counter reset, repository create/update/delete, the TrustSec MONITOR cell status and ANY-ANY default rule, web
+redirection and switch common tasks in the authorization profile tools, and device-IP policy sets in `ise_policy_explain`.
+Core stays 0.15.0. 166 tools (88 read, 55 write, 23 dangerous) and eight prompts.
+
+### Added
+- `ise_reset_hitcounts` (I56, #93, #121, dangerous): reset policy-set, authentication, authorization, local/global exception
+  and MFA hit counters (network access or device admin), with every count that will be lost shown in the preview.
+- `ise_set_repository` / `ise_delete_repository` (I62, #91, #120): repository create, update and delete, so
+  `ise_create_backup` has somewhere to write; the password comes from an `ISE_REPOSITORY_*` server variable.
+- `ise_set_default_egress_rule` (I86, #90, #118, dangerous): the TrustSec ANY-ANY default rule, with an uncovered-pairs and
+  sessions-per-SGT preview.
+
+### Changed
+- `ise_set_egress_policy` takes `status` ENABLED/DISABLED/MONITOR (`enabled` is deprecated; existing cells keep their
+  status); `ise_get_egress_matrix(status=...)` filters cells by status (I86, #90, #118).
+- `ise_create_authz_profile` / `ise_update_authz_profile` set web redirection (CWA, hotspot, BYOD, client provisioning; the
+  portal is checked against the type), interface templates, Auto Smart Port, MACsec policy, NEAT, local web auth, Airespace
+  ACL, IPv6 dACL and track movement (I85, #89, #116).
+- The MAC-less RADIUS coverage note and the onboarding prompts say a router `test aaa` or device-admin RADIUS login leaves no
+  MnT record (GUI Live Logs only); `user=` finds MAC-less logins only when the NAD sent accounting (#114, #119).
+
+### Fixed
+- `ise_policy_explain` fills `Network Access:Device IP Address` from a single-host NAD and evaluates the ipEquals,
+  ipNotEquals, ipGreaterThan and ipLessThan operators, so device-IP policy sets no longer make verdicts UNCERTAIN (#113, #115).
+
 ## 0.16.0 (2026-10-28)
 
 Policy hygiene audit, bulk CoA by scope, allowed-protocols hardening presets, internal user lifecycle and bulk, admin access
