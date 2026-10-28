@@ -19,7 +19,7 @@ objects.
 | Profiler sessions | MnT `Session/ProfilerCount` | yes | — | `ise_profiler_status`, `ise_list_active_sessions` |
 | Reprofile an endpoint | no "reprofile" call; MnT `CoA/Reauth/{psn}/{mac}/{type}` through the PSN that owns the session | — | yes (dangerous tier) | `ise_reprofile_endpoint` |
 | Cloud profiler / telemetry | OpenAPI `/api/v1/profiler/cloud/connection` | yes | register / deregister | `ise_profiler_status` (read) |
-| SNMP endpoint scans | OpenAPI `/api/v1/profiler/snmp/scan*`, `/scan-history/{id}`, `/psn-groups` | yes | create / update / start / stop / enable / disable (delete: `ise_api_call`) | `ise_snmp_scan_history`, `ise_set_snmp_scan`, `ise_run_snmp_scan` |
+| SNMP endpoint scans | OpenAPI `/api/v1/profiler/snmp/scan*`, `/scan-history/{id}`, `/psn-groups` | yes | create / update / start / stop / enable / disable / delete | `ise_snmp_scan_history`, `ise_set_snmp_scan`, `ise_run_snmp_scan`, `ise_delete_object(kind='snmp_scan')` |
 | Anomaly detection, profiler resiliency counters | OpenAPI `/anomaly/config`, `/resiliency/config` | yes | yes | not wrapped; `ise_api_call` |
 
 ## Details
@@ -114,8 +114,15 @@ Scans). ISE 3.5's OpenAPI 'Profiler' group has the whole lifecycle:
 `ise_set_snmp_scan` reads the credentials from `ISE_SNMP_...` environment variables (or `_FILE` twins), never
 from arguments; when the stored community is not returned by ISE, an update other than enable/disable needs
 it again. A weekly or monthly `time` is sent as '<day> <time>' ('Monday 02:00 am', '15 02:00 am'); the 3.5
-spec documents the day without a field for it. Deleting a scan (`DELETE /scan` with an id list) is left to
-`ise_api_call`; disable it instead.
+spec documents the day without a field for it.
+
+- Enabled state: ISE 3.5 answers the entity's top-level `status` (`ENABLED` / `DISABLED`). After
+  `POST /scan/status` disable it leaves `scanDetails.isEnabled` and `scanStatus` `true`, so the tools read
+  `status` first and fall back to those only when it is absent.
+- Delete: `DELETE /scan/{id}` answers `405 Request method 'DELETE' not supported`. The working call is the
+  collection `DELETE /scan` with body `{"ids": ["<id>"]}` (deleteSNMPScans), answering
+  `{"result": [{"id": null, "status": "success"}]}`. `ise_delete_object(kind='snmp_scan', target=<name>)`
+  sends it, preview-first, and is blocked while a run is in progress (stop it first).
 
 ### Reprofile
 

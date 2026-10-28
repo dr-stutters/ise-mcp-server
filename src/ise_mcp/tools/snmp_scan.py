@@ -12,9 +12,13 @@ under OpenAPI `/api/v1/profiler/snmp`:
   auth failures, null responses, errors);
 - `GET /psn-groups`: the PSNs and PSN groups a scan can run on.
 
+- `DELETE /scan` `{"ids": [...]}` (deleteSNMPScans): deletes scans; the per-id `DELETE /scan/{id}` answers 405
+  on ISE 3.5. ise_delete_object(kind='snmp_scan', target=<name>) wraps it (blocked while a run is going).
+
 Credentials never travel as tool arguments: the community (v1/v2c) or the SNMPv3 passwords come from server
-environment variables named `ISE_SNMP_...` (or their `_FILE` twins), and are never shown. Deleting a scan is
-not wrapped here (disable it with ise_run_snmp_scan(action='disable')); ise_api_call reaches the DELETE.
+environment variables named `ISE_SNMP_...` (or their `_FILE` twins), and are never shown. The enabled state
+reads from the entity's top-level `status` (ENABLED/DISABLED): ISE leaves scanDetails.isEnabled true after a
+disable.
 """
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
@@ -117,12 +121,31 @@ def scan_id(scan: dict[str, Any]) -> str:
 
 
 def scan_enabled(scan: dict[str, Any]) -> bool | None:
+    """Whether the scan is enabled. The top-level `status` (ENABLED/DISABLED) wins: after
+    POST /scan/status disable, ISE 3.5 answers status DISABLED but leaves scanDetails.isEnabled and
+    scanStatus true (#161). isEnabled / scanStatus only count when status is absent."""
+    s = str(scan.get("status") or "").lower()
+    state = {"enabled": True, "enable": True, "disabled": False, "disable": False}.get(s)
+    if state is not None:
+        return state
     d = details_of(scan)
     for v in (d.get("isEnabled"), scan.get("scanStatus")):
         if isinstance(v, bool):
             return v
-    s = str(scan.get("status") or "").lower()
-    return {"enabled": True, "enable": True, "disabled": False, "disable": False}.get(s)
+    return None
+
+
+# jobStatus while a run is going (the 3.5 spec gives no enum; the lab answered null when idle).
+RUNNING_JOBS = {"RUNNING", "IN_PROGRESS", "INPROGRESS", "STARTED", "SCANNING", "QUEUED", "PENDING"}
+
+
+def scan_running(scan: dict[str, Any]) -> bool:
+    """A run is in progress: jobStatus says so, or the last start is later than the last end."""
+    job = re.sub(r"[\s-]+", "_", str(scan.get("jobStatus") or "").strip()).upper()
+    if job in RUNNING_JOBS:
+        return True
+    start, end = scan.get("scanStartTime"), scan.get("scanEndTime")
+    return isinstance(start, int | float) and start > 0 and (not isinstance(end, int | float) or start > end)
 
 
 async def find_scan(app: IseApp, name: str) -> dict[str, Any] | None:
@@ -790,7 +813,8 @@ def register(reg: ToolRegistrar) -> None:
         """Run a profiler SNMP scan now (start), stop one that is running, or enable / disable scans. Start
         sends SNMP queries from the scan's PSN to every address in its scope; the endpoints that answer get
         SNMP attributes that can change their profile (ise_explain_profile shows it). ISE starts one scan per
-        request and stops several. Enable/disable on scans already in that state: no_change. Preview-first:
+        request and stops several. Enable/disable on scans already in that state: no_change. Delete a scan
+        with ise_delete_object(kind='snmp_scan'). Preview-first:
         the scans, their PSN, scope size and job status; the result reports ISE's answer per scan."""
         app: IseApp = get_client(ctx)
         if len(set(names)) != len(names):
@@ -829,7 +853,10 @@ def register(reg: ToolRegistrar) -> None:
                 "endpoints that answer may be reprofiled"
             )
         elif action == "disable":
-            side.append("Disabled scans don't run on their schedule until enabled again")
+            side.append(
+                "Disabled scans don't run on their schedule until enabled again; to remove a scan: "
+                "ise_delete_object(kind='snmp_scan', target=<name>)"
+            )
         path = ACTION if action in ("start", "stop") else STATUS
         body = (
             {"action": action, "ids": list(ids)} if path == ACTION else {"status": action, "ids": list(ids)}
@@ -853,6 +880,11 @@ def register(reg: ToolRegistrar) -> None:
                     f"ise_snmp_scan_history(name='{names[0]}') once the run ends; then "
                     "ise_explain_profile(mac) on an endpoint in the scope"
                 )
+            elif action in ("stop", "disable"):
+                out["next"] = (
+                    "ise_snmp_scan_history shows the state; ise_delete_object(kind='snmp_scan', "
+                    "target=<name>) removes a scan (DELETE /api/v1/profiler/snmp/scan with {'ids': [...]})"
+                )
             return out
 
         return await preview_or_apply(
@@ -863,6 +895,69 @@ def register(reg: ToolRegistrar) -> None:
             plan=plan,
             apply=apply,
         )
+
+
+async def delete_snmp_scan(ctx: Context, app: IseApp, target: str, confirm: str | None) -> dict[str, Any]:
+    """ise_delete_object kind='snmp_scan': one scan by name (or id), sent as the collection
+    DELETE /scan {"ids": [id]} (deleteSNMPScans); ISE 3.5 answers 405 on DELETE /scan/{id} (#161)."""
+    scans = await list_scans(app)
+    hits = [s for s in scans if scan_name(s) == target] or [s for s in scans if scan_id(s) == target]
+    if not hits:
+        raise NotFound(f"No SNMP scan {target!r} (see ise_snmp_scan_history with no name)", 404)
+    scan = hits[0]
+    name, sid = scan_name(scan), scan_id(scan)
+    d = details_of(scan)
+    blockers: list[str] = []
+    if scan_running(scan):
+        blockers.append(
+            f"{name!r} is running (job status {scan.get('jobStatus') or 'started, not ended'}): stop "
+            f"it first with ise_run_snmp_scan(names=['{name}'], action='stop')"
+        )
+    enabled = scan_enabled(scan)
+    side = ["Its run history goes with it; endpoints it profiled keep their attributes and profiles"]
+    if enabled and (d.get("scheduleTime") or {}).get("scheduleType") not in (None, "NO_SCHEDULE"):
+        side.insert(
+            0,
+            f"Its {schedule_view(d.get('scheduleTime'))} schedule stops: those addresses are no "
+            "longer scanned",
+        )
+    body = {"ids": [sid]}
+    plan = Plan(
+        f"Delete SNMP scan {name}",
+        details={
+            **config_view(d),
+            "enabled": enabled,
+            "job_status": scan.get("jobStatus"),
+            "id": sid,
+            "method": "DELETE",
+            "path": SCANS,
+            "body": body,
+        },
+        fingerprint=fingerprint([scan_enabled(scan), scan.get("jobStatus"), d]),
+        blockers=blockers,
+        side_effects=side,
+    )
+
+    async def apply() -> Any:
+        res = await app.openapi.request("DELETE", SCANS, json=body)
+        rows = [
+            {**r, "name": name} if r.get("name") in (None, "None") else r
+            for r in action_results(res, {sid: name})
+        ]
+        failed = [r for r in rows if str(r.get("status") or "").lower() not in ("success", "sent")]
+        if failed:
+            why = failed[0].get("failure_reason") or failed[0]["status"]
+            raise UpstreamError(f"ISE did not delete SNMP scan {name!r}: {why}", 502)
+        return {"deleted": name, "id": sid, "result": rows}
+
+    return await preview_or_apply(
+        ctx,
+        tool="ise_delete_object",
+        args={"kind": "snmp_scan", "target": target},
+        confirm=confirm,
+        plan=plan,
+        apply=apply,
+    )
 
 
 def action_results(res: Any, names: dict[str, str]) -> list[dict[str, Any]]:

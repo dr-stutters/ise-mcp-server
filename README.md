@@ -425,7 +425,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_condition` | Delete a library, time-and-date or network condition. |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_guest_user` | Delete a guest account as the sponsor. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted). |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it), TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted) or profiler endpoint SNMP scan (blocked while a run is in progress: stop it with ise_run_snmp_scan first). |
 | `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
@@ -672,7 +672,8 @@ GUI-only: [docs/profiler.md](docs/profiler.md) has what ISE 3.5 exposes.
 IoT and OT segments where DHCP and RADIUS say little: `ise_set_snmp_scan` defines an endpoint SNMP scan (subnets
 or ranges, PSN, schedule; the community or SNMPv3 passwords from `ISE_SNMP_...` environment variables, never
 arguments), `ise_run_snmp_scan` starts, stops, enables or disables it, and `ise_snmp_scan_history` shows each
-run (scanned, discovered, unreachable, SNMP auth failures) with `ise_explain_profile` as the next step.
+run (scanned, discovered, unreachable, SNMP auth failures) with `ise_explain_profile` as the next step. `ise_delete_object(kind='snmp_scan')`
+removes a scan (blocked while it runs).
 
 ## Testing
 

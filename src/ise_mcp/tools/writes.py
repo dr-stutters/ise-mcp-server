@@ -581,6 +581,7 @@ DELETE_KINDS = {
     "guest_type": "guesttype",
     "allowed_protocols": "allowedprotocols",
     "egress_cell": "egressmatrixcell",
+    "snmp_scan": "profiler/snmp/scan",  # OpenAPI, not ERS: tools/snmp_scan.delete_snmp_scan
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -2390,6 +2391,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "guest_type",
                 "allowed_protocols",
                 "egress_cell",
+                "snmp_scan",
             ],
             Field(description="What to delete"),
         ],
@@ -2397,7 +2399,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             str,
             Field(
                 description="Name or id (a MAC for endpoints; for egress_cell 'SOURCE->DESTINATION' SGT "
-                "names, e.g. 'Employees->Servers', or the cell id)"
+                "names, e.g. 'Employees->Servers', or the cell id; for snmp_scan the scan name)"
             ),
         ],
         confirm: Confirm = None,
@@ -2407,16 +2409,21 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS
         server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad),
         sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service
-        (blocked while a policy set selects it) or TrustSec egress matrix cell (its SGT pair then falls to
+        (blocked while a policy set selects it), TrustSec egress matrix cell (its SGT pair then falls to
         the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never
-        deleted). Preview-first: shows the object and what still references it (the ise_where_used scan:
-        rules, profiles, sequences, matrix cells, IP-SGT mappings, devices, members), which blocks the
-        delete.
+        deleted) or profiler endpoint SNMP scan (blocked while a run is in progress: stop it with
+        ise_run_snmp_scan first). Preview-first: shows the object and what still references it (the
+        ise_where_used scan: rules, profiles, sequences, matrix cells, IP-SGT mappings, devices,
+        members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]
         if kind == "egress_cell":
             return await delete_egress_cell(ctx, app, target, confirm)
+        if kind == "snmp_scan":
+            from ise_mcp.tools.snmp_scan import delete_snmp_scan  # noqa: PLC0415 - snmp_scan imports this module
+
+            return await delete_snmp_scan(ctx, app, target, confirm)
         if kind == "endpoint":
             mac_n = normalize_mac(target)
             page = await app.ers_pager.fetch_page(
