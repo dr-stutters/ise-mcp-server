@@ -203,7 +203,9 @@ async def test_failures_block_and_name_the_fix(mock: respx.MockRouter) -> None:
     r = done["result"]  # type: ignore[index]
     assert r["ready"] is False and r["valid"] is False
     assert r["counts"] == {"pass": 2, "warn": 1, "fail": 1, "running": 0}
-    assert r["summary"].startswith("Not ready for the patch install: 1 pre-check(s) failed, 1 warned")
+    assert r["summary"].startswith(
+        "Not ready for the patch install: 1 pre-check(s) failed, 2 passed, 1 warned."
+    )
     sync = r["checks"][0]
     assert sync["check"] == "Node Sync Check" and sync["failing_nodes"] == ["ise-psn1"]
     assert sync["nodes"] == "1/2 ok" and sync["fix"].startswith("Administration > System > Deployment")
@@ -392,11 +394,23 @@ async def test_get_other_400_is_raised(mock: respx.MockRouter) -> None:
         ("FAILED", "WARNING", "warn"),
         ("IN_PROGRESS", None, "running"),
         ("", None, "running"),
-        ("SOMETHING_NEW", None, "warn"),
+        ("SOMETHING_NEW", None, "unknown"),
+        ("in-progress", None, "running"),
+        ("Success", "fail", "pass"),
+        ("Failure", "fail", "fail"),
+        ("Failure", "info", "warn"),
     ],
 )
 def test_verdict(status: str, on_failure: str | None, expect: str) -> None:
     assert verdict(status, on_failure) == expect
+
+
+def test_initiated_message_is_running() -> None:
+    assert (
+        verdict("WARNING", "fail", "local", "ise-pan1.example.com-precheck execution initiated $ ")
+        == "running"
+    )
+    assert verdict("Success", None, None, "precheck execution initiated") == "pass"
 
 
 def test_finished() -> None:
@@ -405,3 +419,144 @@ def test_finished() -> None:
     assert finished({"status": "COMPLETED", "preChecks": [{"status": "SUCCESS"}]})
     assert finished({"preChecks": [{"status": "FAILED"}]})
     assert not finished({})
+    assert not finished({"status": "valid", "preChecks": [{"status": "in-progress"}]})
+    assert not finished({"status": "valid", "preChecks": [{"status": "SOMETHING_NEW"}]})
+    assert finished({"status": "valid", "preChecks": [{"status": "Failure"}, {"status": "Success"}]})
+
+
+# --- ISE 3.5 live shapes (lab 3.5.0.527 Patch 4, 2026-10-28; names and addresses replaced) -------------
+
+LIVE_CHECKS = [
+    ("REPOSITORY_CHECK", "Repository Validation", "local", "fail", "Success", "repository precheck passed"),
+    (
+        "PAN_FAILOVER_CHECK",
+        "PAN Failover Validation",
+        "global",
+        "fail",
+        "Success",
+        "PAN failover is disabled",
+    ),
+    (
+        "ADMIN_CERT_CHECK",
+        "Admin Certificate Check in Trusted store",
+        "global",
+        "fail",
+        "Failure",
+        "Admin Certificate Not Found in trust cert store",
+    ),
+    (
+        "PATCH_BUNDLE_DOWNLOAD_CHECK",
+        "Patch Bundle Download and Metadata Validation",
+        "local",
+        "fail",
+        "Failure",
+        "Patch bundle download failed : Patch is already installed.",
+    ),
+    ("DNS_CHECK", "DNS Resolvability", "local", "warning", "Success", "DNS resolution succeeded"),
+    ("SYSTEM_CERT_CHECK", "System Certificate Validation", "local", "fail", "Success", ""),
+    (
+        "SERVICES_CHECK",
+        "Services or Process Failures",
+        "local",
+        "info",
+        "Success",
+        "all services are running",
+    ),
+]
+LIVE_NODE = "ise-pan1.example.com"
+
+
+def live_report(final: bool) -> dict:
+    checks = []
+    for name, display, check_type, on_failure, status, msg in LIVE_CHECKS:
+        failed = final and status == "Failure"
+        checks.append(
+            {
+                "onFailure": on_failure,
+                "remediationMsg": f"Fix {display}",
+                "message": (f"{LIVE_NODE}-{msg} $ " if failed else "")
+                if final
+                else f"{LIVE_NODE}-precheck execution initiated $ ",
+                "nodes": [
+                    {
+                        "msg": msg if final else "precheck execution initiated",
+                        "name": LIVE_NODE,
+                        "status": status if final else "in-progress",
+                    }
+                ],
+                "checkType": check_type,
+                "displayname": display,
+                "percentage": 100 if final else 0,
+                "name": name,
+                "successMsg": f"{display} passed",
+                "successNodes": int(final and status == "Success"),
+                "status": status if final else "in-progress",
+            }
+        )
+    return {
+        "preChecks": checks,
+        "preCheckReportID": "084c2885-0000-4000-8000-000000000001",
+        "nodecount": 1,
+        "isValid": False,
+        "status": "valid",
+        "iseVersion": "3.5.0.527",
+        "patchNo": 4,
+    }
+
+
+async def test_live_in_progress_keeps_polling_until_the_final_report(mock: respx.MockRouter) -> None:
+    base(mock, patches=[1, 2, 3, 4])
+    mock.post(PATCH_START).respond(
+        202, json={"response": {"id": "084c2885-0000-4000-8000-000000000001", "message": "Prechecks started"}}
+    )
+    polls = iter([live_report(final=False), live_report(final=False), live_report(final=True)])
+    status = mock.get(PATCH_STATUS).mock(side_effect=lambda r: httpx.Response(200, json=next(polls)))
+    _, done = await two_step(PATCH)
+    assert status.call_count == 3
+    r = done["result"]  # type: ignore[index]
+    assert r["ready"] is False and r["complete"] is True and r["valid"] is False
+    assert r["counts"] == {"pass": 5, "warn": 0, "fail": 2, "running": 0}
+    assert r["summary"].startswith("Not ready for the patch install: 2 pre-check(s) failed, 5 passed.")
+    assert [c["check"] for c in r["checks"][:2]] == [
+        "Admin Certificate Check in Trusted store",
+        "Patch Bundle Download and Metadata Validation",
+    ]
+
+
+async def test_live_in_progress_report_is_running_not_ready(mock: respx.MockRouter) -> None:
+    mock.get(PATCH_STATUS).respond(json={"version": "1.0.0", "response": live_report(final=False)})
+    out = await call_tool(make_server(), "ise_get_patch_readiness", {"kind": "patch"})
+    assert out["ready"] is False and out["complete"] is False
+    assert out["counts"] == {"pass": 0, "warn": 0, "fail": 0, "running": 7}
+    assert out["summary"].startswith("Pre-checks still running (7 of 7 not finished)")
+    assert all(c["result"] == "running" and "fix" not in c for c in out["checks"])
+    assert {n["result"] for n in out["nodes"]} == {"running"}
+
+
+async def test_live_final_report(mock: respx.MockRouter) -> None:
+    mock.get(PATCH_STATUS).respond(json=live_report(final=True))
+    out = await call_tool(make_server(), "ise_get_patch_readiness", {"kind": "patch", "report_id": "x"})
+    assert out["ready"] is False and out["complete"] is True
+    assert out["counts"] == {"pass": 5, "warn": 0, "fail": 2, "running": 0}
+
+
+async def test_not_valid_blocks_ready(mock: respx.MockRouter) -> None:
+    mock.get(PATCH_STATUS).respond(json=report(PASSING, valid=False))
+    out = await call_tool(make_server(), "ise_get_patch_readiness", {"kind": "patch"})
+    assert out["ready"] is False and out["complete"] is True and out["counts"]["fail"] == 0
+    assert "ISE marks the report not valid (isValid False)" in out["summary"]
+
+
+async def test_ready_summary_counts_passes_and_warnings(mock: respx.MockRouter) -> None:
+    mock.get(PATCH_STATUS).respond(json=report(WARNING))
+    out = await call_tool(make_server(), "ise_get_patch_readiness", {"kind": "patch"})
+    assert out["ready"] is True
+    assert out["summary"] == "Ready for the patch install: 2 pre-checks passed, 1 warned (review them)."
+
+
+async def test_unknown_status_is_never_done(mock: respx.MockRouter) -> None:
+    mock.get(PATCH_STATUS).respond(json=report([*PASSING, check("new_check", "DEFERRED")]))
+    out = await call_tool(make_server(), "ise_get_patch_readiness", {"kind": "patch"})
+    assert out["ready"] is False and out["complete"] is False
+    assert out["counts"]["unknown"] == 1 and out["checks"][0]["result"] == "unknown"
+    assert out["summary"].startswith("No verdict: 1 pre-check(s) are in a status this server doesn't know")
