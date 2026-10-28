@@ -173,6 +173,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_DETAIL_THRESHOLD` | `100` | ERS list pages above this size skip the per-item detail GETs |
 | `ISE_DETAIL_CONCURRENCY` | `5` | Concurrent per-item ERS GETs |
 | `ISE_EXPORT_DIR` | unset | Directory `ise_export_config` writes to and `ise_diff_config` reads from (relative paths resolve there); unset: absolute `*.yaml` paths only. Set it on a shared host |
+| `ISE_CERT_DIR` | unset | Directory `ise_import_system_certificate` reads certificate, key and PKCS#12 files from (relative paths resolve there; nothing outside it is read). Unset: the tool refuses. Keep it readable by the server's user only |
 | `ISE_PROTECT_MACS` / `ISE_PROTECT_USERS` / `ISE_PROTECT_NADS` | | Comma lists; a CoA/ANC/NAD-delete on any of these is blocked (safety rails, I18) |
 | `ISE_COA_ALLOW_SHARED_PORT` | `false` | Allow `port_bounce`/`port_shutdown` on a switch port with more than one live session (an uplink/trunk) |
 | `ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD` | unset | Sponsor account for the guest-account tools (password also via `_FILE` / `_REF`; never shown). See [Guest access](#guest-access) |
@@ -180,6 +181,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_GUEST_TIMEZONE` | unset | IANA time zone of the guest location; guest dates are in that local time |
 | `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. ISE's rules: 8-15 characters from `[A-Za-z0-9_#]`, at least one upper-case letter, one lower-case letter and one digit, no `cisco` in any case (the preview and `ise_status` check it). See [Backups](#backups) |
 | `ISE_REPOSITORY_<NAME>` | unset | Repository passwords `ise_set_repository(password_env='ISE_REPOSITORY_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_REPOSITORY_` names are read). See [Backups](#backups) |
+| `ISE_CERT_<NAME>` | unset | Key / PKCS#12 passwords `ise_import_system_certificate(password_env='ISE_CERT_<NAME>')` uses (also via `<var>_FILE`; never shown or passed per call; only `ISE_CERT_` names are read) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
 | `MCP_AUTH_TOKENS` | | `name:sha256:<hex>` entries; required for HTTP (`ise-mcp-server token <name>`) |
@@ -452,6 +454,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
 | `ise_set_tacacs_server` | Create a TACACS+ external server (a TACACS+ server ISE proxies device-admin requests to, used through a TACACS+ server sequence), or update an existing one: given fields change, others are kept. |
 | `ise_set_tacacs_server_sequence` | Create a TACACS+ server sequence (an ordered list of TACACS+ external servers a device-admin policy set can proxy to), or update one: given fields change, others are kept. |
+| `ise_set_trusted_cert` | Change a trusted (CA) certificate in ISE's trust store: what it is trusted for (the 'Trust for client authentication' flag is the classic EAP-TLS 'unknown CA' fix), enable/disable it, and revocation checking (CRL download from a distribution URL, OCSP). |
 | `ise_set_trustsec_settings` | Change ISE's TrustSec general settings: the TrustSec HTTPS (REST) policy server that 'cts policy-server' switches download from (and that feeds ise_trustsec_device_report), its audit log, and whether a matrix cell may carry several SGACLs. |
 | `ise_suspend_guest_user` | Suspend a guest account as the sponsor: logins fail until ise_reinstate_guest_user. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain, description, advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group), web redirection (redirect) or common tasks (interface template, Auto Smart Port, MACsec, NEAT, local web auth, Airespace ACL, IPv6 dACL, track movement). |
@@ -461,7 +464,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (23)
+### Dangerous (24)
 
 | Tool | What it does |
 |---|---|
@@ -481,6 +484,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_session` | Delete an endpoint's stale session record from ISE MnT, the classic fix when a session the switch already dropped still shows the host online or blocks CoA/ANC. |
 | `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
 | `ise_import_config` | Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans one step per object, matched by name, in dependency order (device and identity groups, custom attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets and shell profiles, NADs, reusable conditions, then policy sets and their rules in rank order). |
+| `ise_import_system_certificate` | Import an existing certificate and its private key (a public wildcard for the portals, an enterprise certificate issued outside ISE) as a system certificate and put it into service for the given roles. |
 | `ise_join_ad` | Join one or all ISE nodes to the join point's AD domain (creates the computer account). |
 | `ise_leave_ad` | Take one or all ISE nodes out of the AD domain: AD-backed logins through this join point stop working there at once. |
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
@@ -530,6 +534,16 @@ step-ca or a public CA. Flow: `ise_generate_csr` -> `ise_export_csr` -> sign at 
 (dangerous; the Admin role restarts the node's application server). For EAP-TLS, add
 `ise_set_cert_auth_profile` and `ise_set_identity_sequence`, then use the sequence as an authentication
 rule's identity source.
+
+An existing certificate (a public wildcard for the portals, an enterprise certificate issued outside
+ISE) needs no CSR: put the certificate and key (PEM, or a PKCS#12 bundle) in `ISE_CERT_DIR`, the key
+password in a server variable `ISE_CERT_<NAME>`, and run
+`ise_import_system_certificate(usages=['portal'], cert_file=..., key_file=..., password_env='ISE_CERT_<NAME>')`
+(dangerous; `allow_wildcard=true` for a wildcard; Admin restarts the application server). ISE imports it
+on the node this server's `ISE_URL` points at. `ise_set_trusted_cert` changes a trusted CA afterwards:
+`trust_for` (the 'Trust for client authentication' fix for EAP-TLS 'unknown CA'), status, and revocation
+checking (`crl_download` + `crl_url`, `crl_bypass_if_not_received`, `ocsp_service`); disabling a CA that
+issued an in-use Admin or EAP certificate is blocked.
 
 Tested with two CAs:
 - **Windows AD CS (the lab's Enterprise Root `mitchcloud-CA`).** The EAP CSR is signed with the
