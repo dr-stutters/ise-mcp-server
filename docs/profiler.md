@@ -19,7 +19,8 @@ objects.
 | Profiler sessions | MnT `Session/ProfilerCount` | yes | — | `ise_profiler_status`, `ise_list_active_sessions` |
 | Reprofile an endpoint | no "reprofile" call; MnT `CoA/Reauth/{psn}/{mac}/{type}` through the PSN that owns the session | — | yes (dangerous tier) | `ise_reprofile_endpoint` |
 | Cloud profiler / telemetry | OpenAPI `/api/v1/profiler/cloud/connection` | yes | register / deregister | `ise_profiler_status` (read) |
-| SNMP endpoint scans, anomaly detection, profiler resiliency counters | OpenAPI `/api/v1/profiler/snmp/*`, `/anomaly/config`, `/resiliency/config` | yes | yes | not wrapped; `ise_api_call` |
+| SNMP endpoint scans | OpenAPI `/api/v1/profiler/snmp/scan*`, `/scan-history/{id}`, `/psn-groups` | yes | create / update / start / stop / enable / disable (delete: `ise_api_call`) | `ise_snmp_scan_history`, `ise_set_snmp_scan`, `ise_run_snmp_scan` |
+| Anomaly detection, profiler resiliency counters | OpenAPI `/anomaly/config`, `/resiliency/config` | yes | yes | not wrapped; `ise_api_call` |
 
 ## Details
 
@@ -91,6 +92,30 @@ is an object or a list (even an empty list, for `radius`, `nmap` and `pxgrid`) i
 get wrong on a shared deployment; `ise_profiler_status` stays read-only.
 
 There is no REST view of the profiler feed service (last update, subscription status); it is in the GUI only.
+
+### Endpoint SNMP scans (`/api/v1/profiler/snmp`)
+
+For IoT and OT segments the profiler can query endpoints over SNMP itself (Work Centers > Profiler > Endpoint
+Scans). ISE 3.5's OpenAPI 'Profiler' group has the whole lifecycle:
+
+- `GET /scan` lists the scans (the lab answers a bare list); each entity carries `jobStatus`, the last
+  `scanStartTime` / `scanEndTime` (epoch ms), `scannedIp`, `discoveredIp` and the settings under `scanDetails`.
+- `POST /scan` and `PUT /scan/{id}` take `SNMPScanAttributes`: `name`, `isEnabled`, `scanSource` (a PSN FQDN or
+  PSN group from `GET /psn-groups`), `networkScope` (`subnets` of /21../32 or /117../128, **or** `ipRanges`,
+  never both, plus `excludedIps`), `scheduleTime` (`NO_SCHEDULE`, `DAILY`, `WEEKLY`, `MONTHLY` with a `time`
+  in the '12:00 am' form) and `snmpAuthData` (`snmpV1`/`snmpV2` with `roCommunity`, or `snmpV3` with user,
+  security level, protocols and passwords). An update replaces the whole scan, credentials included.
+- `POST /scan/action` `{"action": "start"|"stop", "ids": [...]}`: ISE starts one scan per request and stops
+  several. `POST /scan/status` `{"status": "enable"|"disable", "ids": [...]}`: a disabled scan never runs,
+  even on its schedule. Both answer `{"result": [{"id", "status", "failureReason"}]}`.
+- `GET /scan-history/{id}`: the runs (`scanResult`, `psnFqdn`, `scannedIp`, `discovered`, `ipNotReachable`,
+  `snmpAuthFailed`, `snmpNullResponse`, `scanErrorDetails`).
+
+`ise_set_snmp_scan` reads the credentials from `ISE_SNMP_...` environment variables (or `_FILE` twins), never
+from arguments; when the stored community is not returned by ISE, an update other than enable/disable needs
+it again. A weekly or monthly `time` is sent as '<day> <time>' ('Monday 02:00 am', '15 02:00 am'); the 3.5
+spec documents the day without a field for it. Deleting a scan (`DELETE /scan` with an id list) is left to
+`ise_api_call`; disable it instead.
 
 ### Reprofile
 
