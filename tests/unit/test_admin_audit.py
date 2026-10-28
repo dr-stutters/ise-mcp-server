@@ -455,3 +455,40 @@ async def test_health_flags_many_super_admins() -> None:
         await health_section(app, f)
     assert any(x["severity"] == "low" and "5 enabled Super Admin" in x["finding"] for x in f.items)
     await app.aclose()
+
+
+async def test_change_password_names_survive_compact() -> None:
+    """#124: the admin names under change_password_pending ("password" in the key) are not secrets, so
+    compact() must not mask them in the ise_deployment_health admins section or the list summary."""
+    from ise_mcp._core.formatting import MASK, compact
+    from ise_mcp.client import IseApp
+    from ise_mcp.tools.admin_audit import admin_summary, admin_users, health_section
+    from ise_mcp.tools.health import Findings
+    from tests.unit.conftest import BASE, make_settings
+
+    app = IseApp(make_settings())
+    with respx.mock(base_url=BASE) as mock:
+        mock_users(mock)
+        health = compact({"admins": await health_section(app, Findings())})
+        rows = await admin_users(app)
+    assert health["admins"]["change_password_pending"] == ["api-trustsec"]
+    out = compact({"results": rows, "summary": admin_summary(rows)})
+    assert out["summary"]["change_password_pending"] == ["api-trustsec"]
+    flags = {r["name"]: r.get("change_password_next_login") for r in out["results"]}
+    assert flags["api-trustsec"] is True
+    assert MASK not in str(health) and MASK not in str(out)
+    await app.aclose()
+
+
+async def test_deployment_health_admins_unmasked(mock: respx.MockRouter) -> None:
+    """#124 end to end: ise_deployment_health returns the admin names in admins.change_password_pending."""
+    import json
+
+    from ise_mcp._core.testing import call_tool
+    from tests.unit.test_health import mock_deployment
+
+    mock_deployment(mock)
+    mock_users(mock)  # replaces the empty RBAC admin list mock_deployment registers
+    out = await call_tool(make_server(), "ise_deployment_health")
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["admins"]["change_password_pending"] == ["api-trustsec"]
