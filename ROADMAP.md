@@ -108,7 +108,7 @@ The suite catalogue also lists `catc_onboard_switch_with_nac` (owned by catc) an
 ## Not planned
 Left to `ise_api_call` (with `ise_search_spec` / `ise_get_definition`) or out of scope:
 - **Posture content authoring** (203 operations: conditions, requirements, AV/AM catalogues) and **Exim** posture import/export. Large content models that the GUI handles better; I14 covers read-only posture.
-- **TrustSec ACI / workload / SXP-domain integrations** (~120 operations), **FiveG**, **Prometheus**, **pxGrid Direct / pxGrid Cloud**, and **Duo/MFA/OIDC**. These are niche integrations.
+- **TrustSec ACI / workload / SXP-domain integrations** (~120 operations), **FiveG**, **Prometheus**, **pxGrid Cloud**, and **Duo/MFA/OIDC**. These are niche integrations. (pxGrid Direct connectors shipped in v0.22.0 as I91, #100.)
 - **Patch install/rollback, backup now/restore, node registration/deregistration, PAN HA, and licence registration**. They are long-running and some reload nodes, so they belong in the GUI or a change window. I6 reports the status only.
 - **RBAC catalogue and admin-user management**: rare, and risky to automate.
 - **System settings** (proxy, SMTP, telemetry): one-off.

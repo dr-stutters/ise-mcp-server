@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.22.0 (2026-10-28)
+
+pxGrid Direct connectors (a REST CMDB such as NetBox as an ISE endpoint attribute source), and fixes to the v0.21.0 RADIUS
+proxy, trusted-certificate, patch-readiness and SNMP scan tools found in live proof. Core stays 0.19.0. 185 tools (96 read, 65
+write, 24 dangerous) and thirteen prompts.
+
+### Added
+- `ise_set_pxgrid_direct_connector`, `ise_test_pxgrid_direct` and `ise_pxgrid_direct_status` (I91, #100, #166): pxGrid Direct
+  connectors pull a REST CMDB such as NetBox into ISE endpoint attributes for authorization; token by `ISE_PXGRID_DIRECT_*`
+  env reference, never shown; `ise_delete_object` kind `pxgrid_direct_connector`.
+- `ise_delete_object` deletes profiler SNMP scans (kind `snmp_scan`) (#161, #163).
+
+### Fixed
+- `ise_set_external_radius_server` create (ISE 3.5 answered 502 without the key fields) and its name check; policy sets on a
+  RADIUS server sequence now send `isProxy` true (#158, #162).
+- `ise_set_trusted_cert` works on CAs whose CRL download is off (ISE's CRL-only flags are sent off and shown as
+  `required_by_ise`), blocks CRL options without CRL download, and answers `read_disagrees` instead of `no_change` when ISE's
+  read disagrees with the preview; `ise_import_system_certificate` lists each DNS name once (#159, #165).
+- `ise_patch_readiness` no longer reports ready while ISE's pre-checks are still `in-progress`; ready also needs ISE's
+  `isValid`, and the summary counts passes and warnings (#160, #164).
+- SNMP scans: a disabled scan now reads as disabled (ISE's top-level status) (#161, #163).
+
 ## 0.21.0 (2026-10-28)
 
 Certificate depth (system certificate import, trusted-certificate usages), a RADIUS proxy (external RADIUS servers and
