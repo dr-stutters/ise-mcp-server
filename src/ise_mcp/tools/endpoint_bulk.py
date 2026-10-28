@@ -189,10 +189,17 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                     "DELETE", f"/api/v1/endpoint-custom-attribute/{quote(name, safe='')}", expect="text"
                 )
         else:
-            if name in defs:
+            noop = defs.get(name) == attribute_type
+            if name in defs and not noop:
                 blockers.append(f"Custom attribute {name!r} already exists ({defs[name]})")
             body = {"attributeName": name, "attributeType": attribute_type}
-            plan = Plan(f"Create custom attribute {name} ({attribute_type})", details=body, blockers=blockers)
+            plan = Plan(
+                f"Create custom attribute {name} ({attribute_type})",
+                details=body,
+                blockers=blockers,
+                noop=noop,
+                noop_reason=f"Custom attribute {name} already exists as {attribute_type}" if noop else None,
+            )
 
             async def apply() -> Any:
                 return await app.openapi.request(

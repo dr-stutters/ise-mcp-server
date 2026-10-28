@@ -81,6 +81,13 @@ def masked_changes(
     return out
 
 
+def unchanged(changes: dict[str, Any], *secrets: object) -> bool:
+    """C71: the request leaves the object as it is, so the Plan is a no-op (`status: no_change`, no
+    token). True when the field diff is empty and no secret argument was given: a secret is never
+    compared (it is masked in every diff), so a given one always counts as a change."""
+    return not changes and all(s is None for s in secrets)
+
+
 def put_body(obj: dict[str, Any]) -> dict[str, Any]:
     """An ERS object as returned by GET, minus read-only bits, ready for PUT."""
     return {k: v for k, v in obj.items() if k != "link"}
@@ -1183,9 +1190,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             blockers=blockers,
             side_effects=side,
         )
-        details: dict[str, Any] = {
-            "changes": masked_changes(current, desired, replace=True)
-        }  # ERS PUT replaces
+        changes = masked_changes(current, desired, replace=True)  # ERS PUT replaces
+        details: dict[str, Any] = {"changes": changes}
+        noop = unchanged(changes, radius_secret, tacacs_secret, trustsec_password, trustsec_rest_password)
         if removed:
             details["removed"] = [f"{p} removed (secret was set)" for p in removed]
 
@@ -1199,8 +1206,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             f"Update network device {current.get('name')}",
             details=details,
             fingerprint=fingerprint(current),
-            side_effects=side,
+            side_effects=[] if noop else side,
             blockers=blockers,
+            noop=noop,
+            noop_reason=f"Network device {current.get('name')} already as requested" if noop else None,
         )
         return await preview_or_apply(
             ctx,
@@ -2051,18 +2060,21 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 desired["advancedAttributes"] = advanced
             else:
                 desired.pop("advancedAttributes", None)
-        if desired == current:
-            raise InvalidRequest("Nothing to change: give at least one different field")
-        users = await rules_using_profile(app, str(current.get("name")))
+        noop = desired == current
+        users = [] if noop else await rules_using_profile(app, str(current.get("name")))
         plan = Plan(
             f"Update authorization profile {current.get('name')}",
             details={"changes": field_changes(current, desired, replace=True), "used_by_rules": users},
             fingerprint=fingerprint(current),
             blockers=av_blockers + redirect_blockers,
-            side_effects=([f"Affects {len(users)} rule(s) at the next authentication"] if users else [])
+            side_effects=[]
+            if noop
+            else ([f"Affects {len(users)} rule(s) at the next authentication"] if users else [])
             + av_warnings
             + redirect_warnings
             + common_task_warnings(desired, current),
+            noop=noop,
+            noop_reason=f"Authorization profile {current.get('name')} already as requested" if noop else None,
         )
         return await preview_or_apply(
             ctx,
@@ -2119,12 +2131,13 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         if hit:
             current = await app.ers_get("downloadableacl", str(hit["id"]))
             desired = deep_merge(current, body)
-            if desired == current:
-                raise InvalidRequest(f"dACL {name!r} already has exactly these ACEs and settings")
+            noop = desired == current
             plan = Plan(
                 f"Update dACL {name}",
                 details={"changes": field_changes(current, desired, replace=True)},
                 fingerprint=fingerprint(current),
+                noop=noop,
+                noop_reason=f"dACL {name} already has exactly these ACEs and settings" if noop else None,
             )
             return await preview_or_apply(
                 ctx,
@@ -2172,16 +2185,22 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             if not patch:
                 raise InvalidRequest("SGT exists; give a new value or description to update it")
             desired = deep_merge(current, patch)
+            changes = field_changes(current, desired, replace=True)
+            noop = unchanged(changes)
             side = (
                 ["Re-tags all traffic using this SGT; devices must refresh their policy"]
-                if "value" in patch
+                if "value" in changes
                 else []
             )
             plan = Plan(
                 f"Update SGT {name}",
-                details={"changes": field_changes(current, desired, replace=True)},
+                details={"changes": changes},
                 fingerprint=fingerprint(current),
                 side_effects=side,
+                noop=noop,
+                noop_reason=f"SGT {name} already as requested (value {current.get('value')})"
+                if noop
+                else None,
             )
             return await preview_or_apply(
                 ctx,

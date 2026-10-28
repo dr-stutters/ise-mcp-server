@@ -131,7 +131,7 @@ async def test_custom_attribute_create_and_delete(mock: respx.MockRouter) -> Non
     _, applied = await two_step("ise_set_custom_attribute", {"name": "site", "attribute_type": "Int"})
     assert json.loads(create.calls.last.request.content) == {"attributeName": "site", "attributeType": "Int"}
     assert applied["status"] == "applied"
-    dup, _ = await two_step("ise_set_custom_attribute", {"name": "assetTier"})
+    dup, _ = await two_step("ise_set_custom_attribute", {"name": "assetTier", "attribute_type": "Int"})
     assert dup["status"] == "blocked"
     delete = mock.delete("/api/v1/endpoint-custom-attribute/floor").respond(200, text="ok")
     preview, applied = await two_step("ise_set_custom_attribute", {"name": "floor", "delete": True})

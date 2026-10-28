@@ -526,8 +526,7 @@ def register(reg: ToolRegistrar) -> None:
         if existing:
             full = {**existing, **desired, "id": existing["id"], "name": existing["name"]}
             sync_nested(full)  # the copied objects of protocols this turns off go too
-            if full == existing:
-                raise InvalidRequest(f"Service {name!r} already has exactly these settings")
+            noop = full == existing
             return await preview_or_apply(
                 ctx,
                 tool="ise_set_allowed_protocols",
@@ -538,8 +537,12 @@ def register(reg: ToolRegistrar) -> None:
                     details=details,
                     fingerprint=fingerprint(existing),
                     blockers=blockers,
-                    side_effects=side_effects,
-                    blast_radius=len(policy_sets),
+                    side_effects=[] if noop else side_effects,
+                    blast_radius=0 if noop else len(policy_sets),
+                    noop=noop,
+                    noop_reason=f"Allowed-protocols service {name} already has exactly these settings"
+                    if noop
+                    else None,
                 ),
                 apply=lambda: ers_put(app, RESOURCE, WRAPPER, full),
             )
