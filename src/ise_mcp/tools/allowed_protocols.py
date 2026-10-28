@@ -226,6 +226,17 @@ def apply_overrides(
             "allowPeapEapMsChapV2PwdChange": True,
             "allowPeapEapMsChapV2PwdChangeRetries": 1,
         }
+    # Fields ERS requires once their inner method is on ("required only if X is true"): fill ISE's
+    # defaults so a peap override that turns an inner method on is not answered with a 400.
+    inner = dict(body.get("peap") or {})
+    for method in ("MsChapV2", "Gtc"):
+        if inner.get(f"allowPeapEap{method}"):
+            inner.setdefault(f"allowPeapEap{method}PwdChange", True)
+            inner.setdefault(f"allowPeapEap{method}PwdChangeRetries", 1)
+    if inner.get("allowPeapEapTls"):
+        inner.setdefault("allowPeapEapTlsAuthOfExpiredCerts", False)
+    if inner:
+        body["peap"] = inner
     tls = body.get("eapTls") or {}
     if tls.get("eapTlsEnableStatelessSessionResume") and "eapTlsSessionTicketTtl" not in tls:
         body["eapTls"] = {

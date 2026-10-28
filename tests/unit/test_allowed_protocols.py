@@ -189,3 +189,20 @@ async def test_no_change_is_refused(mock: respx.MockRouter) -> None:
     by_name(mock, "Default Network Access", DEFAULT["AllowedProtocols"])
     policy_sets(mock, [])
     assert "already has exactly" in await error({"name": "Default Network Access", "allow": ["eap-tls"]})
+
+
+async def test_peap_override_fills_the_inner_methods_conditional_fields(mock: respx.MockRouter) -> None:
+    by_name(mock, "mcp-peap", None)
+    post = mock.post(AP).respond(201, headers={"Location": f"{BASE}{AP}/ap3"})
+    await call(
+        "ise_set_allowed_protocols",
+        {
+            "name": "mcp-peap",
+            "preset": "peap-mschapv2",
+            "peap": {"allowPeapEapTls": True, "allowPeapEapGtc": True, "requireCryptobinding": True},
+        },
+    )
+    peap = json.loads(post.calls.last.request.content)["AllowedProtocols"]["peap"]
+    assert peap["allowPeapEapTls"] is True and peap["allowPeapEapTlsAuthOfExpiredCerts"] is False
+    assert peap["allowPeapEapGtcPwdChange"] is True and peap["allowPeapEapGtcPwdChangeRetries"] == 1
+    assert peap["allowPeapEapMsChapV2PwdChangeRetries"] == 1 and peap["requireCryptobinding"] is True
