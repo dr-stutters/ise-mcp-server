@@ -296,7 +296,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 ## Tools
 
 169 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 89 read tools plus `ise_api_call` (GET-only) are registered. Everything
+With the defaults (read-only), the 91 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
 ### Read (91)
