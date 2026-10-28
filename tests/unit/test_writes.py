@@ -12,7 +12,7 @@ from ise_mcp._core import InvalidRequest
 from ise_mcp._core.formatting import MASK
 from ise_mcp.tools.policy_edit import condition_node
 from ise_mcp.tools.writes import masked_changes
-from tests.unit.conftest import BASE, ers_page, fixture_json, make_server
+from tests.unit.conftest import BASE, ers_page, fixture_json, make_server, mock_no_policy
 
 LIB = {"wired_mab": {"id": "c1", "name": "Wired_MAB"}}
 
@@ -183,6 +183,7 @@ async def test_delete_profile_blocked_when_in_use(mock: respx.MockRouter) -> Non
     )
     mock.get("/api/v1/policy/network-access/policy-set/s1/authentication").respond(json={"response": []})
     mock.get("/api/v1/policy/network-access/policy-set/s1/exception").respond(json={"response": []})
+    mock_no_policy(mock, own_sets=("network-access",))
     preview, _ = await two_step("ise_delete_object", {"kind": "authz_profile", "target": "P1"})
     assert preview["status"] == "blocked"
     assert "Wired / R1" in preview["blockers"][0]
@@ -241,6 +242,7 @@ async def test_delete_sgt_in_matrix_blocked(mock: respx.MockRouter) -> None:
     mock.get("/ers/config/egressmatrixcell", params={"filter": "sgtDstName.EQ.Dev"}).respond(
         json=ers_page([])
     )
+    mock_no_policy(mock)
     preview, _ = await two_step("ise_delete_object", {"kind": "sgt", "target": "Dev"})
     assert preview["status"] == "blocked" and "egress matrix" in preview["blockers"][0]
 

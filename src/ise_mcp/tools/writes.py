@@ -305,25 +305,8 @@ async def exists(app: IseApp, resource: str, name: str) -> bool:
 
 
 async def references(app: IseApp, kind: str, obj: dict[str, Any]) -> list[str]:
-    """Blockers for deleting an object that other objects still point at."""
-    name, oid = str(obj.get("name")), str(obj.get("id"))
-
-    async def ers_count(resource: str, filt: str) -> int:
-        page = await app.ers_pager.fetch_page(app.ers, f"/ers/config/{resource}", {"filter": filt}, limit=1)
-        return page.total or len(page.items)
-
-    if kind == "identity_group" and (n := await ers_count("internaluser", f"identityGroup.EQ.{name}")):
-        return [f"{n} internal user(s) are in this group"]
-    if kind == "endpoint_group":
-        eps = await app.openapi.get("/api/v1/endpoint", {"filter": f"groupId.EQ.{oid}", "page": 1, "size": 1})
-        if eps:
-            return ["Endpoints are still in this group (see ise_list_endpoints group=...)"]
-    if kind == "ndg":
-        field = "location" if name.startswith("Location#") else "type"
-        if name.startswith(("Location#", "Device Type#")) and (
-            n := await ers_count("networkdevice", f"{field}.EQ.{name}")
-        ):
-            return [f"{n} network device(s) are in this group"]
+    """Blockers for deleting a kind ise_where_used doesn't cover (it covers the policy-facing ones)."""
+    name = str(obj.get("name"))
     if kind == "tacacs_server":
         page = await app.ers_pager.fetch_page(app.ers, "/ers/config/tacacsserversequence", limit=500)
         for item in page.items:
@@ -331,13 +314,22 @@ async def references(app: IseApp, kind: str, obj: dict[str, Any]) -> list[str]:
             listed = [x.strip().lower() for x in str(seq.get("serverList") or "").split(",")]
             if name.lower() in listed:
                 return [f"Listed in TACACS+ server sequence {seq.get('name')}"]
-    if kind == "sgt":
-        out = []
-        for filt in (f"sgtSrcName.EQ.{name}", f"sgtDstName.EQ.{name}"):
-            if n := await ers_count("egressmatrixcell", filt):
-                out.append(f"{n} egress matrix cell(s) use this SGT")
-        return out
     return []
+
+
+# Kinds whose "still in use" check is ise_where_used's scan (tools/where_used.py).
+WHERE_USED_KINDS = {
+    "identity_group",
+    "endpoint_group",
+    "authz_profile",
+    "dacl",
+    "sgt",
+    "sgacl",
+    "ndg",
+    "command_set",
+    "shell_profile",
+    "ad_join_point",
+}
 
 
 DELETE_KINDS = {
@@ -1424,7 +1416,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server
         sequence, AD join point (after ise_leave_ad), sponsor group or guest type (guest accounts:
         ise_delete_guest_user). Preview-first: shows
-        the object and what still references it (e.g. rules using a profile, which blocks the delete).
+        the object and what still references it (the ise_where_used scan: rules, profiles, sequences,
+        matrix cells, devices, members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]
@@ -1443,27 +1436,11 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         name = str(current.get("name"))
         blockers: list[str] = []
         side: list[str] = []
-        if kind == "authz_profile":
-            users = await rules_using_profile(app, name)
-            if users:
-                blockers.append(f"Used by authorization rule(s): {', '.join(users)}")
-        if kind in ("command_set", "shell_profile"):
-            field = "commands" if kind == "command_set" else "profile"
-            users = await rules_using_profile(app, name, "device-admin", field)
-            if users:
-                blockers.append(f"Used by device-admin rule(s): {', '.join(users)}")
-        if kind == "dacl":
-            page = await app.ers_pager.fetch_page(app.ers, "/ers/config/authorizationprofile", limit=5000)
-            for prof in page.items:
-                full = await app.ers_get("authorizationprofile", str(prof["id"]))
-                if name in (full.get("daclName"), full.get("ipv6DaclName")):
-                    blockers.append(f"Used by authorization profile {full.get('name')}")
         if kind == "ad_join_point":
             from ise_mcp.tools.ad import join_status  # noqa: PLC0415 - ad imports this module
 
             if (await join_status(app, current)).get("joined"):
                 blockers.append(f"{name} is still joined to {current.get('domain')}: ise_leave_ad first")
-            side.append(f"Policy conditions on {name}:ExternalGroups stop working")
         if kind in ("sponsor_group", "guest_type") and (
             current.get("isDefaultGroup") or current.get("isDefaultType")
         ):
@@ -1472,11 +1449,13 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             side.append("Its members can no longer sponsor guests (existing guest accounts stay)")
         if kind == "guest_type":
             side.append("Sponsors can no longer create this type; ISE refuses while guest accounts use it")
+        if kind in WHERE_USED_KINDS:
+            from ise_mcp.tools.where_used import delete_blockers, find_references  # noqa: PLC0415 - cycle
+
+            used, unchecked = delete_blockers(await find_references(app, kind, current))
+            blockers += used
+            side += unchecked
         blockers += await references(app, kind, current)
-        if kind in ("identity_group", "endpoint_group", "sgt"):
-            side.append(
-                "Policy rules that match on it stop matching (rules are not checked; see ise_get_policy_set)"
-            )
         plan = Plan(
             f"Delete {kind.replace('_', ' ')} {name}",
             details=compact(current),
