@@ -181,6 +181,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_GUEST_TIMEZONE` | unset | IANA time zone of the guest location; guest dates are in that local time |
 | `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. ISE's rules: 8-15 characters from `[A-Za-z0-9_#]`, at least one upper-case letter, one lower-case letter and one digit, no `cisco` in any case (the preview and `ise_status` check it). See [Backups](#backups) |
 | `ISE_REPOSITORY_<NAME>` | unset | Repository passwords `ise_set_repository(password_env='ISE_REPOSITORY_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_REPOSITORY_` names are read). See [Backups](#backups) |
+| `ISE_RADIUS_SECRET_<NAME>` | unset | External RADIUS server shared secrets (and key-wrap keys) `ise_set_external_radius_server(secret_env='ISE_RADIUS_SECRET_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown; only `ISE_RADIUS_SECRET_` names are read) |
 | `ISE_SNMP_<NAME>` | unset | SNMP scan credentials `ise_set_snmp_scan(community_env=..., v3_auth_password_env=..., v3_privacy_password_env=...)` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_SNMP_` names are read). See [Profiler](#profiler) |
 | `ISE_CERT_<NAME>` | unset | Key / PKCS#12 passwords `ise_import_system_certificate(password_env='ISE_CERT_<NAME>')` uses (also via `<var>_FILE`; never shown or passed per call; only `ISE_CERT_` names are read) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
@@ -298,7 +299,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-180 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+182 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 94 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -401,7 +402,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (62)
+### Write (64)
 
 | Tool | What it does |
 |---|---|
@@ -424,7 +425,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_condition` | Delete a library, time-and-date or network condition. |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_guest_user` | Delete a guest account as the sponsor. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted). |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted). |
 | `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
@@ -445,11 +446,13 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply, the final catch-all, and the cell status (ENABLED, MONITOR or DISABLED). |
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
 | `ise_set_guest_type` | Create a guest type, or change one: account duration (default and maximum, in days, hours or minutes, optionally from first login), login and device limits, the identity group guests get, and the sponsor groups that may use it. |
+| `ise_set_external_radius_server` | Create an external RADIUS server ISE can proxy to (an NPS or other AAA server being migrated from, or a partner realm's server), used through a RADIUS server sequence; or update one: given fields change, others are kept. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
 | `ise_set_mac_randomization` | Turn ISE's random and changing MAC (RCM) detection and endpoint ownership (Light Session Directory settings) on or off. |
 | `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
+| `ise_set_radius_server_sequence` | Create a RADIUS server sequence (an ordered list of external RADIUS servers a network-access policy set proxies to: an NPS migration or a partner realm), or update one: given fields change, others are kept. |
 | `ise_set_repository` | Create a repository ISE copies configuration backups to (Administration > System > Maintenance > Repository), or update the one with this name, so ise_create_backup has somewhere to write. |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |

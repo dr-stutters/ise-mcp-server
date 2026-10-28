@@ -98,6 +98,51 @@ def mock_custom_attributes(mock: respx.MockRouter) -> respx.Route:
     return mock.post("/api/v1/endpoint-custom-attribute").respond(201, text='"Created"')
 
 
+RADIUS_SERVER = {
+    "ExternalRadiusServer": {
+        "id": "r1",
+        "name": "mcp_noop_nps",
+        "hostIP": "192.0.2.60",
+        "sharedSecret": "stored-secret",
+        "authenticationPort": 1812,
+        "accountingPort": 1813,
+        "timeout": 5,
+        "retries": 3,
+        "enableKeyWrap": False,
+        "keyInputFormat": "ASCII",
+        "msgAuthIsRequiredOnResponse": True,
+    }
+}
+RADIUS_SEQUENCE = {
+    "RadiusServerSequence": {
+        "id": "q1",
+        "name": "mcp_noop_proxy",
+        "RadiusServerList": ["mcp_noop_nps"],
+        "stripPrefix": False,
+        "stripSuffix": False,
+        "remoteAccounting": True,
+        "localAccounting": False,
+        "continueAuthorzPolicy": False,
+    }
+}
+
+
+def mock_radius_proxy(mock: respx.MockRouter) -> respx.Route:
+    mock.get("/ers/config/externalradiusserver", params={"filter": "name.EQ.mcp_noop_nps"}).respond(
+        json=ers_page([{"id": "r1", "name": "mcp_noop_nps"}])
+    )
+    mock.get("/ers/config/externalradiusserver/r1").respond(json=RADIUS_SERVER)
+    mock.get("/ers/config/externalradiusserver").respond(
+        json=ers_page([{"id": "r1", "name": "mcp_noop_nps"}])
+    )
+    mock.get("/ers/config/radiusserversequence", params={"filter": "name.EQ.mcp_noop_proxy"}).respond(
+        json=ers_page([{"id": "q1", "name": "mcp_noop_proxy"}])
+    )
+    mock.get("/ers/config/radiusserversequence/q1").respond(json=RADIUS_SEQUENCE)
+    mock.put("/ers/config/radiusserversequence/q1").respond(json={})
+    return mock.put("/ers/config/externalradiusserver/r1").respond(json={})
+
+
 def mock_policy(mock: respx.MockRouter) -> respx.Route:
     """Policy set Wired (s1) with a Default rule already DenyAccess and an authn rule on CONTINUE (#151)."""
     noop_rule_mocks(mock)
@@ -260,6 +305,8 @@ NOOP_CALLS: dict[str, dict[str, Any]] = {
     "ise_set_sponsor_group": {"name": "mcp-guest-sponsors", "manage": "own"},
     "ise_set_guest_type": {"name": "Daily (default)", "default_duration": 1},
     "ise_set_custom_attribute": {"name": "assetTier", "attribute_type": "String"},
+    "ise_set_external_radius_server": {"name": "mcp_noop_nps", "host": "192.0.2.60", "retries": 3},
+    "ise_set_radius_server_sequence": {"name": "mcp_noop_proxy", "servers": ["mcp_noop_nps"]},
     "ise_update_policy_rule": {"policy_set": "Wired", "rule": "Default", "profiles": ["DenyAccess"]},
     "ise_update_policy_set": {"policy_set": "Wired", "state": "enabled"},
 }
@@ -274,6 +321,7 @@ def mock_all(mock: respx.MockRouter) -> None:
         mock_sponsor_group,
         mock_guest_type,
         mock_custom_attributes,
+        mock_radius_proxy,
         mock_policy,
     ):
         setup(mock)
