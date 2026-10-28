@@ -232,3 +232,213 @@ async def test_backup_hidden_without_dangerous() -> None:
     async with Client(make_server(mcp_enable_writes=True)) as c:
         names = {t.name for t in await c.list_tools()}
     assert "ise_list_repositories" in names and "ise_create_backup" not in names
+
+
+# --- ise_set_repository / ise_delete_repository (I62) ----------------------------------------------
+# Bodies follow the 3.5 OpenAPI 'Repository' schemas (SFTP: name, protocol, serverName, path, userName and
+# enablePki required; FTP also password; NFS server and path; DISK path), read with ise_get_definition
+# on the lab ISE 3.5 (2026-10-28). The lab has no repository yet (`{"response": null}`).
+
+PW = "Repo-Pass-2026!"
+REPO_ENV = "ISE_REPOSITORY_SFTP_PASSWORD"
+
+
+async def repo_two_step(
+    tool: str, args: dict[str, Any], *, apply: bool = True
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
+    async with Client(server) as c:
+        preview = (await c.call_tool(tool, args)).structured_content
+        assert preview is not None
+        if preview.get("status") != "preview" or not apply:
+            return preview, None
+        done = (await c.call_tool(tool, {**args, "confirm": preview["confirm"]})).structured_content
+        return preview, done
+
+
+SFTP_ARGS = {
+    "name": "mcp-backup-sftp",
+    "protocol": "SFTP",
+    "server": "192.0.2.50",
+    "path": "/srv/ise",
+    "user": "backup",
+    "password_env": REPO_ENV,
+}
+
+
+async def test_create_sftp_repository(mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(REPO_ENV, PW)
+    mock.get("/api/v1/repository").respond(json={"response": None, "version": "1.0.0"})
+    post = mock.post("/api/v1/repository").respond(200, json={"success": {"message": "created"}})
+    files = mock.get("/api/v1/repository/mcp-backup-sftp/files").respond(json={"response": []})
+    preview, done = await repo_two_step("ise_set_repository", SFTP_ARGS)
+    assert preview["action"] == "Create SFTP repository 'mcp-backup-sftp' on 192.0.2.50:/srv/ise"
+    p = preview["preview"]
+    assert p["method"] == "POST" and p["body"]["password"] == f"(from {REPO_ENV}, never shown)"
+    assert any("crypto host_key add" in s for s in preview["side_effects"])
+    assert PW not in json.dumps(preview)
+    assert files.call_count == 1  # only after the create (nothing to list before it exists)
+    assert json.loads(post.calls.last.request.content) == {
+        "name": "mcp-backup-sftp",
+        "protocol": "SFTP",
+        "path": "/srv/ise",
+        "serverName": "192.0.2.50",
+        "userName": "backup",
+        "enablePki": False,
+        "password": PW,
+    }
+    assert done is not None and done["result"]["action"] == "created"
+    assert done["result"]["files_check"] == {"ok": True, "files": 0}
+    assert PW not in json.dumps(done)
+
+
+async def test_update_flags_failing_listing(mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An existing SFTP repository ISE can't list: the preview says so and points at the host key."""
+    monkeypatch.setenv(REPO_ENV, PW)
+    existing = {**SFTP, "name": "mcp-backup-sftp", "serverName": "192.0.2.50", "path": "/old"}
+    mock.get("/api/v1/repository").respond(json={"response": [existing]})
+    mock.get("/api/v1/repository/mcp-backup-sftp/files").respond(
+        500, json={"error": {"message": "Failed to list files: host key verification failed"}}
+    )
+    put = mock.put("/api/v1/repository/mcp-backup-sftp").respond(200, json={"success": {}})
+    preview, done = await repo_two_step("ise_set_repository", SFTP_ARGS)
+    p = preview["preview"]
+    assert p["method"] == "PUT" and p["changes"] == {"path": {"from": "/old", "to": "/srv/ise"}}
+    assert p["files_now"]["ok"] is False and "crypto host_key add" in p["files_now"]["hint"]
+    assert any(s.startswith("ISE can't list 'mcp-backup-sftp' now") for s in preview["side_effects"])
+    assert json.loads(put.calls.last.request.content)["password"] == PW
+    assert done is not None and done["result"]["action"] == "updated"
+    assert done["result"]["files_check"]["ok"] is False
+
+
+async def test_update_needs_password_again(mock: respx.MockRouter) -> None:
+    existing = {**SFTP, "name": "mcp-backup-sftp", "serverName": "192.0.2.50", "path": "/srv/ise"}
+    mock.get("/api/v1/repository").respond(json={"response": [existing]})
+    mock.get("/api/v1/repository/mcp-backup-sftp/files").respond(json={"response": []})
+    put = mock.put("/api/v1/repository/mcp-backup-sftp").respond(200, json={})
+    args = {k: v for k, v in SFTP_ARGS.items() if k != "password_env"}
+    preview, _ = await repo_two_step("ise_set_repository", args)
+    assert preview["status"] == "blocked" and not put.called
+    assert any("ISE never returns a stored password" in b for b in preview["blockers"])
+    assert "Nothing changes in repository 'mcp-backup-sftp'." in preview["blockers"]
+
+
+async def test_password_env_missing(mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(REPO_ENV, raising=False)
+    monkeypatch.delenv(f"{REPO_ENV}_FILE", raising=False)
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    post = mock.post("/api/v1/repository").respond(200, json={})
+    preview, _ = await repo_two_step("ise_set_repository", SFTP_ARGS)
+    assert preview["status"] == "blocked" and not post.called
+    assert preview["blockers"] == [
+        f"{REPO_ENV} (or {REPO_ENV}_FILE) is not set on this server: add it to the server's environment and "
+        "restart it."
+    ]
+
+
+async def test_password_from_file(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    secret = tmp_path / "repo-pw"
+    secret.write_text(PW + "\n")
+    monkeypatch.delenv(REPO_ENV, raising=False)
+    monkeypatch.setenv(f"{REPO_ENV}_FILE", str(secret))
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    post = mock.post("/api/v1/repository").respond(200, json={})
+    mock.get("/api/v1/repository/mcp-backup-sftp/files").respond(json={"response": []})
+    await repo_two_step("ise_set_repository", SFTP_ARGS)
+    assert json.loads(post.calls.last.request.content)["password"] == PW
+
+
+async def test_password_env_must_be_repository_var(mock: respx.MockRouter) -> None:
+    """The tool never reads the server's own credentials (or any other variable) as a repository password."""
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    with pytest.raises(ToolError, match="must name a variable starting ISE_REPOSITORY_"):
+        await repo_two_step("ise_set_repository", {**SFTP_ARGS, "password_env": "ISE_PASSWORD"})
+
+
+async def test_nfs_and_disk_need_no_password(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    post = mock.post("/api/v1/repository").respond(200, json={})
+    mock.get("/api/v1/repository/mcp-nfs/files").respond(json={"response": ["a.tar.gpg"]})
+    mock.get("/api/v1/repository/mcp-disk/files").respond(json={"response": []})
+    _, done = await repo_two_step(
+        "ise_set_repository", {"name": "mcp-nfs", "protocol": "NFS", "server": "192.0.2.60", "path": "/ise"}
+    )
+    assert done is not None and done["result"]["files_check"] == {"ok": True, "files": 1}
+    assert json.loads(post.calls.last.request.content) == {
+        "name": "mcp-nfs",
+        "protocol": "NFS",
+        "path": "/ise",
+        "serverName": "192.0.2.60",
+    }
+    await repo_two_step("ise_set_repository", {"name": "mcp-disk", "protocol": "DISK", "path": "/"})
+    assert json.loads(post.calls.last.request.content) == {
+        "name": "mcp-disk",
+        "protocol": "DISK",
+        "path": "/",
+    }
+    with pytest.raises(ToolError, match="local disk"):
+        await repo_two_step("ise_set_repository", {"name": "d", "protocol": "DISK", "server": "192.0.2.1"})
+    with pytest.raises(ToolError, match="must start with '/'"):
+        await repo_two_step("ise_set_repository", {"name": "d", "protocol": "DISK", "path": "srv"})
+
+
+async def test_missing_server_and_user(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    preview, _ = await repo_two_step("ise_set_repository", {"name": "f", "protocol": "FTP"})
+    assert preview["blockers"][:2] == ["A FTP repository needs a server.", "A FTP repository needs a user."]
+
+
+async def test_set_repository_is_write_tier(mock: respx.MockRouter) -> None:
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        names = {t.name for t in await c.list_tools()}
+    assert "ise_set_repository" in names and "ise_delete_repository" not in names
+
+
+async def test_delete_repository(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/repository").respond(json={"response": [SFTP]})
+    mock.get(LAST).respond(json=status(DONE_BEFORE))  # an on-demand backup, not scheduled
+    delete = mock.delete("/api/v1/repository/lab-sftp").respond(200, json={})
+    preview, done = await repo_two_step("ise_delete_repository", {"name": "lab-sftp"})
+    assert preview["action"] == "Delete repository 'lab-sftp'" and preview["preview"]["method"] == "DELETE"
+    assert any("REST API shows no backup schedules" in s for s in preview["side_effects"])
+    assert done is not None and delete.call_count == 1
+
+
+async def test_delete_refused_for_scheduled_target(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/repository").respond(json={"response": [SFTP]})
+    mock.get(LAST).respond(json=status({**DONE_BEFORE, "scheduled": "true"}))
+    delete = mock.delete("/api/v1/repository/lab-sftp").respond(200, json={})
+    preview, _ = await repo_two_step("ise_delete_repository", {"name": "lab-sftp"})
+    assert preview["status"] == "blocked" and not delete.called
+    assert preview["blockers"][0].startswith("Repository 'lab-sftp' is a scheduled backup target")
+
+
+async def test_delete_unknown_repository(mock: respx.MockRouter) -> None:
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    with pytest.raises(ToolError, match="No repository 'nope'"):
+        await repo_two_step("ise_delete_repository", {"name": "nope"})
+
+
+async def test_sftp_pki_still_needs_user(mock: respx.MockRouter) -> None:
+    """The SFTP schema requires userName with enablePki too; the PKI preview says how to set the key up."""
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    post = mock.post("/api/v1/repository").respond(200, json={})
+    mock.get("/api/v1/repository/pki/files").respond(json={"response": []})
+    args = {"name": "pki", "protocol": "SFTP", "server": "192.0.2.50", "path": "/ise", "enable_pki": True}
+    preview, _ = await repo_two_step("ise_set_repository", args)
+    assert preview["status"] == "blocked" and preview["blockers"] == ["A SFTP repository needs a user."]
+    preview, _ = await repo_two_step("ise_set_repository", {**args, "user": "backup"}, apply=False)
+    assert preview["status"] == "preview" and not post.called
+    assert any("crypto key generate rsa" in s for s in preview["side_effects"])
+    assert "password" not in preview["preview"]["body"]
+    _, done = await repo_two_step("ise_set_repository", {**args, "user": "backup"})
+    assert done is not None and json.loads(post.calls.last.request.content) == {
+        "name": "pki",
+        "protocol": "SFTP",
+        "path": "/ise",
+        "serverName": "192.0.2.50",
+        "userName": "backup",
+        "enablePki": True,
+    }
