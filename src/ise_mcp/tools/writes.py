@@ -582,6 +582,8 @@ DELETE_KINDS = {
     "allowed_protocols": "allowedprotocols",
     "egress_cell": "egressmatrixcell",
     "snmp_scan": "profiler/snmp/scan",  # OpenAPI, not ERS: tools/snmp_scan.delete_snmp_scan
+    # OpenAPI, not ERS: tools/pxgrid_direct.delete_pxgrid_direct_connector
+    "pxgrid_direct_connector": "pxgrid-direct/connector-config",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -2392,6 +2394,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "allowed_protocols",
                 "egress_cell",
                 "snmp_scan",
+                "pxgrid_direct_connector",
             ],
             Field(description="What to delete"),
         ],
@@ -2399,7 +2402,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             str,
             Field(
                 description="Name or id (a MAC for endpoints; for egress_cell 'SOURCE->DESTINATION' SGT "
-                "names, e.g. 'Employees->Servers', or the cell id; for snmp_scan the scan name)"
+                "names, e.g. 'Employees->Servers', or the cell id; for snmp_scan the scan name; for "
+                "pxgrid_direct_connector the connector name)"
             ),
         ],
         confirm: Confirm = None,
@@ -2411,8 +2415,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service
         (blocked while a policy set selects it), TrustSec egress matrix cell (its SGT pair then falls to
         the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never
-        deleted) or profiler endpoint SNMP scan (blocked while a run is in progress: stop it with
-        ise_run_snmp_scan first). Preview-first: shows the object and what still references it (the
+        deleted), profiler endpoint SNMP scan (blocked while a run is in progress: stop it with
+        ise_run_snmp_scan first) or pxGrid Direct connector (its dictionary attributes go: rules on them stop
+        matching). Preview-first: shows the object and what still references it (the
         ise_where_used scan: rules, profiles, sequences, matrix cells, IP-SGT mappings, devices,
         members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
@@ -2424,6 +2429,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             from ise_mcp.tools.snmp_scan import delete_snmp_scan  # noqa: PLC0415 - snmp_scan imports this module
 
             return await delete_snmp_scan(ctx, app, target, confirm)
+        if kind == "pxgrid_direct_connector":
+            from ise_mcp.tools.pxgrid_direct import delete_pxgrid_direct_connector  # noqa: PLC0415 - imports this module
+
+            return await delete_pxgrid_direct_connector(ctx, app, target, confirm)
         if kind == "endpoint":
             mac_n = normalize_mac(target)
             page = await app.ers_pager.fetch_page(

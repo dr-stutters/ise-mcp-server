@@ -183,6 +183,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_REPOSITORY_<NAME>` | unset | Repository passwords `ise_set_repository(password_env='ISE_REPOSITORY_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_REPOSITORY_` names are read). See [Backups](#backups) |
 | `ISE_RADIUS_SECRET_<NAME>` | unset | External RADIUS server shared secrets (and key-wrap keys) `ise_set_external_radius_server(secret_env='ISE_RADIUS_SECRET_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown; only `ISE_RADIUS_SECRET_` names are read) |
 | `ISE_SNMP_<NAME>` | unset | SNMP scan credentials `ise_set_snmp_scan(community_env=..., v3_auth_password_env=..., v3_privacy_password_env=...)` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_SNMP_` names are read). See [Profiler](#profiler) |
+| `ISE_PXGRID_DIRECT_<NAME>` | unset | pxGrid Direct CMDB credential (an API token or basic-auth password) `ise_set_pxgrid_direct_connector(secret_env=...)` / `ise_test_pxgrid_direct(secret_env=...)` send to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_PXGRID_DIRECT_` names are read). See [pxGrid Direct](#pxgrid-direct-a-cmdb-as-an-attribute-source) |
 | `ISE_CERT_<NAME>` | unset | Key / PKCS#12 passwords `ise_import_system_certificate(password_env='ISE_CERT_<NAME>')` uses (also via `<var>_FILE`; never shown or passed per call; only `ISE_CERT_` names are read) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
@@ -299,11 +300,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-182 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 94 read tools plus `ise_api_call` (GET-only) are registered. Everything
+185 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 96 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (94)
+### Read (96)
 
 | Tool | What it does |
 |---|---|
@@ -389,6 +390,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_policy_audit` | Policy hygiene audit, for a pre-audit, a quarterly clean-up or an inherited ISE: ranked findings (high, medium, low, info), each with where it is and the tool that fixes it. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
 | `ise_profiler_status` | Profiler health and setup: which nodes run the Profiler service, each PSN's probes (enabled with their settings, and disabled), live profiler session count, custom profiling rule count, cloud profiler / telemetry state, and the feed service (GUI-only, said so). |
+| `ise_pxgrid_direct_status` | pxGrid Direct connectors (a REST CMDB such as NetBox as an endpoint attribute source): their URL, identifiers, attribute mapping and schedules, the last sync's status (INPROGRESS, QUEUED, SYNC COMPLETED, ERRORED), and with unique_id one record as ISE holds it. |
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
@@ -396,13 +398,14 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_snmp_scan_history` | The profiler's endpoint SNMP scans (Work Centers > Profiler > Endpoint Scans). |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
+| `ise_test_pxgrid_direct` | Have ISE fetch the saved connector's bulk URL now (POST test-connector) and report whether it answered, the error if not, and how many records sit under the top-level object, with the first one. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
 | `ise_trustsec_device_report` | Which network devices have downloaded ISE's current TrustSec policy: per device the last step of the ISE <-> switch exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device last reported, whether it is current, and what to check when it is not (PAC, CTS credentials, CoA, 'cts refresh policy'). |
 | `ise_unused_objects` | Objects nothing references, for a clean-up: authorization profiles, dACLs, SGTs, SGACLs, identity and endpoint groups, network device groups for which the ise_where_used scan (policy sets and rules, library conditions, profiles, identity sequences, egress matrix, devices, group members) finds no use, each with its ise_delete_object call. |
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (64)
+### Write (65)
 
 | Tool | What it does |
 |---|---|
@@ -425,7 +428,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_condition` | Delete a library, time-and-date or network condition. |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_guest_user` | Delete a guest account as the sponsor. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it), TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted) or profiler endpoint SNMP scan (blocked while a run is in progress: stop it with ise_run_snmp_scan first). |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, external RADIUS server (blocked while a RADIUS server sequence lists it) / RADIUS server sequence (blocked while a policy set proxies to it), AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it), TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself is changed with ise_set_default_egress_rule, never deleted), profiler endpoint SNMP scan (blocked while a run is in progress: stop it with ise_run_snmp_scan first) or pxGrid Direct connector (its dictionary attributes go: rules on them stop matching). |
 | `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |
@@ -451,6 +454,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
 | `ise_set_mac_randomization` | Turn ISE's random and changing MAC (RCM) detection and endpoint ownership (Light Session Directory settings) on or off. |
 | `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
+| `ise_set_pxgrid_direct_connector` | Create a pxGrid Direct connector (ISE pulls a REST CMDB such as NetBox on a schedule and adds the mapped record attributes to the matching endpoints, for authorization rules on '<connector>:<attribute>'), or update the one with this name: given fields change, others are kept. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
 | `ise_set_radius_server_sequence` | Create a RADIUS server sequence (an ordered list of external RADIUS servers a network-access policy set proxies to: an NPS migration or a partner realm), or update one: given fields change, others are kept. |
 | `ise_set_repository` | Create a repository ISE copies configuration backups to (Administration > System > Maintenance > Repository), or update the one with this name, so ise_create_backup has somewhere to write. |
@@ -594,6 +598,22 @@ encrypted with `key_passphrase`), the CA chain and `server_ca_pem`, the CA the c
 ISE's pxGrid server. The key is then forgotten. ISE's own pxGrid certificate is issued with the certificate
 tools: `ise_generate_csr usage=PXGRID` (vary the subject from the EAP certificate's, or ISE answers 409) ->
 sign -> `ise_bind_certificate use_for=['pxgrid']` (pxGrid restarts on the node for a minute or two).
+
+### pxGrid Direct (a CMDB as an attribute source)
+
+ISE 3.5 can pull a REST CMDB (NetBox, ServiceNow, any JSON source) on a schedule and give the matching
+endpoints its attributes (role, site, owner), so IoT and OT devices are authorized from the source of truth
+instead of profiling guesses. `ise_set_pxgrid_direct_connector` creates or updates the connector: the bulk
+(and optional incremental) URL, the top-level object holding the records (`results` for NetBox), the unique
+identifier (`id`), the correlation identifier (the record attribute with the endpoint MAC), the attribute
+mapping (dictionary attribute -> record attribute), the sync schedule and the CoA on change. The token or
+password comes from an `ISE_PXGRID_DIRECT_<NAME>` server variable and is never shown; an apikey connector
+sends it as `Authorization: Token <token>` by default (NetBox; `token_scheme='Bearer'` for v2 tokens).
+`ise_test_pxgrid_direct` has ISE fetch the URL now (record count and the first record), and
+`ise_pxgrid_direct_status` shows the connectors, their last sync (INPROGRESS, QUEUED, SYNC COMPLETED,
+ERRORED) and one record as ISE holds it. Authorization rules then match `<connector>:<attribute>`;
+`ise_delete_object(kind='pxgrid_direct_connector')` removes a connector. ISE does the pulling: the server
+subscribes to nothing. ISE must trust the CMDB's certificate chain.
 
 ### Active Directory
 `ise_create_ad_join_point` (the join point name becomes the policy dictionary, e.g. `CORP:ExternalGroups`) ->
