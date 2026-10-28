@@ -137,6 +137,28 @@ re-downloads on demand; `clear cts environment-data` starts over.
    5 -> 11 cell increases and the pings get no reply. alice (SGT 4) to the DC: the pings are answered and
    `HW-Permitt` increases on the default (`*` -> `*`, `Permit IP`) cell.
 
+### 3b. Staged enforcement: monitor first, default-deny last
+
+The validated TrustSec rollout order (Cisco TrustSec and Group-Based Policy design guides): classify,
+propagate, put cells in monitor, read the hits, enforce, and only then turn the ANY-ANY default from permit
+to deny.
+
+1. **Monitor a cell**: `ise_set_egress_policy(source_sgt=..., destination_sgt=..., sgacls=["Deny IP"],
+   status="MONITOR")`, then `ise_push_trustsec_matrix()`. The switch counts the SGACL hits (`show cts
+   role-based counters`, the monitored columns) but lets the traffic through. `enabled=` still works as a
+   deprecated alias (true = ENABLED, false = DISABLED); with neither given an existing cell keeps its
+   status.
+2. **What is still in monitor**: `ise_get_egress_matrix(status="MONITOR")`.
+3. **Enforce**: the same call with `status="ENABLED"`, push again; the counters move to `HW-Denied`.
+4. **Default-deny** (dangerous tier): `ise_set_default_egress_rule(rule="DENY_IP", status="MONITOR")` first,
+   read the counters on the default (`*` -> `*`) cell, then `ise_set_default_egress_rule(rule="DENY_IP")`
+   and push. The preview counts the explicit cells (by status), lists the SGT pairs with no explicit cell
+   (they get the new default; pairs whose source has live sessions first; a DISABLED cell is not
+   enforced, so its pair counts too), counts the live sessions per SGT from MnT, and warns when
+   TrustSec_Devices -> TrustSec_Devices (SGT 2, network device traffic) has no enabled cell or when the default was never in monitor. `sgacls` replaces the default cell's SGACL list:
+   `[]` leaves only the catch-all (a `Permit IP` SGACL in front of `DENY_IP` would still permit
+   everything). Undo: `ise_set_default_egress_rule(rule="PERMIT_IP", sgacls=["Permit IP"])` and push.
+
 ## 4. When enforcement does not happen
 
 Work down the list; `ise_trustsec_device_report` names the failing step and the hint for it.
