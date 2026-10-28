@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.18.0 (2026-10-28)
+
+Endpoint summary by device type, profile, identity group or NDG; allowed-protocols writes that work on ISE 3.5; SGTs bound in
+static IP-SGT mappings counted as used; and the four new suite prompts from core 0.19.0. 167 tools (89 read, 55 write, 23
+dangerous) and twelve prompts.
+
+### Added
+- `ise_endpoint_summary` (I59, #98, #133): endpoints by device type, profile, endpoint identity group or network device group,
+  largest first, each row with its share and the next tool; `ise_snapshot` records endpoint device types.
+- `ise_delete_object(kind='allowed_protocols')` (blocked while a policy set selects it) and an `allowed_protocols` section in
+  `ise_export_config` (I71 follow-up, #122, #129).
+- Core pin bumped to stutters-mcp-core v0.19.0: the suite prompts `suite_access_review`, `suite_asbuilt_drift`,
+  `suite_decommission_site` and `suite_maintenance_window` are registered (#126).
+
+### Fixed
+- `ise_set_allowed_protocols` presets and allow/deny updates work on ISE 3.5: nested settings are sent only for allowed
+  protocols, with hardened defaults for a newly allowed one (#122, #129).
+- `ise_where_used` / `ise_unused_objects` / `ise_delete_object` count static IP-SGT mappings and mapping groups as SGT
+  references; `GuestType_*` (default) identity groups are built-in (#123, #128).
+- `ise_deployment_health` no longer masks the admin names in `admins.change_password_pending` (#124, #127).
+
 ## 0.17.0 (2026-10-28)
 
 Policy hit-counter reset, repository create/update/delete, the TrustSec MONITOR cell status and ANY-ANY default rule, web

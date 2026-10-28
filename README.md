@@ -88,7 +88,7 @@ You need: an ISE admin account for the server (read-only is enough to start: adm
 has a wheel with stutters-mcp-core bundled in; it needs only PyPI dependencies.
 
 ```bash
-WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.17.0/ise_mcp_server-0.17.0-py3-none-any.whl
+WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.18.0/ise_mcp_server-0.18.0-py3-none-any.whl
 export ISE_URL=https://ise.example.com ISE_USERNAME=mcp-ro ISE_PASSWORD='...'
 uvx --from "$WHEEL" ise-mcp-server check            # preflight: surfaces, TLS, login, admin groups, version
 claude mcp add ise -e ISE_URL=$ISE_URL -e ISE_USERNAME=$ISE_USERNAME -e ISE_PASSWORD="$ISE_PASSWORD" \
@@ -102,7 +102,7 @@ Claude Desktop (`claude_desktop_config.json`), same idea:
   "mcpServers": {
     "ise": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.17.0/ise_mcp_server-0.17.0-py3-none-any.whl", "ise-mcp-server"],
+      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.18.0/ise_mcp_server-0.18.0-py3-none-any.whl", "ise-mcp-server"],
       "env": {"ISE_URL": "https://ise.example.com", "ISE_USERNAME": "mcp-ro", "ISE_PASSWORD": "..."}
     }
   }
@@ -295,7 +295,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-167 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+167 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 89 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
