@@ -597,12 +597,25 @@ async def redirect_body(app: IseApp, r: Redirect) -> tuple[dict[str, Any], list[
         warnings.append(
             f"Client provisioning portal {r.portal!r} is checked by ISE on apply (ERS cannot list those)"
         )
-    body: dict[str, Any] = {"WebRedirectionType": r.type, "ACL": r.acl.strip(), "portalName": name}
+    # ERS key spelling as ISE 3.5 returns and accepts it: 'acl' (not 'ACL', which ISE refuses with 400).
+    body: dict[str, Any] = {"WebRedirectionType": r.type, "acl": r.acl.strip(), "portalName": name}
     if r.static_host:
         body["staticIPHostNameFQDN"] = r.static_host.strip()
     if r.type == "CentralizedWebAuth":
         body["displayCertificatesRenewalMessages"] = True  # mandatory for CWA (GUI default)
     return body, blockers, warnings
+
+
+def same_redirect_keys(new: dict[str, Any], old: Any) -> dict[str, Any]:
+    """`new` (from redirect_body) lined up with the profile's current webRedirection for the update diff:
+    a redirect of the same type keeps the current displayCertificatesRenewalMessages (not a tool argument),
+    so re-sending what ISE already has is no change."""
+    if not isinstance(old, dict) or old.get("WebRedirectionType") != new.get("WebRedirectionType"):
+        return new
+    out = dict(new)
+    if "displayCertificatesRenewalMessages" in old:
+        out["displayCertificatesRenewalMessages"] = old["displayCertificatesRenewalMessages"]
+    return out
 
 
 def common_task_warnings(body: dict[str, Any], before: dict[str, Any] | None = None) -> list[str]:
@@ -1925,9 +1938,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         redirect_warnings: list[str] = []
         if isinstance(redirect, Redirect):
             # Replaced whole: a stale portal or static host from another type would be refused.
-            desired["webRedirection"], redirect_blockers, redirect_warnings = await redirect_body(
-                app, redirect
-            )
+            new_redirect, redirect_blockers, redirect_warnings = await redirect_body(app, redirect)
+            desired["webRedirection"] = same_redirect_keys(new_redirect, current.get("webRedirection"))
         av_blockers: list[str] = []
         av_warnings: list[str] = []
         if av_pairs is not None or sdwan_group is not None:
