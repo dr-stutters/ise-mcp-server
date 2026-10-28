@@ -22,6 +22,7 @@ from ise_mcp._core import (
     Plan,
     ResponseFormat,
     ToolRegistrar,
+    UpstreamError,
     compact,
     field_changes,
     get_client,
@@ -30,13 +31,94 @@ from ise_mcp._core import (
 from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_list, ers_name_map, ers_resolve, is_uuid, list_result, parse_ip
-from ise_mcp.tools.network import resolve_nad
+from ise_mcp.tools.network import nad_ips, resolve_nad
 from ise_mcp.tools.writes import fingerprint, put_body
 
 SLOW_WRITE_TIMEOUT = 120.0
 SXP_MODES = Literal["SPEAKER", "LISTENER", "BOTH"]
 SXP_VERSIONS = Literal["VERSION_1", "VERSION_2", "VERSION_3", "VERSION_4"]
 COA_TYPES = Literal["ALL", "ENV", "POLICY", "SGACL", "SGT"]
+
+
+# --- TrustSec CoA push scope (#169) -----------------------------------------------------------------
+
+MATRICES = "/api/v1/trustsec/matrix"
+NAD_SCAN_CAP = 5000
+SHOWN_DEVICES = 20
+ONE_DEVICE_NOTE = (
+    "ISE's push API has no per-device scope. To refresh one device (a staged TrustSec change), run "
+    "'cts refresh policy' on it (and 'show cts role-based permissions' to check)."
+)
+
+
+async def resolve_matrix(app: IseApp, key: str) -> dict[str, Any]:
+    """A TrustSec policy matrix by id or name (GET /api/v1/trustsec/matrix)."""
+    got = await app.openapi.get(MATRICES)
+    rows = [m for m in (got.get("response") if isinstance(got, dict) else got) or [] if isinstance(m, dict)]
+    k = key.strip()
+    hits = [m for m in rows if k in (m.get("matrixUuId"), m.get("name"))] or [
+        m for m in rows if str(m.get("name") or "").lower() == k.lower()
+    ]
+    if not hits:
+        names = ", ".join(str(m.get("name")) for m in rows) or "none"
+        raise NotFound(f"No TrustSec matrix {key!r} (matrices: {names})", 404)
+    return hits[0]
+
+
+def matrix_summary(m: dict[str, Any]) -> dict[str, Any]:
+    return compact(  # type: ignore[no-any-return]
+        {
+            "name": m.get("name"),
+            "id": m.get("matrixUuId"),
+            "type": m.get("type"),
+            "policy_type": m.get("matrixPolicyType"),
+            "nads": m.get("noOfNads"),
+            "nad_list": m.get("nadList"),
+            "ndg_list": m.get("ndgList"),
+        }
+    )
+
+
+def in_matrix(nads: list[dict[str, Any]], m: dict[str, Any]) -> list[dict[str, Any]]:
+    """The TrustSec NADs a matrix holds: those named (or by id) in its nadList or inside one of its
+    ndgList groups. A matrix with neither list (the PRODUCTION/default one) keeps them all."""
+    names = {str(x).lower() for x in m.get("nadList") or []}
+    groups = [str(g).lower() for g in m.get("ndgList") or []]
+    if not names and not groups:
+        return nads
+
+    def member(n: dict[str, Any]) -> bool:
+        if str(n.get("name") or "").lower() in names or str(n.get("id") or "").lower() in names:
+            return True
+        ndgs = [str(g).lower() for g in n.get("NetworkDeviceGroupList") or []]
+        return any(d == g or d.startswith(g + "#") for g in groups for d in ndgs)
+
+    return [n for n in nads if member(n)]
+
+
+async def trustsec_nads(app: IseApp) -> tuple[list[dict[str, Any]] | None, bool, str | None]:
+    """The NADs with TrustSec settings (ERS networkdevice trustsecsettings), whether the scan was
+    complete, and why not when ERS could not be read."""
+    try:
+        page = await ers_list(
+            app, "networkdevice", limit=NAD_SCAN_CAP, offset=0, detail=True, detail_cap=None
+        )
+    except UpstreamError as e:
+        return None, False, f"ERS networkdevice: {e}"
+    nads = [n for n in page.items if isinstance(n, dict) and n.get("trustsecsettings")]
+    nads.sort(key=lambda n: str(n.get("name") or "").lower())
+    return nads, page.complete, None
+
+
+def push_on(n: dict[str, Any]) -> bool:
+    """False only when the NAD's TrustSec settings say 'send configuration changes to device' is off."""
+    updates = (n.get("trustsecsettings") or {}).get("sgaNotificationAndUpdates") or {}
+    return updates.get("sendConfigurationToDevice") is not False
+
+
+def nad_row(n: dict[str, Any]) -> dict[str, Any]:
+    row = {"name": n.get("name"), "ips": nad_ips(n), "groups": n.get("NetworkDeviceGroupList")}
+    return {k: v for k, v in row.items() if v}
 
 
 def mapping_name(ip: str) -> str:
@@ -503,27 +585,77 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "ENV (environment data) or ALL"
             ),
         ] = "POLICY",
+        matrix: Annotated[
+            str | None,
+            Field(
+                description="Matrix name or id (GET /api/v1/trustsec/matrix) when ISE has several "
+                "(multiple matrices / DEFCON); omit for ISE's default"
+            ),
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Send a TrustSec CoA to every TrustSec network device so it downloads the current egress
         matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI.
-        Only devices with TrustSec (CTS) credentials in ISE take part. Verify on a device with 'show cts
+        Only devices with TrustSec (CTS) settings and 'send configuration changes to device' on take part;
+        the preview lists them (count, then the first few by name, IP and device group) as the blast
+        radius, and names TrustSec devices the push skips. The API has no per-device push
+        (COAPushRequest takes only coaType and matrixId): to refresh ONE device, as a staged TrustSec
+        change starts, run 'cts refresh policy' on that device instead. Verify on a device with 'show cts
         role-based permissions'. Preview-first."""
         app: IseApp = get_client(ctx)
+        body: dict[str, Any] = {"coaType": coa_type}
+        details: dict[str, Any] = {"coaType": coa_type}
+        matrix_row: dict[str, Any] | None = None
+        if matrix:
+            matrix_row = await resolve_matrix(app, matrix)
+            body["matrixId"] = matrix_row["matrixUuId"]
+            details["matrix"] = matrix_summary(matrix_row)
+        devices, complete, why = await trustsec_nads(app)
+        if devices is not None and matrix_row is not None:
+            devices = in_matrix(devices, matrix_row)
+        if devices is not None:
+            # ISE sends the CoA only to NADs with 'send configuration changes to device' on.
+            skipped = [n for n in devices if not push_on(n)]
+            devices = [n for n in devices if push_on(n)]
+            if skipped:
+                details["trustsec_without_push"] = {
+                    "count": len(skipped),
+                    "names": [str(n.get("name")) for n in skipped[:SHOWN_DEVICES]],
+                    "note": "TrustSec NADs with 'send configuration changes to device' off: ISE's push "
+                    "skips them (ise_update_nad trustsec_push=true); they refresh on their own timer",
+                }
+        blast: dict[str, Any]
+        if devices is None or not complete:
+            reason = why or f"ISE listed more than {NAD_SCAN_CAP} network devices"
+            blast = {"blast_unknown": f"the TrustSec devices could not all be listed: {reason}"}
+            if devices:
+                details["trustsec_devices_seen"] = len(devices)
+        else:
+            blast = {"blast_radius": len(devices)}
+            details["trustsec_devices"] = len(devices)
+        if devices:
+            details["devices"] = [nad_row(n) for n in devices[:SHOWN_DEVICES]]
+            if len(devices) > SHOWN_DEVICES:
+                details["devices_not_shown"] = len(devices) - SHOWN_DEVICES
+        details["one_device_instead"] = ONE_DEVICE_NOTE
+        target = f"matrix {matrix_row.get('name')}" if matrix_row else "all TrustSec devices"
+        count = f" ({len(devices)} devices)" if devices is not None and complete else ""
         plan = Plan(
-            f"TrustSec CoA push ({coa_type}) to all TrustSec devices",
-            details={"coaType": coa_type},
+            f"TrustSec CoA push ({coa_type}) to {target}{count}",
+            details=details,
             side_effects=[
-                "Every TrustSec device re-downloads policy; changed SGACLs take effect network-wide at once"
+                "Every listed TrustSec device re-downloads policy; changed SGACLs take effect on all of "
+                "them at once (ISE has no per-device push)"
             ],
+            **blast,
         )
         return await preview_or_apply(
             ctx,
             tool="ise_push_trustsec_matrix",
-            args={"coa_type": coa_type},
+            args={"coa_type": coa_type, "matrix": matrix},
             confirm=confirm,
             plan=plan,
-            apply=lambda: app.openapi.put("/api/v1/trustsec/coa/push", json={"coaType": coa_type}),
+            apply=lambda: app.openapi.put("/api/v1/trustsec/coa/push", json=body),
         )
 
     @reg.dangerous(title="Deploy IP-SGT mappings to devices (SSH)")
