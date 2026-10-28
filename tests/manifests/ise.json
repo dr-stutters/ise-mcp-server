@@ -78,6 +78,56 @@
         "catc"
       ]
     },
+    "ise_onboard_nad": {
+      "arguments": [
+        "name",
+        "ip",
+        "switch",
+        "location",
+        "device_type",
+        "protocols",
+        "source_interface",
+        "vrf",
+        "ise_address",
+        "site",
+        "test_user",
+        "mac"
+      ],
+      "references": [
+        "ise_get_nad",
+        "ise_list_ndgs",
+        "ise_list_nodes",
+        "ise_create_ndg",
+        "ise_create_nad",
+        "ise_update_nad",
+        "ise_audit_nads",
+        "ise_policy_explain",
+        "ise_admin_policy_explain",
+        "ise_get_auth_list",
+        "ise_recent_auth_failures",
+        "ise_find_session",
+        "ise_delete_object",
+        "cml_run_commands",
+        "cml_configure_node",
+        "catc_get_device",
+        "catc_list_devices",
+        "catc_run_show_commands",
+        "catc_get_site_settings",
+        "catc_update_site_aaa_settings",
+        "catc_provision_devices",
+        "catc_create_template",
+        "catc_commit_template",
+        "catc_preview_template",
+        "catc_deploy_template"
+      ],
+      "rendered": false,
+      "tier": "write",
+      "uses": [
+        "ise",
+        "cml",
+        "catc"
+      ]
+    },
     "ise_onboard_sdwan_edges": {
       "arguments": [
         "site",
