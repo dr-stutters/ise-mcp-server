@@ -415,7 +415,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_decline_pxgrid_client` | Refuse a pending pxGrid registration (an unknown or unwanted client). |
 | `ise_delete_csr` | Delete a pending CSR and its private key on ISE (e.g. |
 | `ise_delete_guest_user` | Delete a guest account as the sponsor. |
-| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user) or allowed-protocols service (blocked while a policy set selects it). |
+| `ise_delete_object` | Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT, SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts: ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or TrustSec egress matrix cell (`kind=egress_cell`, target `'SOURCE->DESTINATION'` or the cell id; the pair falls to the ANY-ANY default, which itself is changed with ise_set_default_egress_rule). |
 | `ise_delete_profiling_rule` | Delete a CUSTOM profiling rule. |
 | `ise_delete_pxgrid_client` | Remove a pxGrid client (any state). |
 | `ise_delete_trustsec_object` | Delete a static IP-SGT mapping (SXP listeners withdraw it; devices it was deployed to keep it until the next deploy) or an SXP connection (the session to the device goes down). |

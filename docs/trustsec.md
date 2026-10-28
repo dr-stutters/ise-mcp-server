@@ -158,6 +158,9 @@ to deny.
    TrustSec_Devices -> TrustSec_Devices (SGT 2, network device traffic) has no enabled cell or when the default was never in monitor. `sgacls` replaces the default cell's SGACL list:
    `[]` leaves only the catch-all (a `Permit IP` SGACL in front of `DENY_IP` would still permit
    everything). Undo: `ise_set_default_egress_rule(rule="PERMIT_IP", sgacls=["Permit IP"])` and push.
+5. **Remove a cell**: `ise_delete_object(kind="egress_cell", target="Employees->Servers")` (or the cell id).
+   The preview shows the SGTs, SGACLs, catch-all and status; the pair then falls to the ANY-ANY default, so
+   push again. The ANY-ANY cell can't be deleted (use `ise_set_default_egress_rule`).
 
 ## 4. When enforcement does not happen
 
