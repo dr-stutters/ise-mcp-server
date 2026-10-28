@@ -561,7 +561,7 @@ wheels = [
 
 [[package]]
 name = "ise-mcp-server"
-version = "0.14.1"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
