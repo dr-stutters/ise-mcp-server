@@ -11,11 +11,12 @@ secrets; NAD secrets are passed separately. Applying stops at the first failure 
 import fnmatch
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastmcp import Context
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from ise_mcp._core import (
     Confirm,
@@ -70,6 +71,7 @@ APPLY_ORDER = (
     "command_sets",
     "shell_profiles",
     "nads",
+    "conditions",
     "policy_sets",
 )
 ERS = {  # section -> (ERS resource, JSON wrapper)
@@ -409,6 +411,98 @@ def _custom_delete(app: IseApp, name: str) -> Callable[[], Awaitable[Any]]:
     return run
 
 
+# --- planning: reusable conditions --------------------------------------------------------------
+
+
+async def _conditions(
+    app: IseApp,
+    plan: ImportPlan,
+    source: dict[str, Any],
+    live: list[dict[str, Any]],
+    run: Export,
+    *,
+    only: list[str] | None,
+    prune: bool,
+) -> None:
+    """Library, time and network conditions, matched by kind and name; each body is built and checked
+    by ise_set_condition's code (dictionaries, NADs and device groups, this import's own NADs and groups
+    counting as known)."""
+    from ise_mcp.tools.conditions import (  # noqa: PLC0415 - conditions imports config_export lazily
+        RESOURCE,
+        NetworkSpec,
+        TimeSpec,
+        delete_condition,
+        desired_body,
+        write_condition,
+    )
+
+    have = _keyed("conditions", live)
+    raw = {
+        f"{kind}/{c.get('name')}": (ctype, c)
+        for kind, existing in run.raw_conditions.items()
+        for ctype, items in existing.items()
+        for c in items
+    }
+    nads = {str(n.get("name")) for n in source.get("nads") or []}
+    ndgs = {str(g.get("name")) for g in source.get("ndgs") or []}
+    want = {
+        key: o
+        for key, o in _keyed("conditions", source.get("conditions") or []).items()
+        if matches(str(o.get("name")), only)
+    }
+    for key in sorted(want, key=str.casefold):
+        o = want[key]
+        kind, ctype, where = o.get("kind"), str(o.get("type")), f"conditions/{key}"
+        if kind not in KINDS or ctype not in RESOURCE:
+            plan.blockers.append(
+                f"{where}: kind must be one of {', '.join(KINDS)} and type library|time|network"
+            )
+            continue
+        if kind not in run.raw_conditions:
+            plan.blockers.append(f"{where}: {kind} conditions can't be read on the target")
+            continue
+        changes: dict[str, Any] | None = None
+        if key in have:
+            if have[key].get("type") != ctype:
+                plan.blockers.append(
+                    f"{where}: a {have[key].get('type')} condition on the target, {ctype} in the export"
+                )
+                continue
+            changes = field_changes(have[key], o)
+            if not changes:
+                plan.skip("conditions")
+                continue
+        try:
+            body, blockers = await desired_body(
+                app,
+                kind,
+                ctype,
+                conditions=o.get("conditions") if ctype == "library" else None,
+                match=str(o.get("match") or "all"),
+                time=TimeSpec(**(o.get("time") or {})) if ctype == "time" else None,
+                network=NetworkSpec(**(o.get("network") or {})) if ctype == "network" else None,
+                known_nads=nads,
+                known_ndgs=ndgs,
+            )
+        except (InvalidRequest, ValidationError) as e:
+            plan.blockers.append(f"{where}: {str(e)[:300]}")
+            continue
+        plan.blockers += [f"{where}: {b}" for b in blockers]
+        body = {**body, "name": o.get("name"), "description": o.get("description") or ""}
+        current = raw[key][1] if changes is not None else None
+        step_run = partial(write_condition, app, str(kind), ctype, body, current)
+        plan.steps.append(Step("update" if current else "create", "conditions", key, step_run, changes))
+    extra = sorted(
+        (k for k, o in have.items() if k not in want and matches(str(o.get("name")), only)), key=str.casefold
+    )
+    if extra and not prune:
+        plan.left_alone["conditions"] = extra
+    for key in extra if prune else []:
+        ctype, cur = raw[key]
+        kind = key.split("/", 1)[0]
+        plan.steps.append(Step("delete", "conditions", key, partial(delete_condition, app, kind, ctype, cur)))
+
+
 # --- planning: policy sets and rules ------------------------------------------------------------
 
 
@@ -446,15 +540,20 @@ def _leaves(node: dict[str, Any] | None) -> list[dict[str, Any]]:
 class PolicyContext:
     """What policy planning needs from the target: condition libraries, dictionaries, known names."""
 
-    def __init__(self, app: IseApp) -> None:
+    def __init__(self, app: IseApp, pending: dict[str, set[str]] | None = None) -> None:
         self.app = app
+        # Conditions this import creates before the policy (by kind): referenced by name, id at run time.
+        self.pending = pending or {}
         self.libraries: dict[str, dict[str, dict[str, Any]]] = {}
         self.attrs: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self.names: dict[str, set[str]] = {}
 
     async def library(self, kind: str) -> dict[str, dict[str, Any]]:
         if kind not in self.libraries:
-            self.libraries[kind] = await condition_library(self.app, kind)
+            lib = await condition_library(self.app, kind)
+            for name in self.pending.get(kind, set()):
+                lib.setdefault(name.lower(), {"name": name, "id": None})
+            self.libraries[kind] = lib
         return self.libraries[kind]
 
     async def condition(self, kind: str, scope: str, tree: Any, where: str, blockers: list[str]) -> Any:
@@ -479,6 +578,26 @@ class PolicyContext:
             data = data.get("response", data) if isinstance(data, dict) else data
             self.names[what] = {str(x.get("name")) for x in data or [] if isinstance(x, dict)}
         return self.names[what]
+
+
+async def fill_reference_ids(app: IseApp, kind: str, node: Any) -> None:
+    """Ids for references to conditions this import created (planned by name, with no id yet)."""
+    refs = [
+        leaf
+        for leaf in _leaves(node if isinstance(node, dict) else None)
+        if leaf.get("conditionType") == "ConditionReference" and not leaf.get("id")
+    ]
+    if not refs:
+        return
+    from ise_mcp.tools.conditions import read_conditions  # noqa: PLC0415 - conditions imports policy_edit
+
+    existing = await read_conditions(app, kind)
+    by_name = {str(c.get("name")).lower(): c for items in existing.values() for c in items}
+    for leaf in refs:
+        hit = by_name.get(str(leaf.get("name")).lower())
+        if hit is None:
+            raise NotFound(f"Condition {leaf.get('name')!r} does not exist on the target", 404)
+        leaf["id"] = hit.get("id")
 
 
 REF_PATHS = {
@@ -551,7 +670,7 @@ async def _policy(
     prune: bool,
     created: dict[str, set[str]],
 ) -> None:
-    pc = PolicyContext(app)
+    pc = PolicyContext(app, {k: created.get(f"condition:{k}", set()) for k in KINDS})
     for kind in KINDS:
         want_kind = (wanted or {}).get(kind)
         if want_kind is None:
@@ -771,6 +890,7 @@ async def _rules(
 
 def _set_create(app: IseApp, kind: str, body: dict[str, Any]) -> Callable[[], Awaitable[Any]]:
     async def run() -> Any:
+        await fill_reference_ids(app, kind, body.get("condition"))
         data = await app.openapi.post(f"/api/v1/policy/{kind}/policy-set", body)
         data = data.get("response", data) if isinstance(data, dict) else data
         return data.get("id") if isinstance(data, dict) else None
@@ -782,6 +902,7 @@ def _set_update(
     app: IseApp, kind: str, raw: dict[str, Any], body: dict[str, Any]
 ) -> Callable[[], Awaitable[Any]]:
     async def run() -> Any:
+        await fill_reference_ids(app, kind, body.get("condition"))
         desired = deep_merge(strip_links(raw), body)
         desired["condition"] = body["condition"]  # a condition is replaced, never merged
         desired["id"] = raw["id"]
@@ -801,6 +922,7 @@ def _set_delete(app: IseApp, kind: str, ps_id: str) -> Callable[[], Awaitable[An
 
 def _rule_create(app: IseApp, base: _SetPath, body: dict[str, Any]) -> Callable[[], Awaitable[Any]]:
     async def run() -> Any:
+        await fill_reference_ids(app, base.kind, body["rule"].get("condition"))
         data = await app.openapi.post(await base.url(app), body)
         data = data.get("response", data) if isinstance(data, dict) else data
         return ((data or {}).get("rule") or {}).get("id") if isinstance(data, dict) else None
@@ -812,6 +934,7 @@ def _rule_update(
     app: IseApp, base: _SetPath, raw: dict[str, Any], body: dict[str, Any], *, keep_rank: bool = False
 ) -> Callable[[], Awaitable[Any]]:
     async def run() -> Any:
+        await fill_reference_ids(app, base.kind, body["rule"].get("condition"))
         rule = raw.get("rule") or {}
         head = {**body["rule"], "id": rule.get("id")}
         if keep_rank:
@@ -880,6 +1003,10 @@ async def plan_import(
     if unknown:
         plan.blockers.append(f"secrets given for NADs not in this import: {', '.join(unknown)}")
     created = _created_names(source, live, only)
+    if "conditions" in wanted:
+        for o in source.get("conditions") or []:
+            if o.get("kind") in KINDS and matches(str(o.get("name")), only):
+                created.setdefault(f"condition:{o['kind']}", set()).add(str(o.get("name")))
     for section in APPLY_ORDER:
         if section not in wanted:
             continue
@@ -899,6 +1026,8 @@ async def plan_import(
                 prune=prune,
                 created=created,
             )
+        elif section == "conditions":
+            await _conditions(app, plan, source, live.get(section) or [], run, only=only, prune=prune)
         elif section == "custom_attributes":
             _custom_attributes(
                 app, plan, source.get(section) or [], live.get(section) or [], only=only, prune=prune
@@ -1034,9 +1163,10 @@ def register(reg: ToolRegistrar) -> None:
         """Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans
         one step per object, matched by name, in dependency order (device and identity groups, custom
         attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets
-        and shell profiles, NADs, then policy sets and their rules in rank order). Objects already the
-        same are skipped; objects on the target that the export lacks are left alone unless prune=true.
-        NAD secrets are masked in exports, so pass them in `secrets`. The preview is the whole plan
+        and shell profiles, NADs, reusable conditions, then policy sets and their rules in rank order).
+        Objects already the same are skipped; objects on the target that the export lacks are left
+        alone unless prune=true. NAD secrets are masked in exports, so pass them in `secrets`. The
+        preview is the whole plan
         with field-level changes; confirm applies it step by step and stops at the first failure,
         saying what was applied. Afterwards ise_diff_config(before=<the export>) should be empty."""
         app: IseApp = get_client(ctx)

@@ -21,6 +21,7 @@ from ise_mcp._core import (
     NotFound,
     Plan,
     ToolRegistrar,
+    UpstreamError,
     compact,
     field_changes,
     get_client,
@@ -133,6 +134,26 @@ async def condition_library(app: IseApp, kind: str) -> dict[str, dict[str, Any]]
     return {str(c.get("name")).lower(): c for c in data if isinstance(c, dict) and c.get("name")}
 
 
+def _unknown_name(text: str, library: dict[str, dict[str, Any]]) -> bool:
+    raw = text.strip()
+    if raw.upper().startswith("NOT "):
+        raw = raw[4:].strip()
+    return raw.lower() not in library and not _EXPR.match(raw)
+
+
+async def other_conditions(app: IseApp, kind: str) -> dict[str, dict[str, Any]]:
+    """Time-and-date and network conditions by lower-case name: rules reference them like library
+    conditions, but ISE lists them under their own resources."""
+    out: dict[str, dict[str, Any]] = {}
+    for resource in ("time-condition", "network-condition"):
+        try:
+            data = _resp(await app.openapi.get(f"/api/v1/policy/{kind}/{resource}")) or []
+        except (NotFound, UpstreamError):
+            continue
+        out.update({str(c.get("name")).lower(): c for c in data if isinstance(c, dict) and c.get("name")})
+    return out
+
+
 async def dictionary_attributes(
     app: IseApp, kind: str, scope: str, max_age: float | None = None
 ) -> list[dict[str, Any]]:
@@ -201,6 +222,8 @@ async def build_condition(
     if not conditions:
         return None, []
     library = await condition_library(app, kind)
+    if any(_unknown_name(c, library) for c in conditions):
+        library = {**await other_conditions(app, kind), **library}
     nodes = [condition_node(c, library) for c in conditions]
     blockers: list[str] = []
     if any(n["conditionType"] == "ConditionAttributes" for n in nodes):

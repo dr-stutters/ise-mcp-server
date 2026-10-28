@@ -20,6 +20,7 @@ from ise_mcp.tools import (
     backup,
     certs,
     coa_bulk,
+    conditions,
     config_export,
     config_import,
     dangerous,
@@ -90,7 +91,9 @@ Configuration Audit, or ISE syslog in a SIEM), TACACS+ live logs, and on the pro
 profiling policies, certainty factors and the feed service (docs/profiler.md). Policy changes (writes):
 ise_create_policy_set -> ise_create_authn_rule -> ise_create_authz_rule, then ise_update_policy_rule;
 conditions are 'Dictionary:Attribute operator value' or library condition names
-(ise_list_dictionary_attributes, ise_list_conditions) and are checked before anything is sent. Device
+(ise_list_dictionary_attributes, ise_list_conditions) and are checked before anything is sent; reusable
+library, time-and-date (business hours) and network conditions: ise_set_condition / ise_delete_condition
+(refused while a rule uses it). Device
 admin (TACACS+): kind='device-admin' on the policy tools, plus ise_set_command_set /
 ise_set_shell_profile; the node needs the DeviceAdmin service. Catalyst SD-WAN Manager admins: sdwan_group
 on ise_create_authz_profile (RADIUS Viptela-Group-Name; ISE ships no Viptela dictionary, the preview names
@@ -157,6 +160,7 @@ def create_server(
             writes.register,
             endpoint_bulk.register,
             policy_edit.register,
+            conditions.register,
             policy_explain.register,
             profiler_posture.register,
             device_admin.register,
