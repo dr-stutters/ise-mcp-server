@@ -919,6 +919,11 @@ async def plan_import(
                 prune=prune,
                 secrets=secrets,
             )
+    if "allowed_protocols" in wanted:
+        plan.notes.append(
+            "allowed_protocols is exported for review and diff only: create or change a service with "
+            "ise_set_allowed_protocols"
+        )
     plan.steps = _deletes_last(plan.steps)
     return plan
 

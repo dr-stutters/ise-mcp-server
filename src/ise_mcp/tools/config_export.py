@@ -44,6 +44,7 @@ RULE_SECTIONS = (
 )  # (API path, export key), in evaluation order
 SECTIONS = (
     "policy_sets",
+    "allowed_protocols",
     "authz_profiles",
     "dacls",
     "nads",
@@ -59,7 +60,7 @@ SECTIONS = (
 )
 ALIASES = {
     "all": SECTIONS,
-    "policy": ("policy_sets", "authz_profiles", "dacls"),
+    "policy": ("policy_sets", "allowed_protocols", "authz_profiles", "dacls"),
     "network": ("nads", "ndgs"),
     "groups": ("identity_groups", "endpoint_groups"),
     "trustsec": ("sgts", "sgacls", "egress_matrix"),
@@ -90,7 +91,8 @@ DEFAULT_MAX_OBJECTS = 5000
 Scope = Annotated[
     list[str] | None,
     Field(
-        description="Sections to export (default: all): policy_sets, authz_profiles, dacls, nads, ndgs, "
+        description="Sections to export (default: all): policy_sets, allowed_protocols, authz_profiles, "
+        "dacls, nads, ndgs, "
         "identity_groups, endpoint_groups, custom_attributes, sgts, sgacls, egress_matrix, command_sets, "
         "shell_profiles; or the groups policy, network, groups, trustsec, device_admin"
     ),
@@ -361,6 +363,7 @@ class Export:
     async def section(self, name: str) -> Any:
         fetch: dict[str, Callable[[], Awaitable[Any]]] = {
             "policy_sets": self.policy_sets,
+            "allowed_protocols": lambda: self._simple(name, "allowedprotocols", clean),
             "authz_profiles": lambda: self._simple(name, "authorizationprofile", clean),
             "dacls": lambda: self._simple(name, "downloadableacl", norm_dacl),
             "nads": lambda: self._simple(name, "networkdevice", norm_nad),
@@ -735,14 +738,14 @@ def register(reg: ToolRegistrar) -> None:
         ] = DEFAULT_MAX_OBJECTS,
     ) -> ToolResult:
         """Export ISE configuration as reviewable YAML: policy sets with their authentication,
-        authorization and local exception rules (network access and device admin), authorization
-        profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and
-        endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+
-        command sets and shell profiles. References are names, not ids; rules keep their rank and
-        everything else is sorted by name; ids, links, hit counts and timestamps are left out, so two
-        exports of an unchanged ISE differ only in the header's exported_at. Keep one as a baseline and
-        compare later with ise_diff_config. Large deployments: one GET per object (NADs!), so narrow
-        `scope` or use `path` for a full export."""
+        authorization and local exception rules (network access and device admin), allowed-protocols
+        services, authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities
+        masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec
+        egress matrix, TACACS+ command sets and shell profiles. References are names, not ids; rules keep
+        their rank and everything else is sorted by name; ids, links, hit counts and timestamps are left
+        out, so two exports of an unchanged ISE differ only in the header's exported_at. Keep one as a
+        baseline and compare later with ise_diff_config. Large deployments: one GET per object (NADs!), so
+        narrow `scope` or use `path` for a full export."""
         app: IseApp = get_client(ctx)
         sections = resolve_scope(scope)
         data = await export_config(app, sections, max_objects=max_objects)

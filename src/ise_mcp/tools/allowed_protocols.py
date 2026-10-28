@@ -4,7 +4,8 @@ ERS `allowedprotocols` takes eighteen required top-level booleans and five neste
 peap, eapFast, eapTtls, teap; shapes from the ERS data model and a GET of ISE 3.5's 'Default Network
 Access'). A preset fills all of them, so the body is complete and nothing is left at ISE's permissive
 defaults. Conditional fields ("required only if X is true, otherwise it must be ignored") are only sent
-when X is true.
+when X is true, and a nested object only with its protocol allowed: ISE 3.5 refuses the settings of a
+protocol that is off (#122), and an allow that turns one on gets hardened defaults (NESTED_DEFAULTS).
 
 Presets follow Cisco's ISE secure-access guidance and the campus / SD-Access validated designs: one
 service per use case, PAP/ASCII, EAP-MD5, LEAP and MS-CHAPv1 off, no EAP-TLS with expired certificates,
@@ -97,6 +98,90 @@ PEAP_FIELDS = {
 TTL_UNITS = {"SECONDS", "MINUTES", "HOURS", "DAYS", "WEEKS"}
 
 
+# Protocol name -> its nested ERS settings object. ISE 3.5 refuses a body that carries the object of a
+# protocol that is not allowed ("Peap protocol is not allowed but settings are not null", #122) and
+# leaves it out of a GET, so the object goes only with an allowed protocol.
+NESTED: dict[str, str] = {
+    "eap-tls": "eapTls",
+    "peap": "peap",
+    "eap-fast": "eapFast",
+    "eap-ttls": "eapTtls",
+    "teap": "teap",
+}
+# Settings for a protocol turned on (preset or allow) that has no object yet: ISE's own defaults with the
+# weak inner methods off (EAP-GTC, EAP-TTLS PAP/CHAP/MS-CHAPv1/EAP-MD5, expired certificates, anonymous
+# PAC provisioning, MSK downgrade), so an `allow` never re-opens what a preset closed.
+NESTED_DEFAULTS: dict[str, dict[str, Any]] = {
+    "eapTls": {"allowEapTlsAuthOfExpiredCerts": False, "eapTlsEnableStatelessSessionResume": False},
+    "peap": {
+        "allowPeapEapMsChapV2": True,
+        "allowPeapEapMsChapV2PwdChange": True,
+        "allowPeapEapMsChapV2PwdChangeRetries": 1,
+        "allowPeapEapGtc": False,
+        "allowPeapEapTls": False,
+        "requireCryptobinding": False,
+        "allowPeapV0": False,
+    },
+    "eapFast": {
+        "allowEapFastEapMsChapV2": True,
+        "allowEapFastEapMsChapV2PwdChange": True,
+        "allowEapFastEapMsChapV2PwdChangeRetries": 3,
+        "allowEapFastEapGtc": False,
+        "allowEapFastEapTls": True,
+        "allowEapFastEapTlsAuthOfExpiredCerts": False,
+        "eapFastUsePacs": True,
+        "eapFastUsePacsTunnelPacTtl": 90,
+        "eapFastUsePacsTunnelPacTtlUnits": "DAYS",
+        "eapFastUsePacsUseProactivePacUpdatePrecentage": 90,
+        "eapFastUsePacsAllowAnonymProvisioning": False,
+        "eapFastUsePacsAllowAuthenProvisioning": True,
+        "eapFastUsePacsServerReturns": True,
+        "eapFastUsePacsAcceptClientCert": False,
+        "eapFastUsePacsAllowMachineAuthentication": True,
+        "eapFastUsePacsMachinePacTtl": 1,
+        "eapFastUsePacsMachinePacTtlUnits": "WEEKS",
+        "eapFastUsePacsStatelessSessionResume": True,
+        "eapFastUsePacsAuthorizationPacTtl": 1,
+        "eapFastUsePacsAuthorizationPacTtlUnits": "HOURS",
+        "eapFastEnableEAPChaining": False,
+    },
+    "eapTtls": {
+        "eapTtlsPapAscii": False,
+        "eapTtlsChap": False,
+        "eapTtlsMsChapV1": False,
+        "eapTtlsMsChapV2": True,
+        "eapTtlsEapMd5": False,
+        "eapTtlsEapMsChapV2": True,
+        "eapTtlsEapMsChapV2PwdChange": True,
+        "eapTtlsEapMsChapV2PwdChangeRetries": 1,
+    },
+    "teap": {
+        "allowTeapEapMsChapV2": True,
+        "allowTeapEapMsChapV2PwdChange": True,
+        "allowTeapEapMsChapV2PwdChangeRetries": 3,
+        "allowTeapEapTls": True,
+        "allowTeapEapTlsAuthOfExpiredCerts": False,
+        "acceptClientCertDuringTunnelEst": False,
+        "enableEapChaining": False,
+        "allowDowngradeMsk": False,
+    },
+}
+
+
+def sync_nested(body: dict[str, Any]) -> list[str]:
+    """Make the nested objects follow the protocol flags, in place: drop the object of every protocol
+    that is not allowed, and give an allowed one that has none the defaults above. Returns the
+    sections filled from the defaults."""
+    filled: list[str] = []
+    for name, section in NESTED.items():
+        if not body.get(PROTOCOLS[name]):
+            body.pop(section, None)
+        elif not body.get(section):
+            body[section] = copy.deepcopy(NESTED_DEFAULTS[section])
+            filled.append(section)
+    return filled
+
+
 def preset_body(preset: str, *, include_mab: bool = False) -> dict[str, Any]:
     """The full ERS body (minus name/description/id) for a preset."""
     spec = PRESETS[preset]
@@ -116,7 +201,6 @@ def preset_body(preset: str, *, include_mab: bool = False) -> dict[str, Any]:
             "requireMessageAuth": eap_only,
         }
     )
-    body["eapTls"] = {"allowEapTlsAuthOfExpiredCerts": False, "eapTlsEnableStatelessSessionResume": False}
     mschap = spec["peap_inner"] == "mschapv2"
     peap: dict[str, Any] = {"allowPeapEapMsChapV2": mschap}
     if mschap:
@@ -130,33 +214,7 @@ def preset_body(preset: str, *, include_mab: bool = False) -> dict[str, Any]:
         }
     )
     body["peap"] = peap
-    body["eapFast"] = {
-        "allowEapFastEapMsChapV2": False,
-        "allowEapFastEapGtc": False,
-        "allowEapFastEapTls": False,
-        "eapFastUsePacs": False,
-        "eapFastDontUsePacsAcceptClientCert": False,
-        "eapFastDontUsePacsAllowMachineAuthentication": False,
-        "eapFastEnableEAPChaining": False,
-    }
-    body["eapTtls"] = {
-        k: False
-        for k in (
-            "eapTtlsPapAscii",
-            "eapTtlsChap",
-            "eapTtlsMsChapV1",
-            "eapTtlsMsChapV2",
-            "eapTtlsEapMd5",
-            "eapTtlsEapMsChapV2",
-        )
-    }
-    body["teap"] = {
-        "allowTeapEapMsChapV2": False,
-        "allowTeapEapTls": False,
-        "acceptClientCertDuringTunnelEst": False,
-        "enableEapChaining": False,
-        "allowDowngradeMsk": False,
-    }
+    sync_nested(body)
     return body
 
 
@@ -204,6 +262,13 @@ def apply_overrides(
         body[PROTOCOLS[name]] = True
     for name in denied:
         body[PROTOCOLS[name]] = False
+    for proto, given in (("eap-tls", eap_tls), ("peap", peap)):
+        if given and not body.get(PROTOCOLS[proto]):
+            arg = proto.replace("-", "_")
+            raise InvalidRequest(
+                f"{arg} options given but {proto} is not allowed on this service: add allow=['{proto}']"
+            )
+    sync_nested(body)
     for section, given in (("eapTls", eap_tls), ("peap", peap)):
         if not given:
             continue
@@ -437,6 +502,10 @@ def register(reg: ToolRegistrar) -> None:
             },
             "policy_sets_using_it": policy_sets,
         }
+        if existing:
+            filled = [sec for sec in NESTED.values() if sec in desired and not existing.get(sec)]
+            if filled:
+                details["settings_from_defaults"] = {sec: desired[sec] for sec in filled}
         if incomplete:
             details["references_incomplete"] = incomplete
         if warnings:
@@ -456,6 +525,7 @@ def register(reg: ToolRegistrar) -> None:
             )
         if existing:
             full = {**existing, **desired, "id": existing["id"], "name": existing["name"]}
+            sync_nested(full)  # the copied objects of protocols this turns off go too
             if full == existing:
                 raise InvalidRequest(f"Service {name!r} already has exactly these settings")
             return await preview_or_apply(
