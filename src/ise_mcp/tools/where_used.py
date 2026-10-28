@@ -400,9 +400,12 @@ async def resolve_target(app: IseApp, kind: str, name: str) -> dict[str, Any]:
     )
 
 
-async def find_references(app: IseApp, kind: str, obj: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
-    """Every reference to `obj` (an ERS object or {name, id}) of `kind`; see the module docstring."""
-    scan = Scan(app)
+async def find_references(  # noqa: C901
+    app: IseApp, kind: str, obj: dict[str, Any], scan: Scan | None = None
+) -> dict[str, Any]:
+    """Every reference to `obj` (an ERS object or {name, id}) of `kind`; see the module docstring.
+    Pass a `scan` to reuse its reads across many objects (ise_unused_objects)."""
+    scan = scan or Scan(app)
     name, oid = str(obj.get("name")), str(obj.get("id") or "")
     refs: list[dict[str, Any]] = []
     if kind == "authz_profile":
@@ -523,7 +526,7 @@ async def find_references(app: IseApp, kind: str, obj: dict[str, Any]) -> dict[s
         out["members"] = members
     out["scanned"] = list(dict.fromkeys(scan.scanned))
     if scan.incomplete:
-        out["incomplete"] = scan.incomplete
+        out["incomplete"] = list(dict.fromkeys(scan.incomplete))
     return out
 
 

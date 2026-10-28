@@ -449,3 +449,282 @@ async def test_update_nad_remove_reports_when_ise_keeps_it(mock: respx.MockRoute
         r = await c.call_tool("ise_update_nad", {**args, "confirm": preview["confirm"]}, raise_on_error=False)
     assert put.called
     assert r.is_error and "still has RADIUS" in r.content[0].text
+
+
+# --- I73: internal user lifecycle fields and bulk -------------------------------------------------
+
+USER_GET = {
+    "id": "u1",
+    "name": "bob",
+    "description": "",
+    "enabled": True,
+    "email": "",
+    "accountNameAlias": "",
+    "password": "*******",
+    "firstName": "",
+    "lastName": "",
+    "changePassword": False,
+    "identityGroups": "g1",
+    "passwordNeverExpires": False,
+    "daysForPasswordExpiration": 60,
+    "expiryDateEnabled": False,
+    "expiryDate": "",
+    "dateModified": "2026-10-21",
+    "dateCreated": "2026-10-21",
+    "customAttributes": {},
+    "passwordIDStore": "Internal Users",
+    "link": {"rel": "self", "href": f"{BASE}/ers/config/internaluser/u1"},
+}
+
+
+def mock_user(mock: respx.MockRouter, user: dict[str, Any] | None = None) -> None:
+    u = user or USER_GET
+    mock.get("/ers/config/internaluser", params={"filter": f"name.EQ.{u['name']}"}).respond(
+        json=ers_page([{"id": u["id"], "name": u["name"]}])
+    )
+    mock.get(f"/ers/config/internaluser/{u['id']}").respond(json={"InternalUser": u})
+
+
+async def test_create_user_lifecycle_fields(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/identitygroup").respond(json=ers_page([{"id": "g1", "name": "Contractors"}]))
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.carol"}).respond(json=ers_page([]))
+    post = mock.post("/ers/config/internaluser").respond(
+        201, headers={"Location": f"{BASE}/ers/config/internaluser/u9"}
+    )
+    preview, applied = await two_step(
+        "ise_create_internal_user",
+        {
+            "name": "carol",
+            "password": "Pa55word!x",
+            "enable_password": "En4ble!secret",
+            "groups": ["contractors"],
+            "expiry_date": "2099-01-31",
+            "change_password_on_login": True,
+            "password_never_expires": False,
+            "custom_attributes": {"costCentre": "4711"},
+            "account_name_alias": "carol@example.com",
+        },
+    )
+    text = json.dumps(preview) + json.dumps(applied)
+    assert "Pa55word" not in text and "En4ble" not in text
+    shown = preview["preview"]
+    assert shown["credentials_set"] == ["password", "enable"]
+    assert shown["expiryDate"] == "2099-01-31" and shown["changePassword"] is True
+    assert shown["passwordNeverExpires"] is False  # a flag, not masked
+    body = json.loads(post.calls.last.request.content)["InternalUser"]
+    assert body["password"] == "Pa55word!x" and body["enablePassword"] == "En4ble!secret"
+    assert body["expiryDateEnabled"] is True and body["expiryDate"] == "2099-01-31"
+    assert body["changePassword"] is True and body["passwordNeverExpires"] is False
+    assert body["customAttributes"] == {"costCentre": "4711"}
+    assert body["accountNameAlias"] == "carol@example.com" and body["identityGroups"] == "g1"
+    assert applied["result"]["id"] == "u9"
+
+
+async def test_create_user_bad_or_past_expiry(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.carol"}).respond(json=ers_page([]))
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        r = await c.call_tool(
+            "ise_create_internal_user",
+            {"name": "carol", "password": "x", "expiry_date": "31/01/2099"},
+            raise_on_error=False,
+        )
+        assert r.is_error and "YYYY-MM-DD" in r.content[0].text
+        past = (
+            await c.call_tool(
+                "ise_create_internal_user", {"name": "carol", "password": "x", "expiry_date": "2001-01-01"}
+            )
+        ).structured_content
+    assert past["status"] == "blocked" and "in the past" in past["blockers"][0]
+
+
+async def test_create_ad_backed_user_needs_no_password(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/activedirectory").respond(json=ers_page([{"id": "j1", "name": "CORP-AD"}]))
+    mock.get("/ers/config/ldap").respond(404)
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.dave"}).respond(json=ers_page([]))
+    post = mock.post("/ers/config/internaluser").respond(
+        201, headers={"Location": f"{BASE}/ers/config/internaluser/u2"}
+    )
+    preview, _ = await two_step("ise_create_internal_user", {"name": "dave", "password_store": "corp-ad"})
+    assert preview["preview"]["passwordIDStore"] == "CORP-AD"
+    body = json.loads(post.calls.last.request.content)["InternalUser"]
+    assert body["passwordIDStore"] == "CORP-AD" and "password" not in body
+
+
+async def test_create_user_store_checks(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/activedirectory").respond(json=ers_page([{"id": "j1", "name": "CORP-AD"}]))
+    mock.get("/ers/config/ldap").respond(json=ers_page([]))
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.dave"}).respond(json=ers_page([]))
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        nopw = (await c.call_tool("ise_create_internal_user", {"name": "dave"})).structured_content
+        assert nopw["status"] == "blocked" and "password is required" in nopw["blockers"][0]
+        ad = (
+            await c.call_tool(
+                "ise_create_internal_user",
+                {"name": "dave", "password_store": "CORP-AD", "change_password_on_login": True},
+            )
+        ).structured_content
+        assert ad["status"] == "blocked" and "Internal Users' password" in ad["blockers"][0]
+        r = await c.call_tool(
+            "ise_create_internal_user", {"name": "dave", "password_store": "Nope"}, raise_on_error=False
+        )
+    assert r.is_error and "ise_list_identity_sources" in r.content[0].text
+
+
+async def test_update_user_sets_enable_password_masked(mock: respx.MockRouter) -> None:
+    mock_user(mock)
+    put = mock.put("/ers/config/internaluser/u1").respond(json={})
+    preview, applied = await two_step(
+        "ise_update_internal_user", {"user": "bob", "enable_password": "En4ble!secret"}
+    )
+    assert "En4ble" not in json.dumps(preview) and "En4ble" not in json.dumps(applied)
+    assert preview["preview"]["changes"] == {"enablePassword": {"from": None, "to": MASK}}
+    body = json.loads(put.calls.last.request.content)["InternalUser"]
+    assert body["enablePassword"] == "En4ble!secret"
+    assert "password" not in body and "passwordIDStore" not in body  # stored password kept
+    assert applied["status"] == "applied"
+
+
+async def test_update_user_password_does_not_send_enable_placeholder(mock: respx.MockRouter) -> None:
+    mock_user(mock, {**USER_GET, "enablePassword": "*******"})
+    put = mock.put("/ers/config/internaluser/u1").respond(json={})
+    await two_step("ise_update_internal_user", {"user": "bob", "password": "N3wPass!word"})
+    body = json.loads(put.calls.last.request.content)["InternalUser"]
+    assert body["password"] == "N3wPass!word" and "enablePassword" not in body
+    assert body["passwordIDStore"] == "Internal Users"
+
+
+async def test_update_user_expiry_and_flags(mock: respx.MockRouter) -> None:
+    mock_user(mock, {**USER_GET, "expiryDateEnabled": True, "expiryDate": "2099-01-31"})
+    put = mock.put("/ers/config/internaluser/u1").respond(json={})
+    preview, _ = await two_step(
+        "ise_update_internal_user",
+        {
+            "user": "bob",
+            "expiry_date": "never",
+            "change_password_on_login": True,
+            "password_never_expires": True,
+            "custom_attributes": {"costCentre": "42"},
+        },
+    )
+    changes = preview["preview"]["changes"]
+    assert changes["expiryDateEnabled"] == {"from": True, "to": False}
+    assert changes["changePassword"] == {"from": False, "to": True}
+    assert changes["passwordNeverExpires"] == {"from": False, "to": True}
+    assert "customAttributes.costCentre" in changes
+    body = json.loads(put.calls.last.request.content)["InternalUser"]
+    assert body["expiryDateEnabled"] is False and body["expiryDate"] == ""
+    assert body["passwordNeverExpires"] is True and body["customAttributes"] == {"costCentre": "42"}
+
+
+async def test_update_user_past_expiry_is_a_side_effect(mock: respx.MockRouter) -> None:
+    mock_user(mock)
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        preview = (
+            await c.call_tool("ise_update_internal_user", {"user": "bob", "expiry_date": "2001-01-01"})
+        ).structured_content
+    assert preview["status"] == "preview"
+    assert any("expired from now on" in s for s in preview["side_effects"])
+
+
+def _bulk_users(n: int, **extra: Any) -> list[dict[str, Any]]:
+    return [{"name": f"mcp-test-u{i}", **extra} for i in range(n)]
+
+
+async def test_bulk_create_users_one_preview_partial_failure(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/identitygroup").respond(json=ers_page([{"id": "g1", "name": "Contractors"}]))
+    for i in range(7):
+        found = [{"id": "x", "name": "mcp-test-u6"}] if i == 6 else []
+        mock.get("/ers/config/internaluser", params={"filter": f"name.EQ.mcp-test-u{i}"}).respond(
+            json=ers_page(found)
+        )
+
+    def post(request: httpx.Request) -> httpx.Response:
+        name = json.loads(request.content)["InternalUser"]["name"]
+        if name == "mcp-test-u3":
+            return httpx.Response(
+                400,
+                json={"ERSResponse": {"messages": [{"title": "Password Pa55word!x fails the policy"}]}},
+            )
+        return httpx.Response(201, headers={"Location": f"{BASE}/ers/config/internaluser/{name}-id"})
+
+    route = mock.post("/ers/config/internaluser").mock(side_effect=post)
+    users = _bulk_users(
+        7, password="Pa55word!x", groups=["Contractors"], expiry_date="2099-01-31", enable_password="En4ble!x"
+    )
+    preview, applied = await two_step("ise_bulk_internal_users", {"action": "create", "users": users})
+    assert "Pa55word" not in json.dumps(preview) and "En4ble" not in json.dumps(preview)
+    details = preview["preview"]
+    assert details["users_in_run"] == 6 and len(details["sample"]) == 5
+    assert details["left_out_conflicts"]["names"] == ["mcp-test-u6"]
+    assert details["sample"][0]["credentials_set"] == ["password", "enable"]
+    assert route.call_count == 6  # one ERS call per user, the conflict left out
+    assert applied["result"]["succeeded"] == 5 and applied["result"]["failed"] == 1
+    failed = [r for r in applied["result"]["results"] if r["status"] == "failed"]
+    assert failed[0]["name"] == "mcp-test-u3" and "Pa55word" not in json.dumps(applied)
+
+
+async def test_bulk_create_users_problems_block(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/identitygroup").respond(json=ers_page([{"id": "g1", "name": "Contractors"}]))
+    mock.get("/ers/config/internaluser").respond(json=ers_page([]))
+    users = [
+        {"name": "a", "password": "x", "groups": ["Nope"]},
+        {"name": "b", "password": "x", "expiry_date": "tomorrow"},
+        {"name": "c"},
+        {"name": "c", "password": "y"},
+    ]
+    preview, _ = await two_step("ise_bulk_internal_users", {"action": "create", "users": users})
+    assert preview["status"] == "blocked"
+    text = " ".join(preview["blockers"])
+    assert "more than once" in text and "a: No identity group" in text
+    assert "b: expiry_date" in text and "c: a password is required" in text
+
+
+async def test_bulk_users_max_items(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/internaluser").respond(json=ers_page([]))
+    preview, _ = await two_step(
+        "ise_bulk_internal_users",
+        {"action": "create", "users": _bulk_users(3, password="x"), "max_items": 2},
+    )
+    assert preview["status"] == "blocked" and "max_items=2" in preview["blockers"][0]
+
+
+async def test_bulk_update_users_diff_and_unchanged(mock: respx.MockRouter) -> None:
+    mock_user(mock)
+    mock_user(
+        mock, {**USER_GET, "id": "u2", "name": "eve", "expiryDateEnabled": True, "expiryDate": "2099-01-31"}
+    )
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.ghost"}).respond(json=ers_page([]))
+    put1 = mock.put("/ers/config/internaluser/u1").respond(json={})
+    put2 = mock.put("/ers/config/internaluser/u2").respond(json={})
+    users = [
+        {"name": "bob", "expiry_date": "2099-01-31"},
+        {"name": "eve", "expiry_date": "2099-01-31"},
+        {"name": "ghost", "enabled": False},
+    ]
+    preview, applied = await two_step("ise_bulk_internal_users", {"action": "update", "users": users})
+    details = preview["preview"]
+    assert details["users_in_run"] == 1 and details["left_out_unchanged"] == ["eve"]
+    assert details["left_out_conflicts"]["names"] == ["ghost"]
+    assert details["sample"][0]["changes"]["expiryDate"] == {"from": "", "to": "2099-01-31"}
+    assert put1.called and not put2.called
+    body = json.loads(put1.calls.last.request.content)["InternalUser"]
+    assert "password" not in body and "link" not in body
+    assert applied["result"]["results"] == [{"name": "bob", "status": "updated"}]
+
+
+async def test_bulk_delete_users(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.mcp-test-u0"}).respond(
+        json=ers_page([{"id": "d0", "name": "mcp-test-u0"}])
+    )
+    mock.get("/ers/config/internaluser", params={"filter": "name.EQ.mcp-test-u1"}).respond(
+        json=ers_page([{"id": "d1", "name": "mcp-test-u1"}])
+    )
+    d0 = mock.delete("/ers/config/internaluser/d0").respond(204)
+    d1 = mock.delete("/ers/config/internaluser/d1").respond(404, json={"ERSResponse": {}})
+    preview, applied = await two_step(
+        "ise_bulk_internal_users", {"action": "delete", "users": _bulk_users(2)}
+    )
+    assert preview["preview"]["users_in_run"] == 2 and preview["blast_radius"] == 2
+    assert d0.called and d1.called
+    result = applied["result"]
+    assert result["succeeded"] == 1 and result["failed"] == 1
