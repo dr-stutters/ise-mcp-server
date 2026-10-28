@@ -623,6 +623,10 @@
       "tier": "read",
       "title": "Endpoint 360"
     },
+    "ise_endpoint_summary": {
+      "tier": "read",
+      "title": "Endpoint summary"
+    },
     "ise_explain_profile": {
       "tier": "read",
       "title": "Explain an endpoint's profile"

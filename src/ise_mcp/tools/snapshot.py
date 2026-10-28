@@ -1,10 +1,13 @@
 """ise_snapshot / ise_compare_snapshot: the core snapshot contract (C53) for pre/post change checks (I82).
 
-Three sections, one product read each, every one allowed to fail on its own:
+Four sections, one product read each, every one allowed to fail on its own:
 - `nad_auth`: per NAD in scope, the failure % and timeouts over a fixed 15-minute window before the
   snapshot, from MnT auth history (the same per-MAC reads and grouping as ise_nad_radius_stats);
 - `nodes`: persona, services and sync state per deployment node (OpenAPI);
-- `pxgrid_clients`: state per registered pxGrid client (ERS).
+- `pxgrid_clients`: state per registered pxGrid client (ERS);
+- `endpoint_summary`: the endpoint device types ISE has, deployment-wide whatever the site (OpenAPI
+  deviceType/summary, I59), so the compare shows device types that appeared or went away. Counts are
+  volatile and stay out.
 
 Volatile values (request counts, response times, timestamps, PSN shares) stay out of the blob, so two
 snapshots of an unchanged deployment compare as "No change". Nothing is stored on the server (ADR-003).
@@ -27,6 +30,7 @@ from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_list, gather_limited
 from ise_mcp.tools.activity import NadFilter, candidate_macs
 from ise_mcp.tools.config_export import server_version
+from ise_mcp.tools.endpoint_summary import device_type_summary
 from ise_mcp.tools.network import all_nads, nad_networks
 from ise_mcp.tools.pxgrid import all_clients
 from ise_mcp.tools.radius import _time, summarise
@@ -198,6 +202,11 @@ async def pxgrid_section(app: IseApp, sec: Section) -> None:
         )
 
 
+async def endpoint_summary_section(app: IseApp, sec: Section) -> None:
+    for name in sorted(await device_type_summary(app)):
+        sec.item(f"device_type:{name}"[:200], label=name)
+
+
 async def take(ctx: Context, site: str) -> Snapshot:
     app: IseApp = get_client(ctx)
     snap = Snapshot(
@@ -213,10 +222,12 @@ async def take(ctx: Context, site: str) -> Snapshot:
     )
     nodes = snap.section("nodes", "Deployment nodes")
     pxgrid = snap.section("pxgrid_clients", "pxGrid clients")
+    endpoints = snap.section("endpoint_summary", "Endpoint device types")
     reads: list[tuple[Section, Coroutine[Any, Any, None]]] = [
         (nads, nad_auth_section(app, nads, site, end)),
         (nodes, nodes_section(app, nodes)),
         (pxgrid, pxgrid_section(app, pxgrid)),
+        (endpoints, endpoint_summary_section(app, endpoints)),
     ]
     for sec, read in reads:
         try:
@@ -233,7 +244,7 @@ def register(reg: ToolRegistrar) -> None:
         product="Cisco ISE",
         covers=(
             f"failure % and timeouts per NAD over the {WINDOW_MINUTES} minutes before the snapshot (MnT), "
-            "node persona and sync state, pxGrid client states"
+            "node persona and sync state, pxGrid client states, endpoint device types"
         ),
         site_doc=(
             "NDG location (e.g. 'br1' or 'HQ#Floor1') or, when no location matches, a NAD name prefix; "
