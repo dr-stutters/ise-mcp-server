@@ -78,3 +78,15 @@ MISSING_SESSION = xml(
     "<mnt-rest-result><http-code>500</http-code><cpm-code>34110</cpm-code><internal-error-info>Session data "
     "is not available.</internal-error-info></mnt-rest-result>"
 )
+
+
+def mock_no_policy(mock: respx.MockRouter, *, own_sets: tuple[str, ...] = ()) -> None:
+    """Empty policy (no policy sets, global exceptions or library conditions) for the ise_where_used scan
+    that ise_delete_object runs. respx replaces a route registered twice, so `own_sets` names the kinds
+    whose policy-set list the test mocks itself."""
+    for kind in ("network-access", "device-admin"):
+        base = f"/api/v1/policy/{kind}"
+        if kind not in own_sets:
+            mock.get(f"{base}/policy-set").respond(json={"response": []})
+        mock.get(f"{base}/policy-set/global-exception").respond(json={"response": []})
+        mock.get(f"{base}/condition").respond(json={"response": []})

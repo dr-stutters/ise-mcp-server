@@ -40,6 +40,7 @@ from ise_mcp.tools import (
     system,
     troubleshoot,
     trustsec,
+    where_used,
     workflows,
     writes,
 )
@@ -58,7 +59,9 @@ after (suite_change_check across products); "is it the network or ISE?" (per-NAD
 timeouts) -> ise_nad_radius_stats; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD names may be partial);
 "what does policy do?" -> ise_list_policy_sets then ise_get_policy_set; "which rule would a MAB/802.1X
 login from switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk to B?" ->
-ise_get_egress_matrix(source, destination); "why is this device profiled as X?" -> ise_explain_profile
+ise_get_egress_matrix(source, destination); "what uses this profile / SGT / group / condition before I
+change or delete it?" -> ise_where_used(kind, name); "why is this device profiled as X?" ->
+ise_explain_profile
 (custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status). Everything is queried from
 ISE when called: MnT keeps per-MAC auth history (CoA results are labelled kind=coa, not logins) and has
 nothing when no RADIUS reached ISE; it leaves out repeated successful logins, which the session
@@ -144,6 +147,7 @@ def create_server(
             config_export.register,
             config_import.register,
             snapshot.register,
+            where_used.register,
             suite.register,
         ],
         status=IseApp.status,
