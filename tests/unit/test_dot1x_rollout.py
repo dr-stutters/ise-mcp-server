@@ -55,7 +55,9 @@ async def test_readiness_changes_nothing() -> None:
     # Catalyst Center leg (no switch given: the NDG's switches).
     assert "`catc_list_devices` with ip=<each NAD IP>" in text
     assert '"show access-session", "show authentication sessions"' in text
-    assert "`catc_get_device_config` with device=<each switch>" in text
+    # catc's match is a section-header prefix, not a regex.
+    assert '`catc_get_device_config` with device=<each switch>, match="interface"' in text
+    assert 'match="access-session|' not in text
 
 
 async def test_monitor_phase() -> None:
@@ -66,6 +68,10 @@ async def test_monitor_phase() -> None:
     assert 'section="authentication", if_user_not_found="CONTINUE"' in text
     assert "authentication convert-to new-style" in text and "device-tracking policy IPDT_POLICY" in text
     assert "no access-session closed" in text
+    assert "dot1x system-auth-control" in text
+    # A MAB reject restarts after a pause instead of re-running MAB at once (a RADIUS loop in closed mode).
+    assert "class MAB_FAILED do-until-failure" in text and "authentication-restart 60" in text
+    assert "class always do-until-failure 10 terminate dot1x" not in text
     assert "`ise_compare_snapshot` with before=<the step 4 blob>" in text
 
 

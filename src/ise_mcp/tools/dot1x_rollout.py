@@ -133,18 +133,34 @@ def _global_lines(interfaces: str) -> list[str]:
     """Once per switch before the first phase: new-style AAA, IP device tracking, the control policy."""
     return [
         "authentication convert-to new-style   (once, if 'show run' still has legacy 'authentication' lines)",
+        "dot1x system-auth-control   (802.1X does not run on any port without it)",
         "device-tracking policy IPDT_POLICY",
         " tracking enable",
         f"interface range {interfaces}",
         " device-tracking attach-policy IPDT_POLICY   (a dACL needs the endpoint's IP for 'any')",
+        "class-map type control subscriber match-all DOT1X_FAILED",
+        " match method dot1x",
+        " match result-type method dot1x authoritative",
+        "class-map type control subscriber match-all DOT1X_NO_RESP",
+        " match method dot1x",
+        " match result-type method dot1x agent-not-found",
+        "class-map type control subscriber match-all MAB_FAILED",
+        " match method mab",
+        " match result-type method mab authoritative",
         "policy-map type control subscriber PMAP_DOT1X_MAB",
         " event session-started match-all",
         "  10 class always do-until-failure",
         "   10 authenticate using dot1x priority 10",
         " event authentication-failure match-first",
-        "  10 class always do-until-failure",
+        "  5 class DOT1X_FAILED do-until-failure",
         "   10 terminate dot1x",
         "   20 authenticate using mab priority 20",
+        "  10 class DOT1X_NO_RESP do-until-failure",
+        "   10 terminate dot1x",
+        "   20 authenticate using mab priority 20",
+        "  20 class MAB_FAILED do-until-failure   (a rejected MAC waits 60 s, no MAB loop against ISE)",
+        "   10 terminate mab",
+        "   20 authentication-restart 60",
         " event agent-found match-all",
         "  10 class always do-until-failure",
         "   10 terminate mab",
@@ -252,9 +268,13 @@ def register(reg: ToolRegistrar) -> None:
         else:
             target = f'["{switch}"]' if switch else "[the NDG's switches from step 1]"
             show_cli = f"{tool_ref('catc_run_show_commands')} with devices={target}"
+            # `match` is a prefix of top-level section headers (not a regex): the port lines sit under
+            # 'interface ...', the global lines are read with a show command.
             mode_source = (
-                f'{tool_ref("catc_get_device_config")} with device=<each switch>, match="access-session|'
-                'authentication|ip access-group|dot1x|mab"'
+                f'{tool_ref("catc_get_device_config")} with device=<each switch>, match="interface" (the\n'
+                "     ports' access-session, ip access-group, dot1x and mab lines), plus "
+                f'{show_cli}, commands=["show running-config | include ^dot1x system-auth-control|'
+                '^policy-map type control"]'
             )
             stage = f"""   Stage them as a Catalyst Center template (the catc server; each a preview the user
    approves): {tool_ref("catc_create_template")} with project=<a template project the user names>,
