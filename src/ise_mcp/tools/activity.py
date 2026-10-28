@@ -215,13 +215,16 @@ async def candidate_macs(
 
 # RADIUS without a Calling-Station-Id MAC (device admin over RADIUS, VPN, a router's `test aaa`) never
 # reaches the per-MAC AuthStatus history; the only MnT read not keyed by MAC is the user's latest
-# session (Session/UserName). Seen live (Wave 7, 2026-10-24): an edge's `test aaa` Access-Reject left
-# no per-MAC record, and the failed user had no MnT session either.
+# session (Session/UserName), and MnT only builds a session from RADIUS accounting. Seen live: an
+# edge's `test aaa` Access-Reject (Wave 7, 2026-10-24) and an Access-Accept (ISE 3.5, 2026-10-28, #114)
+# both left no per-MAC record and no MnT session; only the GUI live log showed them.
 MAC_LESS_NOTE = (
-    "MAC-less RADIUS (device admin, VPN, a router's 'test aaa') carries no Calling-Station-Id MAC, so "
-    "MnT's per-MAC history never shows it. Pass user=<name> to read that user's latest MnT session "
-    "(Session/UserName; a failed login often has none), or look in the GUI live log (Operations > "
-    "RADIUS > Live Logs, filtered by the NAS IP or user)."
+    "MAC-less RADIUS (a router's 'test aaa', device admin over RADIUS, VPN) carries no Calling-Station-Id "
+    "MAC, so MnT's per-MAC history never shows it. user=<name> reads that user's latest MnT session "
+    "(Session/UserName), which exists only when the NAD also sent RADIUS accounting (VPN, some wireless "
+    "or admin flows). A 'test aaa' or device-admin RADIUS login, passed or failed, sends no accounting and "
+    "leaves no MnT record at all: only the GUI live log (Operations > RADIUS > Live Logs, filtered by the "
+    "NAS IP or user) shows it."
 )
 
 
@@ -370,7 +373,8 @@ def register(reg: ToolRegistrar) -> None:
             str | None,
             Field(
                 description="Filter: username contains (case-insensitive). Also reads this exact user's "
-                "latest MnT session, which covers MAC-less RADIUS (device admin, VPN, router 'test aaa')"
+                "latest MnT session: finds MAC-less RADIUS only when the NAD sent accounting (VPN); a "
+                "'test aaa' or device-admin RADIUS login leaves no MnT record"
             ),
         ] = None,
         macs: Annotated[
@@ -399,8 +403,10 @@ def register(reg: ToolRegistrar) -> None:
         candidate MACs: the ones you pass, then sessions authenticated in the window, then the endpoint
         database. The result says how many MACs were checked and whether more exist; a failing MAC
         that ISE never stored is only found when you pass it. RADIUS without a MAC (device admin, VPN,
-        a router's 'test aaa') is not in the per-MAC history: pass user= to also read that user's
-        latest MnT session; the result says so when nothing was found. RADIUS from an unknown NAD or with a
+        a router's 'test aaa') is not in the per-MAC history: user= also reads that user's latest MnT
+        session, which exists only when the NAD sent RADIUS accounting (VPN). A 'test aaa' or
+        device-admin RADIUS login, passed or failed, leaves no MnT record: only the GUI live log shows
+        it, and the result says so when nothing was found. RADIUS from an unknown NAD or with a
         wrong shared secret leaves no record at all (check ise_audit_nads). Repeated successful logins
         may be missing from MnT's history, so a MAC listed here may have passed since: ise_find_session
         has its newest authentication. The window always ends now. The list holds one row per failed

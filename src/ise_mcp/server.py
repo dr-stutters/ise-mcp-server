@@ -71,7 +71,8 @@ ise_policy_audit (ranked findings with fix tools) and ise_unused_objects; "why i
 profiled as X?" -> ise_explain_profile
 (custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status). Everything is queried from
 ISE when called: MnT keeps per-MAC auth history (CoA results are labelled kind=coa, not logins) and has
-nothing when no RADIUS reached ISE; it leaves out repeated successful logins, which the session
+nothing when no RADIUS reached ISE, or for a router's 'test aaa' / device-admin RADIUS login (no
+accounting: GUI Live Logs only); it leaves out repeated successful logins, which the session
 (ise_find_session) still shows. "How much did this host move?" -> ise_get_accounting (bytes/packets per
 session); a session the switch dropped still shown online -> ise_delete_session (dangerous). Not
 available over REST, so don't search for it: the RADIUS suppression settings, the

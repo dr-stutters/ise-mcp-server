@@ -181,7 +181,6 @@ def register(reg: ToolRegistrar) -> None:
         what = {"both": "TACACS+ and RADIUS", "tacacs": "TACACS+", "radius": "RADIUS"}[protocols]
         order = ", ".join([*kinds, "local"])
         user_text = f'"{test_user}"' if test_user else "a test account the user names"
-        user_arg = f', user="{test_user}"' if test_user else ""
 
         parcel_values = []
         if radius:
@@ -228,9 +227,11 @@ def register(reg: ToolRegistrar) -> None:
         radius_check = (
             f"""   - RADIUS: with "{order}" an SSH login is answered by the first server group, so test
      RADIUS on the edge's console: the user types `test aaa group <the RADIUS group> <user> <password>
-     new-code` there (never here). Then {tool_ref("ise_get_auth_list")} with nad=<edge>,
-     since_minutes=15{user_arg}: the login with NAS IP = the edge's loopback. Nothing there:
-     {tool_ref("ise_recent_auth_failures")} with nad=<edge> (decoded reasons); no record at all = a
+     new-code` there (never here). The edge's answer is the proof: "User successfully authenticated"
+     or "User rejected" both prove the path and the secret. A `test aaa` login sends no RADIUS
+     accounting, so MnT keeps no record of it, passed or failed ({tool_ref("ise_get_auth_list")} and
+     {tool_ref("ise_recent_auth_failures")} stay empty): the rule it hit is only in the GUI,
+     Operations > RADIUS > Live Logs filtered by the edge's loopback. No answer at all (timeout) = a
      wrong secret, the wrong source address or no route (step 2)."""
             if radius
             else ""

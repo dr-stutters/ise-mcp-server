@@ -51,7 +51,9 @@ async def test_prompt_renders_the_full_flow_on_a_cml_switch() -> None:
     assert "never pass confirm yourself" in text
     # Test login, session.
     assert "test aaa group ISE-RADIUS alice <password> new-code" in text
-    assert '`ise_get_auth_list` with nad="syd-acc-sw01", since_minutes=15, user="alice"' in text
+    # A 'test aaa' login has no MnT record (#114): the switch's answer and the GUI live log are the proof.
+    assert '`ise_get_auth_list` with nad="syd-acc-sw01"' not in text
+    assert "sends no RADIUS accounting, so MnT keeps no record" in text and "RADIUS > Live Logs" in text
     assert '`ise_admin_policy_explain` with user="alice", nad="syd-acc-sw01"' in text
     assert "LOCAL account on the console" in text
     assert '`ise_find_session` with mac="AA:BB:CC:DD:EE:FF"' in text

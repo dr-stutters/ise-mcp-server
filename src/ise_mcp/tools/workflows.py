@@ -912,13 +912,14 @@ def register_onboard_nad(reg: ToolRegistrar) -> None:
         radius_test = (
             f"""   - RADIUS: the user types on the switch console (never here):
        test aaa group {RADIUS_GROUP} {test_user or "<user>"} <password> new-code
-     Then {tool_ref("ise_get_auth_list")} with nad="{name}", since_minutes=15{
-                f', user="{test_user}"' if test_user else ""
-            }: the attempt
-     with NAS IP {ip_text}. A reject still proves the path and the secret; nothing at all: {
+     The switch's answer is the proof: "User successfully authenticated" or "User rejected" both
+     prove the path and the secret. A 'test aaa' login sends no RADIUS accounting, so MnT keeps no
+     record of it, passed or failed: {tool_ref("ise_get_auth_list")} and {
                 tool_ref("ise_recent_auth_failures")
-            } with nad="{name}", then
-     'show aaa servers' (requests rising, no responses = the secret, the source address or the route)."""
+            } stay empty, and the
+     rule it hit is only in the GUI (Operations > RADIUS > Live Logs, NAS IP {ip_text}). No answer
+     at all: 'show aaa servers' (requests rising, no responses = the secret, the source address or
+     the route)."""
             if radius
             else ""
         )
