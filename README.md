@@ -178,7 +178,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_SPONSOR_USERNAME` / `ISE_SPONSOR_PASSWORD` | unset | Sponsor account for the guest-account tools (password also via `_FILE` / `_REF`; never shown). See [Guest access](#guest-access) |
 | `ISE_SPONSOR_PORTAL` | the only sponsor portal | Sponsor portal (name or id) sent as the guest API's `portalId` |
 | `ISE_GUEST_TIMEZONE` | unset | IANA time zone of the guest location; guest dates are in that local time |
-| `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. See [Backups](#backups) |
+| `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. ISE's rules: 8-15 characters from `[A-Za-z0-9_#]`, at least one upper-case letter, one lower-case letter and one digit, no `cisco` in any case (the preview and `ise_status` check it). See [Backups](#backups) |
 | `ISE_REPOSITORY_<NAME>` | unset | Repository passwords `ise_set_repository(password_env='ISE_REPOSITORY_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_REPOSITORY_` names are read). See [Backups](#backups) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
@@ -612,7 +612,10 @@ host_key add host <server>`) -> `ise_create_backup(repository, name)`
 (dangerous, preview-first; the key comes from `ISE_BACKUP_ENCRYPTION_KEY`) -> `ise_get_backup_status`;
 `ise_list_repositories(repository=...)` lists the backup files (`<name>-CFG10-<yymmdd>-<hhmm>.tar.gpg`). The
 preview refuses when no repository is configured, the repository is read-only (CDROM, HTTP, HTTPS), the key
-is not set or a backup is already running. The OpenAPI backs up the configuration only (no MnT data).
+is not set or a backup is already running. It also refuses a key ISE would reject with a 400: ISE takes 8-15
+characters from `[A-Za-z0-9_#]` with at least one upper-case letter, one lower-case letter and one digit, and
+none containing `cisco` in any case. The preview names the rule the key breaks and its length, never the key;
+`ise_status` reports the same check under `backup_key` (set, length, `ok`, the broken rules). The OpenAPI backs up the configuration only (no MnT data).
 Restoring is not automated: Administration > System > Backup & Restore > Restore with the file and the same
 key (it replaces the whole configuration and restarts ISE's services). `ise_delete_repository` (dangerous) is refused while the last backup was a scheduled one to it. Catalyst Center's half is catc-mcp-server's
 `catc_create_backup`.
