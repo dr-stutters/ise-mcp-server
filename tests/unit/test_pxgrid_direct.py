@@ -179,6 +179,31 @@ async def test_update_mapping_keeps_saved_token(mock: respx.MockRouter) -> None:
     assert sent["flexibleUrl"] == connector()["flexibleUrl"]  # untouched: the saved key goes back as is
 
 
+async def test_update_url_sends_masked_key_back_unprefixed(mock: respx.MockRouter) -> None:
+    listing(mock, [connector()])
+    put = mock.put(f"{CONFIG}/{NAME}").respond(json={})
+    new_url = "https://netbox.example.com/api/dcim/devices/?limit=500"
+    preview, done = await two_step("ise_set_pxgrid_direct_connector", {"name": NAME, "bulk_url": new_url})
+    assert preview["status"] == "preview", preview
+    assert done is not None
+    bulk = json.loads(put.calls.last.request.content)["connector"]["flexibleUrl"]["bulk"]
+    assert bulk["url"] == new_url
+    assert bulk["apiKeyProperties"]["key"] == "******"  # ISE's mask as returned, never 'Token ******'
+
+
+async def test_update_scheme_with_masked_key_needs_secret(mock: respx.MockRouter) -> None:
+    listing(mock, [connector()])
+    put = mock.put(f"{CONFIG}/{NAME}").respond(json={})
+    server = make_server(mcp_enable_writes=True)
+    async with Client(server) as c:
+        out = (
+            await c.call_tool("ise_set_pxgrid_direct_connector", {"name": NAME, "token_scheme": "Bearer"})
+        ).structured_content
+    assert out is not None and "confirm" not in out, out
+    assert "secret_env" in json.dumps(out)
+    assert not put.called
+
+
 async def test_update_new_token_counts_as_change(
     mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
 ) -> None:

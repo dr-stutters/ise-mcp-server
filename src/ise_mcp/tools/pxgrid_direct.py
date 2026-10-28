@@ -142,6 +142,12 @@ def _secret_set(c: dict[str, Any]) -> bool:
     )
 
 
+def _masked(value: str) -> bool:
+    """A credential ISE masked in a GET ('******', or 'Token ******')."""
+    tail = value.split(" ", 1)[-1]
+    return bool(tail) and set(tail) == {"*"}
+
+
 def _schedule(s: Any) -> str | None:
     if not isinstance(s, dict) or not s.get("interval"):
         return None
@@ -647,6 +653,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             i_url = incremental_url if incremental_url is not None else old.get("incremental_url")
             user = username if username is not None else old.get("username")
             keep = None
+            key_scheme = scheme
             if secret is None and existing and a == old.get("auth"):
                 # No new credential: send the saved one back as ISE returned it.
                 b = _fetch(existing, "bulk")
@@ -656,12 +663,22 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                     else (b.get("basicAuthProperties") or {}).get("password")
                     or (existing.get("url") or {}).get("password")
                 )
-                if a == "apikey" and isinstance(keep, str) and " " in keep:
-                    keep = keep.split(" ", 1)[1]
+                if a == "apikey" and isinstance(keep, str):
+                    if _masked(keep):
+                        # ISE masks the saved key: send its mask back untouched (no scheme prefix, or ISE
+                        # would store 'Token ******' as the new key). A new scheme needs the token itself.
+                        key_scheme = ""
+                        if token_scheme is not None:
+                            blockers.append(
+                                "ISE doesn't return the saved token, so token_scheme can't be changed "
+                                "without it: give secret_env too"
+                            )
+                    elif " " in keep:
+                        keep = keep.split(" ", 1)[1]
             cred = secret if secret is not None else keep
-            flex: dict[str, Any] = {"bulk": _fetch_url(str(b_url), a, user, cred, header, scheme)}
+            flex: dict[str, Any] = {"bulk": _fetch_url(str(b_url), a, user, cred, header, key_scheme)}
             if i_url:
-                flex["incremental"] = _fetch_url(str(i_url), a, user, cred, header, scheme)
+                flex["incremental"] = _fetch_url(str(i_url), a, user, cred, header, key_scheme)
             url: dict[str, Any] = {"bulkUrl": b_url, "authenticationType": a}
             if i_url:
                 url["incrementalUrl"] = i_url
