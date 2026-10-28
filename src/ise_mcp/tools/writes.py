@@ -344,12 +344,30 @@ async def find_egress_cell(
     return src, dst, current
 
 
+async def any_any_default_cell(app: IseApp) -> dict[str, Any]:
+    """The ANY-ANY default egress cell (full object). ERS can't filter cells by name, but its source SGT
+    name ANY filters (ISE 3.5 returns just this cell); an unfiltered scan is the fallback."""
+    path = "/ers/config/egressmatrixcell"
+    pages: tuple[tuple[dict[str, Any] | None, int], ...] = (
+        ({"filter": "sgtSrcName.EQ.ANY"}, 20),
+        (None, 10_000),
+    )
+    for params, limit in pages:
+        page = await app.ers_pager.fetch_page(app.ers, path, params, limit=limit)
+        hit = next((c for c in page.items if isinstance(c, dict) and c.get("name") == "ANY-ANY"), None)
+        if hit is not None:
+            return await app.ers_get("egressmatrixcell", str(hit["id"]))
+    raise NotFound("The ANY-ANY default egress cell could not be read (ERS egressmatrixcell)", 404)
+
+
 async def resolve_egress_cell(app: IseApp, target: str) -> tuple[dict[str, Any], str, str]:
     """(full cell, source SGT name, destination SGT name) for ise_delete_object kind='egress_cell': the
     target is 'SOURCE->DESTINATION' (SGT names), the cell id, or 'ANY-ANY'."""
     key = target.strip()
-    if key.upper() in ("ANY-ANY", "ANY->ANY"):
-        key = "ANY->ANY"
+    if re.sub(r"\s+", "", key).upper() in ("ANY-ANY", "ANY->ANY"):
+        # #143: ERS lists no SGT named ANY (the cell's source/destination is an internal pseudo-SGT), so an
+        # SGT-name lookup fails before delete_egress_cell's blocker runs: find the default cell by name.
+        return await any_any_default_cell(app), "ANY", "ANY"
     if is_uuid(key):
         cell = await app.ers_get("egressmatrixcell", key)
         sgts = await ers_name_map(app, "sgt")
