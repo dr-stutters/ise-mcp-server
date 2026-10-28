@@ -243,3 +243,70 @@ def test_slow_needs_a_real_gap() -> None:
     )
     assert slow_nads(rows) == []
     assert compare(rows, {}) == []
+
+
+# MAC-less RADIUS (#84): a router's `test aaa` / device-admin login carries no Calling-Station-Id, so it
+# is never in the per-MAC history; only the user's latest MnT session (Session/UserName) can show it.
+EDGE_IP = "192.0.2.14"
+PROBE = "mcp-probe"
+
+
+def user_session(*, minutes_ago: int, passed: bool, ms: int = 91) -> str:
+    """Shaped like tests/fixtures/mnt_session.xml, without a MAC (router login)."""
+    reason = "" if passed else "<failure_reason>22040 Wrong password</failure_reason>"
+    return xml(
+        f"<sessionParameters><passed>{int(passed)}</passed><failed>{int(not passed)}</failed>"
+        f"<user_name>{PROBE}</user_name><nas_ip_address>{EDGE_IP}</nas_ip_address>"
+        "<calling_station_id></calling_station_id><network_device_name>mcp-br1</network_device_name>"
+        "<acs_server>ise-psn1</acs_server><authentication_protocol>PAP_ASCII</authentication_protocol>"
+        f"<auth_acs_timestamp>{ago(minutes_ago)}</auth_acs_timestamp>{reason}"
+        f"<message_code>{5200 if passed else 5400}</message_code><response_time>{ms}</response_time>"
+        "<service_type>Login</service_type></sessionParameters>"
+    )
+
+
+async def test_nothing_found_says_mac_less_radius_is_not_covered(mock: respx.MockRouter) -> None:
+    mock_mnt(mock, {}, auth_list())
+    out = body(await call_tool(make_server(), "ise_nad_radius_stats", {"include_endpoint_db": False}))
+    note = out["coverage"]["mac_less_radius"]
+    assert "test aaa" in note and "user=" in note and "Live Logs" in note
+    assert "mac_less_radius" in out["verdict"]
+    assert "users_checked" not in out["coverage"]
+
+
+async def test_user_session_covers_mac_less_router_login(mock: respx.MockRouter) -> None:
+    mock_mnt(mock, {}, auth_list())
+    mock.get(f"/admin/API/mnt/Session/UserName/{PROBE}").respond(
+        text=user_session(minutes_ago=3, passed=False)
+    )
+    mock.get("/ers/config/networkdevice").respond(json=ers_page([]))
+    out = body(
+        await call_tool(
+            make_server(),
+            "ise_nad_radius_stats",
+            {"user": PROBE, "nad": EDGE_IP, "since_minutes": 15, "include_endpoint_db": False},
+        )
+    )
+    [row] = out["results"]
+    assert row["nad"] == "mcp-br1" and row["nas_ips"] == [EDGE_IP]
+    assert row["requests"] == 1 and row["failed"] == 1 and row["timeouts"] == 0
+    assert row["other_avg_ms"] == 91 and row["endpoints"] == 0
+    assert out["coverage"]["users_checked"] == {PROBE: "session in the window"}
+    assert out["coverage"]["macs_checked"] == 0
+    assert "mac_less_radius" not in out["coverage"]
+
+
+async def test_user_session_outside_window_or_missing(mock: respx.MockRouter) -> None:
+    from tests.unit.conftest import MISSING_SESSION
+
+    mock_mnt(mock, {}, auth_list())
+    route = mock.get(f"/admin/API/mnt/Session/UserName/{PROBE}")
+    route.respond(text=user_session(minutes_ago=120, passed=True))
+    args = {"user": PROBE, "since_minutes": 15, "include_endpoint_db": False}
+    out = body(await call_tool(make_server(), "ise_nad_radius_stats", args))
+    assert out["records"] == 0
+    assert out["coverage"]["users_checked"][PROBE].startswith("latest session outside the window")
+    assert "mac_less_radius" in out["coverage"]
+    route.respond(500, text=MISSING_SESSION)
+    out = body(await call_tool(make_server(), "ise_nad_radius_stats", args))
+    assert out["coverage"]["users_checked"] == {PROBE: "no MnT session"}
