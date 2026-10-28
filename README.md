@@ -202,6 +202,13 @@ create the accounts and the read-tier verification test.
 `ise_deployment_health` reports the server's own account and flags it when it holds more than the
 enabled tiers need.
 
+**Admin access review** (reads only; the account needs an admin group that can read Admin Access, e.g.
+Super Admin or Read Only Admin): `ise_list_admin_users` (groups, disabled, never-disabled, external, with a
+summary), `ise_list_admin_groups` (members and the AD groups mapped to each admin group),
+`ise_list_rbac_policies`, and `ise_get_admin_access(group=|user=)` for the menus and data a group or
+admin gets. `ise_deployment_health` adds an `admins` section and flags enabled Super Admins beyond three
+and Super Admins exempt from inactivity disabling. Admin accounts are never changed by this server.
+
 ## Safety rails
 
 On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_TOOLS`,
@@ -279,18 +286,18 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-151 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 81 read tools plus `ise_api_call` (GET-only) are registered. Everything
+155 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 85 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (81)
+### Read (85)
 
 | Tool | What it does |
 |---|---|
 | `ise_admin_policy_explain` | Predict what a TACACS+ device-admin login gets, client-side (ISE has no evaluate API and no TACACS+ live-log REST API): which device-admin policy set the NAD and user select, the authentication rule (identity source), the authorization rule (with its hit count), the shell profile (priv-lvl etc.; Deny All Shell Profile means the login fails) and, for each `command`, the command-set verdict and the line that decided it. |
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
 | `ise_compare_snapshot` | Compare a ise_snapshot blob from before a change with one from after it (or, when `after` is empty, a fresh snapshot of the same scope taken now) and name what changed, most severe first: major = got unhealthy (session down, metric past its limit, healthy item gone), minor = changed but not clearly bad, info = recovered or improved. |
-| `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
+| `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16); and an admins review (Super Admin count, disabled, never-disabled, external; I74). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
 | `ise_explain_profile` | Why an endpoint has its profile: the profiling policy it matched and its parent chain (e.g. |
@@ -298,6 +305,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
+| `ise_get_admin_access` | What an ISE admin group, or an admin user through their groups, may do: group -> enabled RBAC policies -> menu access (top-level tabs shown and hidden, menu pages shown) and data access (each category's permission: Admin Groups, User/Endpoint Identity Groups, Network Device Groups), plus the external AD groups mapped to the group and its members. |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
 | `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes (also as av_pairs such as 'Viptela:Viptela-Group-Name=netadmin'), device profile. |
@@ -317,6 +325,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_trustsec_settings` | ISE's TrustSec general settings: whether the TrustSec HTTPS (REST) policy server is on (what 'cts policy-server' on IOS-XE downloads environment data and policy from, port 9063 on the PSNs, and what feeds ise_trustsec_device_report), its audit log, whether a matrix cell may carry several SGACLs, automatic SGT numbering, and the HTTPS server list ISE hands to devices in environment data (host name, addresses, port). |
 | `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN, audit session id), plus total, posture and profiler session counts. |
 | `ise_list_ad_groups` | Search the joined domain for groups (name as ISE writes it, e.g. |
+| `ise_list_admin_groups` | ISE admin groups (built-in such as Super Admin, Policy Admin, Read Only Admin, ERS Admin, and custom ones): description, member admins (and which are disabled), whether the group is external and the external identity source and AD groups mapped to it ('which AD groups grant admin?'), and the RBAC policies that give it access. |
+| `ise_list_admin_users` | ISE's own administrators (Administration > System > Admin Access > Administrators), for an access review: name, enabled, admin groups, Super Admin or not, external, read-only, 'inactive account never disabled' and 'change password on next login', plus a summary (Super Admin count and names, disabled, never-disabled, external). |
 | `ise_list_allowed_protocols` | List allowed-protocols services (selected by each policy set) and which authentication protocols each permits: PAP, CHAP, MS-CHAPv2, EAP-MD5, EAP-TLS, PEAP, EAP-FAST, TEAP, LEAP. |
 | `ise_list_anc_endpoints` | List endpoints that currently have an ANC policy applied (e.g. |
 | `ise_list_anc_policies` | List Adaptive Network Control (ANC) policies and their actions (QUARANTINE, PORTBOUNCE, SHUTDOWN, REAUTHENTICATE). |
@@ -348,6 +358,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_profiler_profiles` | List the classic profiling policies (ISE ships ~700, e.g. |
 | `ise_list_profiling_rules` | List the profiler's custom / direct / ML profiling rules (ISE 3.3+ Profiler Policy Management): name, type, enabled, priority, condition, the endpoint labels it sets (endpoint type, manufacturer, model, OS) and how many endpoints it matched. |
 | `ise_list_pxgrid_clients` | The pxGrid 2.0 clients registered with ISE (FMC, Catalyst Center, SIEMs, scripts): name, state (pending / enabled / disabled / created), the product that registered it when the name shows it (FMC uses iseagent-* and firesightisetest-*), description and groups. |
+| `ise_list_rbac_policies` | ISE admin RBAC policies (Administration > System > Admin Access > Authorization > Policy): name, enabled, the admin groups they apply to, and the menu-access and data-access permission sets they grant. |
 | `ise_list_repositories` | Repositories ISE copies configuration backups to (Administration > System > Maintenance > Repository): name, protocol (SFTP, FTP, NFS, DISK, ...), server, path and user; passwords are never shown. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
@@ -456,8 +467,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join and a user test), the Catalyst Center to ISE integration (policy server state and next action, Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source with name resolution. |
-| `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_nad` | Day-1 onboarding of an access switch into ISE, the same way every time: the location and device-type groups, the NAD with its RADIUS and/or TACACS+ secret, the switch's AAA config (a preview through cml_configure_node, Catalyst Center's site AAA settings or a template), a test login seen in ISE, the endpoint session, a recorded undo (ISE and the switch's 'no' lines), and a closing coverage check of the site against ISE's NADs. |
+| `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `suite_change_check` | Did anything else break? |
 
