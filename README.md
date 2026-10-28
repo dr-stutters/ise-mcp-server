@@ -279,11 +279,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-150 tools and 5 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+153 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 81 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (81)
+### Read (83)
 
 | Tool | What it does |
 |---|---|
@@ -356,6 +356,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
 | `ise_nad_radius_stats` | ISE's own view of each NAD's RADIUS traffic over a window, from MnT auth history (queried when called): attempts, failures, timeouts (the NAD or supplicant stopped answering: 5411, 5440, ...), average/median/worst response time overall and per method (EAP vs MAB), the PSN that answered, and the NADs that stand out against the others (or against the previous window with compare_previous=true). |
+| `ise_policy_audit` | Policy hygiene audit, for a pre-audit, a quarterly clean-up or an inherited ISE: ranked findings (high, medium, low, info), each with where it is and the tool that fixes it. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
 | `ise_profiler_status` | Profiler health and setup: which nodes run the Profiler service, each PSN's probes (enabled with their settings, and disabled), live profiler session count, custom profiling rule count, cloud profiler / telemetry state, and the feed service (GUI-only, said so). |
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
@@ -366,6 +367,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
 | `ise_trustsec_device_report` | Which network devices have downloaded ISE's current TrustSec policy: per device the last step of the ISE <-> switch exchange (environment data, SGACLs, policy, CoA), its status, when ISE last changed policy, when the device last reported, whether it is current, and what to check when it is not (PAC, CTS credentials, CoA, 'cts refresh policy'). |
+| `ise_unused_objects` | Objects nothing references, for a clean-up: authorization profiles, dACLs, SGTs, SGACLs, identity and endpoint groups, network device groups for which the ise_where_used scan (policy sets and rules, library conditions, profiles, identity sequences, egress matrix, devices, group members) finds no use, each with its ise_delete_object call. |
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
@@ -456,8 +458,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join and a user test), the Catalyst Center to ISE integration (policy server state and next action, Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source with name resolution. |
-| `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_nad` | Day-1 onboarding of an access switch into ISE, the same way every time: the location and device-type groups, the NAD with its RADIUS and/or TACACS+ secret, the switch's AAA config (a preview through cml_configure_node, Catalyst Center's site AAA settings or a template), a test login seen in ISE, the endpoint session, a recorded undo (ISE and the switch's 'no' lines), and a closing coverage check of the site against ISE's NADs. |
+| `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `suite_change_check` | Did anything else break? |
 
