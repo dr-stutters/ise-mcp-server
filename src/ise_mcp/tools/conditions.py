@@ -10,6 +10,13 @@ ISE keeps three kinds of reusable condition, each with its own OpenAPI resource:
 - network conditions (`.../network-condition`): NADs, NAD IPs or subnets and device groups (device /
   device-port), or end-station IPs, MACs and CLI/DNIS (end station).
 
+ISE 3.5 keeps one condition library for both policy kinds: an object created under network-access comes
+back, with the same id, from the device-admin list too (the device-admin list leaves out library conditions
+on RADIUS-only dictionaries). The export writes such an object once, with kind `shared`; writes go to the
+kind's own path first and, on a 400, to the other kind's (a delete or update only works on some ISE builds
+through the path that created the object). ISE also keeps a time condition's description on an update
+(the PUT is accepted and the old description stays), so the update preview leaves it out and says so.
+
 Rules refer to any of them by name. `condition_spec` / `condition_view` are shared with ise_export_config
 and ise_import_config (the `conditions` section), so an export entry is exactly ise_set_condition's
 arguments."""
@@ -68,6 +75,12 @@ RESOURCE = {"library": "condition", "time": "time-condition", "network": "networ
 SCOPES = ("authorization", "policyset", "authentication")
 _TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _DATE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
+SHARED = "shared"  # export kind of a condition both policy kinds return with the same id
+OTHER_KIND = {"network-access": "device-admin", "device-admin": "network-access"}
+TIME_DESCRIPTION_NOTE = (
+    "ISE keeps a time condition's description on an update (it accepts the PUT and the old description "
+    "stays): change it in the GUI, or delete and re-create the condition"
+)
 
 
 class DateRange(BaseModel):
@@ -464,8 +477,13 @@ def full_view(ctype: str, body: dict[str, Any]) -> dict[str, Any]:
     return compact(out)  # type: ignore[no-any-return]
 
 
+def api_kind(kind: str) -> str:
+    """The policy kind whose path a write uses first: a shared condition is written through network access."""
+    return "network-access" if kind == SHARED else kind
+
+
 def write_path(kind: str, ctype: str, current: dict[str, Any] | None) -> str:
-    base = f"/api/v1/policy/{kind}/{RESOURCE[ctype]}"
+    base = f"/api/v1/policy/{api_kind(kind)}/{RESOURCE[ctype]}"
     if current is None:
         return base
     if ctype == "library":
@@ -473,14 +491,35 @@ def write_path(kind: str, ctype: str, current: dict[str, Any] | None) -> str:
     return f"{base}/{q(current.get('id'))}"
 
 
+async def _either_kind(kind: str, call: Any) -> Any:
+    """`call(kind)`, then `call(other kind)` when ISE answers 400 on the first path. ISE 3.5 shares the
+    condition library across both kinds, but on some builds only the path that created an object can
+    update or delete it ("Failed to process request"); the first error is raised when both fail."""
+    first = api_kind(kind)
+    try:
+        return await call(first)
+    except UpstreamError as e:
+        if e.status_code != 400 or isinstance(e, NotFound):
+            raise
+        try:
+            return await call(OTHER_KIND[first])
+        except UpstreamError:
+            raise e from None
+
+
 async def write_condition(
     app: IseApp, kind: str, ctype: str, body: dict[str, Any], current: dict[str, Any] | None
 ) -> Any:
-    path = write_path(kind, ctype, current)
     if current is None:
-        data = _resp(await app.openapi.post(path, body))
+        data = _resp(await app.openapi.post(write_path(kind, ctype, None), body))
     else:
-        data = _resp(await app.openapi.put(path, {**body, "id": current.get("id")}))
+
+        async def put(k: str) -> Any:
+            return _resp(
+                await app.openapi.put(write_path(k, ctype, current), {**body, "id": current.get("id")})
+            )
+
+        data = await _either_kind(kind, put)
     app.__dict__.pop("_dict_cache", None)
     if isinstance(data, dict):
         return compact(
@@ -490,8 +529,12 @@ async def write_condition(
 
 
 async def delete_condition(app: IseApp, kind: str, ctype: str, current: dict[str, Any]) -> Any:
-    path = f"/api/v1/policy/{kind}/{RESOURCE[ctype]}/{q(current.get('id'))}"
-    await app.openapi.request("DELETE", path)
+    async def delete(k: str) -> Any:
+        return await app.openapi.request(
+            "DELETE", f"/api/v1/policy/{k}/{RESOURCE[ctype]}/{q(current.get('id'))}"
+        )
+
+    await _either_kind(kind, delete)
     return {"deleted": current.get("name"), "id": current.get("id")}
 
 
@@ -584,7 +627,15 @@ def register(reg: ToolRegistrar) -> None:
             )
         else:
             have = full_view(type, current)
+            if type == "time" and have.get("description") != want.get("description"):
+                # ISE keeps a time condition's description on a PUT: don't promise a change it ignores.
+                side.append(TIME_DESCRIPTION_NOTE)
+                want = compact({**want, "description": have.get("description")})
+                body["description"] = current.get("description") or ""
             changes = field_changes(have, want, replace=True)
+            same = f"{current.get('name')} already has this definition"
+            if TIME_DESCRIPTION_NOTE in side:
+                same += f" ({TIME_DESCRIPTION_NOTE})"
             refs = await _references(app, current)
             if refs:
                 side.append(f"Used by {refs}: the change applies to them at the next authentication")
@@ -595,7 +646,7 @@ def register(reg: ToolRegistrar) -> None:
                 fingerprint=fingerprint(current),
                 side_effects=side,
                 noop=not changes,
-                noop_reason=None if changes else f"{current.get('name')} already has this definition",
+                noop_reason=None if changes else same,
             )
         return await preview_or_apply(
             ctx,
@@ -659,7 +710,7 @@ async def _references(app: IseApp, current: dict[str, Any]) -> str:
         )
     except (UpstreamError, NotFound):
         return ""
-    labels = [str(r.get("label")) for r in result.get("references") or []]
+    labels = list(dict.fromkeys(str(r.get("label")) for r in result.get("references") or []))
     if not labels:
         return ""
     shown = ", ".join(labels[:5]) + (f" and {len(labels) - 5} more" if len(labels) > 5 else "")

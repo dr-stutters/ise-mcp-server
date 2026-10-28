@@ -337,6 +337,14 @@ async def _rule_field_refs(
     return out
 
 
+def _one_hit(hits: list[str | None]) -> list[str | None]:
+    """One reference per rule or policy set: a direct match wins over the library conditions it also
+    comes through (a rule naming a time condition is reached both ways), else the first of those."""
+    if not hits:
+        return []
+    return [None] if None in hits else hits[:1]
+
+
 async def _condition_refs(scan: Scan, match: Match) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for kind in POLICY_KINDS:
@@ -345,7 +353,7 @@ async def _condition_refs(scan: Scan, match: Match) -> list[dict[str, Any]]:
             continue
         library = await scan.library(kind)
         for ps in sets:
-            for via in condition_hits(ps.get("condition"), library, match):
+            for via in _one_hit(condition_hits(ps.get("condition"), library, match)):
                 ref = {
                     "where": "policy set" if kind == "network-access" else "device-admin policy set",
                     "policy_kind": kind,
@@ -355,7 +363,7 @@ async def _condition_refs(scan: Scan, match: Match) -> list[dict[str, Any]]:
                 }
                 out.append({**ref, "via": via} if via else ref)
         for ps_name, section, e in await scan.rules(kind, ("authentication", "authorization", "exception")):
-            for via in condition_hits((e.get("rule") or {}).get("condition"), library, match):
+            for via in _one_hit(condition_hits((e.get("rule") or {}).get("condition"), library, match)):
                 out.append(_rule_ref(kind, ps_name, section, e, "condition", via))
         seen_ids: set[str] = set()
         for cond in library.values():

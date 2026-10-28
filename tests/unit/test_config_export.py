@@ -188,8 +188,9 @@ def lab_objects() -> dict[str, list[dict[str, Any]]]:
 def serve(mock: respx.MockRouter, objects: dict[str, list[dict[str, Any]]], *, shuffle: bool = False) -> None:
     rnd = random.Random(42)
     for resource, objs in objects.items():
-        if resource.startswith("na:"):
-            mock.get(f"/api/v1/policy/network-access/{resource[3:]}").respond(json={"response": objs})
+        if resource[:3] in ("na:", "da:"):
+            kind = "network-access" if resource.startswith("na:") else "device-admin"
+            mock.get(f"/api/v1/policy/{kind}/{resource[3:]}").respond(json={"response": objs})
             continue
         listed = [{"id": o["id"], "name": o.get("name"), "description": o.get("description")} for o in objs]
         if shuffle:
@@ -211,6 +212,8 @@ def serve(mock: respx.MockRouter, objects: dict[str, list[dict[str, Any]]], *, s
     mock.get(f"{NA}/global-exception").respond(json={"response": []})
     mock.get("/api/v1/policy/device-admin/policy-set").respond(404, json={"message": "Device Admin is off"})
     for resource in ("condition", "time-condition", "network-condition"):
+        if f"da:{resource}" in objects:
+            continue
         mock.get(f"/api/v1/policy/device-admin/{resource}").respond(
             404, json={"message": "Device Admin is off"}
         )

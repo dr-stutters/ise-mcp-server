@@ -414,6 +414,32 @@ def _custom_delete(app: IseApp, name: str) -> Callable[[], Awaitable[Any]]:
 # --- planning: reusable conditions --------------------------------------------------------------
 
 
+def _merge_shared(objs: list[dict[str, Any]], blockers: list[str]) -> list[dict[str, Any]]:
+    """One entry per condition name. ISE keeps one condition library for both policy kinds, so an export
+    from before kind `shared` lists such a condition under each kind: identical entries become one
+    `shared` entry; entries that differ are a blocker (ISE can hold only one of them)."""
+    from ise_mcp.tools.conditions import SHARED  # noqa: PLC0415 - conditions imports config_export lazily
+
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for o in objs:
+        by_name.setdefault(str(o.get("name")).lower(), []).append(o)
+    out: list[dict[str, Any]] = []
+    for group in by_name.values():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        bodies = [{k: v for k, v in o.items() if k != "kind"} for o in group]
+        if any(b != bodies[0] for b in bodies[1:]):
+            kinds = ", ".join(str(o.get("kind")) for o in group)
+            blockers.append(
+                f"conditions/{group[0].get('name')}: given for {kinds} with different definitions; ISE keeps "
+                "one condition of a name for both policy kinds"
+            )
+            continue
+        out.append({**group[0], "kind": SHARED})
+    return out
+
+
 async def _conditions(
     app: IseApp,
     plan: ImportPlan,
@@ -424,11 +450,14 @@ async def _conditions(
     only: list[str] | None,
     prune: bool,
 ) -> None:
-    """Library, time and network conditions, matched by kind and name; each body is built and checked
-    by ise_set_condition's code (dictionaries, NADs and device groups, this import's own NADs and groups
-    counting as known)."""
+    """Library, time and network conditions, matched by name across both policy kinds (ISE keeps one
+    library for both: the target's object is found whichever kind lists it, so a re-plan after a create is
+    a no-op); each body is built and checked by ise_set_condition's code (dictionaries, NADs and device
+    groups, this import's own NADs and groups counting as known)."""
     from ise_mcp.tools.conditions import (  # noqa: PLC0415 - conditions imports config_export lazily
         RESOURCE,
+        SHARED,
+        TIME_DESCRIPTION_NOTE,
         NetworkSpec,
         TimeSpec,
         delete_condition,
@@ -437,45 +466,66 @@ async def _conditions(
     )
 
     have = _keyed("conditions", live)
-    raw = {
-        f"{kind}/{c.get('name')}": (ctype, c)
-        for kind, existing in run.raw_conditions.items()
-        for ctype, items in existing.items()
-        for c in items
-    }
+    have_by_name: dict[str, str] = {}
+    for key, o in have.items():
+        have_by_name.setdefault(str(o.get("name")).lower(), key)
+    raw: dict[str, tuple[str, dict[str, Any]]] = {}
+    for existing in run.raw_conditions.values():
+        for ctype, items in existing.items():
+            for c in items:
+                raw.setdefault(str(c.get("name")).lower(), (ctype, c))
     nads = {str(n.get("name")) for n in source.get("nads") or []}
     ndgs = {str(g.get("name")) for g in source.get("ndgs") or []}
     want = {
         key: o
-        for key, o in _keyed("conditions", source.get("conditions") or []).items()
+        for key, o in _keyed(
+            "conditions", _merge_shared(source.get("conditions") or [], plan.blockers)
+        ).items()
         if matches(str(o.get("name")), only)
     }
+    matched: set[str] = set()
     for key in sorted(want, key=str.casefold):
         o = want[key]
-        kind, ctype, where = o.get("kind"), str(o.get("type")), f"conditions/{key}"
-        if kind not in KINDS or ctype not in RESOURCE:
+        kind, ctype, where = str(o.get("kind")), str(o.get("type")), f"conditions/{key}"
+        if kind not in (*KINDS, SHARED) or ctype not in RESOURCE:
             plan.blockers.append(
-                f"{where}: kind must be one of {', '.join(KINDS)} and type library|time|network"
+                f"{where}: kind must be one of {', '.join((*KINDS, SHARED))} and type library|time|network"
             )
             continue
-        if kind not in run.raw_conditions:
+        readable = [k for k in KINDS if k in run.raw_conditions]
+        if (kind == SHARED and not readable) or (kind != SHARED and kind not in run.raw_conditions):
             plan.blockers.append(f"{where}: {kind} conditions can't be read on the target")
             continue
+        name_key = str(o.get("name")).lower()
+        target_key = have_by_name.get(name_key)
         changes: dict[str, Any] | None = None
-        if key in have:
-            if have[key].get("type") != ctype:
+        write_kind = kind if kind != SHARED else readable[0]
+        if target_key is not None:
+            matched.add(target_key)
+            target = have[target_key]
+            if target.get("type") != ctype:
                 plan.blockers.append(
-                    f"{where}: a {have[key].get('type')} condition on the target, {ctype} in the export"
+                    f"{where}: a {target.get('type')} condition on the target, {ctype} in the export"
                 )
                 continue
-            changes = field_changes(have[key], o)
+            # The target's own kind (or the shared library) is where the object is written.
+            target_kind = str(target.get("kind"))
+            write_kind = target_kind if target_kind != SHARED else write_kind
+            desired = {k: v for k, v in o.items() if k != "kind"}
+            if ctype == "time" and desired.get("description") != target.get("description"):
+                # ISE keeps a time condition's description on an update.
+                plan.notes.append(
+                    f"{where}: description left as it is on the target ({TIME_DESCRIPTION_NOTE})"
+                )
+                desired["description"] = target.get("description")
+            changes = field_changes({k: v for k, v in target.items() if k != "kind"}, desired)
             if not changes:
                 plan.skip("conditions")
                 continue
         try:
             body, blockers = await desired_body(
                 app,
-                kind,
+                write_kind,
                 ctype,
                 conditions=o.get("conditions") if ctype == "library" else None,
                 match=str(o.get("match") or "all"),
@@ -488,18 +538,25 @@ async def _conditions(
             plan.blockers.append(f"{where}: {str(e)[:300]}")
             continue
         plan.blockers += [f"{where}: {b}" for b in blockers]
-        body = {**body, "name": o.get("name"), "description": o.get("description") or ""}
-        current = raw[key][1] if changes is not None else None
-        step_run = partial(write_condition, app, str(kind), ctype, body, current)
+        current = raw[name_key][1] if changes is not None and name_key in raw else None
+        description = o.get("description") or ""
+        if current is not None and ctype == "time":
+            description = current.get("description") or ""
+        body = {**body, "name": o.get("name"), "description": description}
+        step_run = partial(write_condition, app, write_kind, ctype, body, current)
         plan.steps.append(Step("update" if current else "create", "conditions", key, step_run, changes))
     extra = sorted(
-        (k for k, o in have.items() if k not in want and matches(str(o.get("name")), only)), key=str.casefold
+        (k for k, o in have.items() if k not in matched and matches(str(o.get("name")), only)),
+        key=str.casefold,
     )
     if extra and not prune:
         plan.left_alone["conditions"] = extra
     for key in extra if prune else []:
-        ctype, cur = raw[key]
-        kind = key.split("/", 1)[0]
+        name_key = str(have[key].get("name")).lower()
+        if name_key not in raw:
+            continue
+        ctype, cur = raw[name_key]
+        kind = str(have[key].get("kind"))
         plan.steps.append(Step("delete", "conditions", key, partial(delete_condition, app, kind, ctype, cur)))
 
 
@@ -1005,8 +1062,9 @@ async def plan_import(
     created = _created_names(source, live, only)
     if "conditions" in wanted:
         for o in source.get("conditions") or []:
-            if o.get("kind") in KINDS and matches(str(o.get("name")), only):
-                created.setdefault(f"condition:{o['kind']}", set()).add(str(o.get("name")))
+            if o.get("kind") in (*KINDS, "shared") and matches(str(o.get("name")), only):
+                for kind in KINDS if o["kind"] == "shared" else (o["kind"],):
+                    created.setdefault(f"condition:{kind}", set()).add(str(o.get("name")))
     for section in APPLY_ORDER:
         if section not in wanted:
             continue

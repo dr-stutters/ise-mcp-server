@@ -17,7 +17,7 @@ ise_diff_config(before="a.yaml", after="b.yaml") # compare two exports
 | Section | ISE source | Contents |
 |---|---|---|
 | `policy_sets` | OpenAPI `/api/v1/policy/{network-access,device-admin}` | Policy sets with their `authentication`, `authorization` and `local_exceptions` rules, plus `global_exceptions`, per kind |
-| `conditions` | OpenAPI `/api/v1/policy/{network-access,device-admin}/{condition,time-condition,network-condition}` | Reusable library, time-and-date and network conditions, each as `ise_set_condition` arguments (`kind`, `type`, `name`, `description`, `conditions` + `match` / `time` / `network`); imported after NADs and device groups, before the policy sets that use them |
+| `conditions` | OpenAPI `/api/v1/policy/{network-access,device-admin}/{condition,time-condition,network-condition}` | Reusable library, time-and-date and network conditions, each as `ise_set_condition` arguments (`kind`, `type`, `name`, `description`, `conditions` + `match` / `time` / `network`); imported after NADs and device groups, before the policy sets that use them. ISE 3.5 keeps one condition library for both policy kinds: an object both kinds list (same id) is written once with `kind: shared`, and the import matches conditions by name across both kinds (an older export that lists one twice creates it once). ISE keeps a time condition's description on an update, so the import leaves it as it is and adds a note |
 | `allowed_protocols` | ERS `allowedprotocols` | Allowed-protocols services (the service a policy set selects); exported and diffed, not imported |
 | `authz_profiles` | ERS `authorizationprofile` | Authorization profiles |
 | `dacls` | ERS `downloadableacl` | Downloadable ACLs |
