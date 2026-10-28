@@ -29,6 +29,7 @@ from ise_mcp.tools import (
     guest,
     health,
     health_review,
+    hitcounts,
     identity,
     mnt_depth,
     network,
@@ -67,7 +68,8 @@ timeouts) -> ise_nad_radius_stats; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD 
 login from switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk to B?" ->
 ise_get_egress_matrix(source, destination); "what uses this profile / SGT / group / condition before I
 change or delete it?" -> ise_where_used(kind, name); "clean-up / inherited ISE review" ->
-ise_policy_audit (ranked findings with fix tools) and ise_unused_objects; "why is this device
+ise_policy_audit (ranked findings with fix tools) and ise_unused_objects (zero-hit baseline:
+ise_reset_hitcounts, dangerous); "why is this device
 profiled as X?" -> ise_explain_profile
 (custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status). Everything is queried from
 ISE when called: MnT keeps per-MAC auth history (CoA results are labelled kind=coa, not logins) and has
@@ -163,6 +165,7 @@ def create_server(
             snapshot.register,
             where_used.register,
             policy_audit.register,
+            hitcounts.register,
             suite.register,
         ],
         status=IseApp.status,
