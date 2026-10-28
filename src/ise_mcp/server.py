@@ -15,6 +15,7 @@ from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
     activity,
     ad,
+    allowed_protocols,
     backup,
     certs,
     config_export,
@@ -136,6 +137,7 @@ def create_server(
             policy_explain.register,
             profiler_posture.register,
             device_admin.register,
+            allowed_protocols.register,
             sxp.register,
             certs.register,
             ad.register,
