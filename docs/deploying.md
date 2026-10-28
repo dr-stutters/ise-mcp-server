@@ -14,6 +14,7 @@ in [`examples/shared-host/`](../examples/shared-host/); a laptop (stdio) setup i
 | `MCP_DEFAULT_ROLE` | `ro` | once `MCP_ROLES` is set, a caller with no entry gets read tools only (without `MCP_ROLES` every token can use every enabled tier) |
 | `ISE_VERIFY_SSL` | `true` | ISE's certificate is checked; set `ISE_CA_BUNDLE` for a private CA |
 | `ISE_EXPORT_DIR` | unset | `ise_export_config` (a read tool) can write `.yaml` files to any absolute path the server's user can write; **set this on a shared host** to confine export files to one directory ([config-export.md](config-export.md)) |
+| `ISE_CERT_DIR` | unset | `ise_import_system_certificate` reads certificate, key and PKCS#12 files only from inside this directory (unset: the tool refuses); key passwords come from `ISE_CERT_<NAME>` variables |
 
 Turning on writes is two decisions: the server (`MCP_ENABLE_WRITES=true`) and who may use them (`MCP_ROLES`).
 Every write tool is preview-first: nothing changes until the caller repeats the call with the confirm token.

@@ -37,7 +37,14 @@ class Settings(BaseServerSettings):
         default=None, description="Directory for config export files (ISE_EXPORT_DIR)"
     )
 
-    @field_validator("export_dir", mode="before")
+    # ise_import_system_certificate (I58): certificate, key and PKCS#12 files are read only from inside this
+    # directory (relative paths resolve against it). Unset: the tool refuses file imports. Key files are
+    # secrets: keep the directory readable by the server's user only.
+    cert_dir: Path | None = Field(
+        default=None, description="Directory system-certificate import files are read from (ISE_CERT_DIR)"
+    )
+
+    @field_validator("export_dir", "cert_dir", mode="before")
     @classmethod
     def _empty_dir_is_none(cls, v: object) -> object:
         if isinstance(v, str):
