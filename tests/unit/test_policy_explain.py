@@ -36,6 +36,14 @@ def test_eval_operator() -> None:
     assert eval_operator("greaterThan", "x", "5") is None  # non-numeric -> unknown
     assert eval_operator("matches", "mcp-99", r"mcp-\d+") is True
     assert eval_operator("someFutureOp", "a", "b") is None
+    assert eval_operator("ipEquals", "198.51.100.10", "198.51.100.10") is True
+    assert eval_operator("ipEquals", "192.0.2.45", "198.51.100.10") is False
+    assert eval_operator("ipEquals", "198.51.100.7", "198.51.100.0/24") is True
+    assert eval_operator("ipNotEquals", "192.0.2.45", "198.51.100.10") is True
+    assert eval_operator("ipEquals", "2001:db8::1", "198.51.100.10") is False
+    assert eval_operator("ipGreaterThan", "192.0.2.50", "192.0.2.45") is True
+    assert eval_operator("ipLessThan", "192.0.2.50", "192.0.2.45") is False
+    assert eval_operator("ipEquals", "not-an-ip", "198.51.100.10") is None
 
 
 def test_evaluate_and_or_negate() -> None:
@@ -293,10 +301,69 @@ def test_normalize_device_attrs_and_nad_attributes() -> None:
         "DEVICE:IPSEC": "Is IPSEC Device#No",
         "Network Access:NetworkDeviceName": "sw1",
         "Radius:NAS-IP-Address": "192.0.2.9",
+        "Network Access:Device IP Address": "192.0.2.9",
     }
     # several addresses: the NAS IP is not known, so it is not assumed
-    nad["NetworkDeviceIPList"].append({"ipaddress": "10.0.0.0", "mask": 24})
-    assert "Radius:NAS-IP-Address" not in nad_attributes(nad)
+    nad["NetworkDeviceIPList"].append({"ipaddress": "198.51.100.0", "mask": 24})
+    attrs = nad_attributes(nad)
+    assert "Radius:NAS-IP-Address" not in attrs and "Network Access:Device IP Address" not in attrs
+
+
+async def test_policy_explain_device_ip_set_is_a_real_no_match(mock: respx.MockRouter) -> None:
+    # #113: a higher-ranked set on 'Network Access:Device IP Address ipEquals <other>' must not match
+    # (and not make the verdict UNCERTAIN) for a single-host NAD at a different address.
+    sets = {
+        "response": [
+            {
+                "id": "s-admin",
+                "name": "sdwan-admin",
+                "rank": 0,
+                "state": "enabled",
+                "default": False,
+                "condition": attr("Network Access", "Device IP Address", "ipEquals", "198.51.100.10"),
+            },
+            {"id": "s-def", "name": "Default", "rank": 1, "state": "enabled", "default": True},
+        ]
+    }
+    mock.get("/api/v1/policy/network-access/policy-set").respond(json=sets)
+    mock.get("/api/v1/policy/network-access/condition").respond(json={"response": []})
+    mock.get("/api/v1/policy/network-access/policy-set/global-exception").respond(json={"response": []})
+    rules = {
+        "response": [
+            {
+                "rule": {"name": "Default", "rank": 0, "state": "enabled", "default": True},
+                "profile": ["PermitAccess"],
+            }
+        ]
+    }
+    for ps_id in ("s-admin", "s-def"):
+        mock.get(f"/api/v1/policy/network-access/policy-set/{ps_id}/exception").respond(json={"response": []})
+        mock.get(f"/api/v1/policy/network-access/policy-set/{ps_id}/authorization").respond(json=rules)
+    mock.get("/ers/config/networkdevice", params={"filter": "ipaddress.EQ.192.0.2.45"}).respond(
+        json={"SearchResult": {"total": 1, "resources": [{"id": "n45", "name": "mcp-sw45"}]}}
+    )
+    mock.get("/ers/config/networkdevice/n45").respond(
+        json={
+            "NetworkDevice": {
+                "id": "n45",
+                "name": "mcp-sw45",
+                "NetworkDeviceIPList": [{"ipaddress": "192.0.2.45", "mask": 32}],
+            }
+        }
+    )
+    out = await call_tool(make_server(), "ise_policy_explain", {"nad": "192.0.2.45", "flow": "wired-dot1x"})
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["policy_set"] == "Default"
+    assert out["assumed_attributes"]["Network Access:Device IP Address"] == "192.0.2.45"
+    assert "UNCERTAIN" not in (out.get("note") or "")
+    # the same set is a real match for a NAD at its address
+    out = await call_tool(
+        make_server(),
+        "ise_policy_explain",
+        {"nad": "192.0.2.45", "flow": "wired-dot1x", "attributes": {"Device IP Address": "198.51.100.10"}},
+    )
+    out = out if isinstance(out, dict) else json.loads(str(out))
+    assert out["policy_set"] == "sdwan-admin"
 
 
 async def test_policy_explain_nad_and_flow(mock: respx.MockRouter) -> None:

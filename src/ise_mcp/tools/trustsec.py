@@ -3,7 +3,7 @@
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastmcp import Context
@@ -308,14 +308,23 @@ def register(reg: ToolRegistrar) -> None:
         destination: Annotated[
             str | None, Field(description="Only cells whose destination SGT name contains this")
         ] = None,
+        status: Annotated[
+            Literal["ENABLED", "DISABLED", "MONITOR"] | None,
+            Field(
+                description="Only cells with this status, e.g. MONITOR: the cells a rollout still has to "
+                "enforce"
+            ),
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
         offset: Annotated[int, Field(ge=0)] = 0,
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
         """The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs
-        applied, the final catch-all rule (permit/deny), and cell status. Answers 'can Employees talk to
-        Development_Servers?'. Cells not listed fall back to the ANY-ANY default; given both a source
-        and a destination with no cell, the result's 'effective' field shows that default."""
+        applied, the final catch-all rule (permit/deny), and cell status (ENABLED, MONITOR: hits counted,
+        traffic passes, or DISABLED). Answers 'can Employees talk to Development_Servers?' and, with
+        status='MONITOR', 'which cells are still in monitor mode?'. Cells not listed fall back to the
+        ANY-ANY default; given both a source and a destination with no cell, the result's 'effective'
+        field shows that default."""
         app: IseApp = get_client(ctx)
         # Narrow server-side by SGT name first so a large matrix isn't fetched cell by cell.
         filters = []
@@ -359,6 +368,8 @@ def register(reg: ToolRegistrar) -> None:
             rows = [r for r in rows if source.lower() in str(r["source"]).lower()]
         if destination:
             rows = [r for r in rows if destination.lower() in str(r["destination"]).lower()]
+        if status:
+            rows = [r for r in rows if str(r["status"] or "").upper() == status]
         rows.sort(key=lambda r: (r["source"] != "ANY", str(r["source"]), str(r["destination"])))
         extra: dict[str, Any] | None = None
         if not cells.complete:
@@ -366,7 +377,7 @@ def register(reg: ToolRegistrar) -> None:
                 "partial": f"Only the first {MATRIX_CELL_CAP} cells were read; filter by source or "
                 "destination for the rest."
             }
-        if source and destination and not rows:
+        if source and destination and not rows and not status:
             extra = {**(extra or {}), "effective": await _default_cell(app, sgts, acls, source, destination)}
         return list_result(
             page_of(rows, limit=limit, offset=offset),

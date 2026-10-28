@@ -8,11 +8,19 @@ takes from ISE_BACKUP_ENCRYPTION_KEY (never from a tool argument, never shown). 
 `last-backup-status`. With no repository `GET /api/v1/repository` answers `{"response": null}` and
 `last-backup-status` a record of nulls (the lab ISE 3.5, 2026-10-22), so ise_create_backup refuses in its
 preview. Restore is not automated: docs and the preview say how.
+
+Repositories themselves (roadmap I62): ise_set_repository creates or updates one over
+`POST /api/v1/repository` and `PUT /api/v1/repository/{name}`; ise_delete_repository removes one (`DELETE`).
+A repository password is read from a server environment variable the caller names (ISE_REPOSITORY_<...>,
+or its _FILE twin), never taken as a tool argument and never shown. ISE returns stored passwords masked, so
+an update sends it again.
 """
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
+import os
 import re
-from typing import Annotated, Any
+from pathlib import Path
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastmcp import Context
@@ -22,6 +30,7 @@ from pydantic import Field
 from ise_mcp._core import (
     AuthError,
     Confirm,
+    InvalidRequest,
     NotFound,
     Plan,
     ResponseFormat,
@@ -35,6 +44,7 @@ from ise_mcp._core import (
     preview_or_apply,
 )
 from ise_mcp._core.http import page_of
+from ise_mcp._core.secrets import register_secret
 from ise_mcp.client import IseApp
 
 REPOS = "/api/v1/repository"
@@ -59,6 +69,21 @@ DENIED = (
     "(Super Admin, the dangerous-tier account in docs/least-privilege.md)."
 )
 WAIT_FLOOR = 3600.0
+
+# --- repositories (I62) ------------------------------------------------------------------------
+REPO_PROTOCOL = Literal["SFTP", "FTP", "NFS", "HTTPS", "DISK"]
+NEEDS_SERVER = ("SFTP", "FTP", "NFS", "HTTPS")
+# A repository password may only come from a variable with this prefix, so a caller can't point the tool at
+# the server's own ISE credentials (or any other secret in its environment) and send them to a server.
+PASSWORD_ENV = re.compile(r"ISE_REPOSITORY_[A-Z0-9_]+")
+HOST_KEY = (
+    "ISE only talks to an SFTP server whose host key it trusts: on each ISE node that uses this repository "
+    "run 'crypto host_key add host <server>' in the ISE CLI (3.x), or file listings and backups to it fail."
+)
+NOT_FOR_BACKUPS = (
+    "ISE reads from {protocol} repositories (patches, upgrade bundles) but can't write a configuration "
+    "backup to one; use SFTP, FTP, NFS or DISK for ise_create_backup."
+)
 
 
 def _response(data: Any) -> Any:
@@ -87,6 +112,40 @@ def file_stamp(name: str) -> str:
     """The yymmddhhmm ISE puts in a backup file's name (-CFG10-yymmdd-hhmm), or ''."""
     m = STAMP.search(name)
     return "".join(m.groups()) if m else ""
+
+
+def repo_password(var: str) -> str | None:
+    """The repository password from the server's environment: `var`, or the file `<var>_FILE` names."""
+    if not PASSWORD_ENV.fullmatch(var):
+        raise InvalidRequest(
+            f"password_env must name a variable starting ISE_REPOSITORY_ (upper case, digits, '_'), not "
+            f"{var!r}: the tool never reads the server's other secrets."
+        )
+    value = os.environ.get(var)
+    if not value and (file := os.environ.get(f"{var}_FILE")):
+        try:
+            value = Path(file).expanduser().read_text().removesuffix("\n")
+        except OSError:
+            raise InvalidRequest(f"{var}_FILE names a file this server can't read") from None
+    if value:
+        register_secret(value)
+    return value or None
+
+
+def truthy(v: Any) -> bool:
+    return v is True or str(v).strip().lower() in ("true", "yes", "1")
+
+
+async def files_check(app: IseApp, name: str, protocol: str) -> dict[str, Any]:
+    """Can ISE list the repository? {'ok': True, 'files': n} or {'ok': False, 'error': ..., 'hint': ...}."""
+    try:
+        files = _response(await app.openapi.get(f"{REPOS}/{quote(name, safe='')}/files"))
+    except UpstreamError as e:
+        out: dict[str, Any] = {"ok": False, "error": str(e)}
+        if protocol == "SFTP":
+            out["hint"] = HOST_KEY
+        return out
+    return {"ok": True, "files": len([f for f in files or [] if isinstance(f, str)])}
 
 
 def backup_failed(status: dict[str, Any]) -> str | bool:
@@ -270,4 +329,232 @@ def register(reg: ToolRegistrar) -> None:
             confirm=confirm,
             plan=plan,
             apply=apply,
+        )
+
+    @reg.write(title="Create or update a backup repository")
+    async def ise_set_repository(
+        ctx: Context,
+        name: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=79,
+                pattern=r"^[A-Za-z0-9_.-]+$",
+                description="Repository name (letters, digits, '_', '-', '.'); an existing one is updated",
+            ),
+        ],
+        protocol: Annotated[
+            REPO_PROTOCOL,
+            Field(description="SFTP, FTP or NFS (a server), DISK (the node's local disk), HTTPS (read only)"),
+        ],
+        server: Annotated[
+            str | None, Field(description="Server name or IP (not for DISK)", max_length=255)
+        ] = None,
+        path: Annotated[str, Field(description="Directory on the server, starting with '/'")] = "/",
+        user: Annotated[str | None, Field(description="Login user (SFTP, FTP; optional for HTTPS)")] = None,
+        password_env: Annotated[
+            str | None,
+            Field(
+                description="Name of the server environment variable holding the password, e.g. "
+                "'ISE_REPOSITORY_SFTP_PASSWORD' (or its _FILE twin); never the password itself"
+            ),
+        ] = None,
+        enable_pki: Annotated[
+            bool, Field(description="SFTP: authenticate with ISE's public key instead of a password")
+        ] = False,
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Create a repository ISE copies configuration backups to (Administration > System > Maintenance >
+        Repository), or update the one with this name, so ise_create_backup has somewhere to write. The
+        password comes from a server environment variable named in `password_env` (ISE_REPOSITORY_...),
+        never a tool argument, never shown; ISE never returns a stored password, so an update sends it again.
+        Preview-first: the repository before/after and, for an existing one, whether ISE can list its files
+        now; for SFTP it says ISE must trust the server's host key (CLI 'crypto host_key add'). After the
+        change it lists the files once to show ISE can reach it."""
+        app: IseApp = get_client(ctx)
+        if not path.startswith("/"):
+            raise InvalidRequest(f"path must start with '/', e.g. '/{path}'")
+        if protocol == "DISK" and (server or user or password_env):
+            raise InvalidRequest(
+                "A DISK repository is the ISE node's local disk: leave server, user and password_env out"
+            )
+        if enable_pki and protocol != "SFTP":
+            raise InvalidRequest("enable_pki applies to SFTP repositories only")
+        password = repo_password(password_env) if password_env else None
+        current = next((r for r in await repositories(app) if str(r.get("name")) == name), None)
+
+        desired: dict[str, Any] = {"name": name, "protocol": protocol, "path": path}
+        if protocol in NEEDS_SERVER and server:
+            desired["serverName"] = server
+        if user and protocol != "DISK":
+            desired["userName"] = user
+        if protocol == "SFTP":
+            desired["enablePki"] = enable_pki
+
+        blockers: list[str] = []
+        if protocol in NEEDS_SERVER and not server:
+            blockers.append(f"A {protocol} repository needs a server.")
+        # The 3.5 OpenAPI SFTP schema requires userName with PKI too (ISE logs in as that user with its key).
+        needs_login = protocol == "FTP" or (protocol == "SFTP" and not enable_pki)
+        if protocol in ("FTP", "SFTP") and not user:
+            blockers.append(f"A {protocol} repository needs a user.")
+        wants_password = needs_login or (protocol == "HTTPS" and bool(user))
+        if wants_password and not password_env:
+            blockers.append(
+                "Give password_env: the name of a server environment variable (ISE_REPOSITORY_...) holding "
+                "the password"
+                + (" (ISE never returns a stored password, so an update sends it again)." if current else ".")
+            )
+        elif password_env and not password:
+            blockers.append(
+                f"{password_env} (or {password_env}_FILE) is not set on this server: add it to the server's "
+                "environment and restart it."
+            )
+
+        before = repo_row(current) if current else None
+        after = repo_row(desired)
+        changes = (
+            {
+                k: {"from": before.get(k), "to": after.get(k)}
+                for k in sorted(set(before) | set(after))
+                if before.get(k) != after.get(k)
+            }
+            if before is not None
+            else None
+        )
+        if current and not changes and not password:
+            blockers.append(f"Nothing changes in repository {name!r}.")
+        shown = dict(desired)
+        if password_env:
+            shown["password"] = f"(from {password_env}, never shown)"
+
+        details: dict[str, Any] = {
+            "method": "PUT" if current else "POST",
+            "path": f"{REPOS}/{quote(name, safe='')}" if current else REPOS,
+            "body": shown,
+        }
+        side_effects: list[str] = []
+        if current:
+            details["changes"] = changes or {}
+            details["files_now"] = await files_check(app, name, str(current.get("protocol", "")).upper())
+            if not details["files_now"]["ok"]:
+                side_effects.append(
+                    f"ISE can't list {name!r} now ({details['files_now']['error']}); check the server, path "
+                    "and login" + (", and the host key" if protocol == "SFTP" else "") + "."
+                )
+        if protocol == "SFTP":
+            side_effects.append(HOST_KEY)
+            if enable_pki:
+                side_effects.append(
+                    "PKI login: ISE signs in with its own key pair, so generate it on the ISE CLI "
+                    "('crypto key generate rsa passphrase ...'), export the public key (Administration > "
+                    "System > Maintenance > Repository > Export public key) and add it to the user's "
+                    "authorized_keys."
+                )
+        if protocol == "HTTPS":
+            side_effects.append(NOT_FOR_BACKUPS.format(protocol=protocol))
+        side_effects.append(
+            "ISE only stores the definition; nothing is copied until a backup or export uses it."
+        )
+
+        plan = Plan(
+            f"{'Update' if current else 'Create'} {protocol} repository {name!r}"
+            + (f" on {server}:{path}" if server else f" at {path}"),
+            details=details,
+            side_effects=side_effects,
+            fingerprint={"current": before, "password_set": bool(password)},
+            blockers=blockers,
+        )
+
+        async def apply() -> Any:
+            body = dict(desired)
+            if password:
+                body["password"] = password
+            try:
+                if current:
+                    await app.openapi.put(f"{REPOS}/{quote(name, safe='')}", body)
+                else:
+                    await app.openapi.post(REPOS, body)
+            except UpstreamError as err:
+                # Never let ISE's error text carry the password back to the caller.
+                text = str(err).replace(password, "***") if password else str(err)
+                raise type(err)(text, err.status_code) from None
+            return {
+                "repository": name,
+                "action": "updated" if current else "created",
+                "files_check": await files_check(app, name, protocol),
+            }
+
+        return await preview_or_apply(
+            ctx,
+            tool="ise_set_repository",
+            args={
+                "name": name,
+                "protocol": protocol,
+                "server": server,
+                "path": path,
+                "user": user,
+                "password_env": password_env,
+                "enable_pki": enable_pki,
+            },
+            confirm=confirm,
+            plan=plan,
+            apply=apply,
+        )
+
+    @reg.dangerous(title="Delete a backup repository")
+    async def ise_delete_repository(
+        ctx: Context,
+        name: Annotated[str, Field(min_length=1, description="Repository to delete (ise_list_repositories)")],
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Delete a repository definition from ISE (the files on the server stay). Refused in the preview
+        when the last configuration backup was a scheduled one to this repository (a schedule still writes
+        there) or a backup to it is running. The REST API has no schedule view, so the preview also says to
+        check Administration > System > Backup & Restore for other schedules. Preview-first."""
+        app: IseApp = get_client(ctx)
+        current = next((r for r in await repositories(app) if str(r.get("name")) == name), None)
+        if current is None:
+            raise NotFound(f"No repository {name!r}; see ise_list_repositories.", 404)
+        last = await last_backup(app)
+        mine = str(last.get("repository") or "") == name
+        scheduled = mine and truthy(last.get("scheduled"))
+        running = mine and str(last.get("status", "")).upper() == "IN_PROGRESS"
+        blockers: list[str] = []
+        if scheduled:
+            blockers.append(
+                f"Repository {name!r} is a scheduled backup target (the last backup, {last.get('name')}, was "
+                "a scheduled one to it): move or delete the schedule under Administration > System > "
+                "Backup & Restore first."
+            )
+        if running:
+            blockers.append(
+                f"A backup to {name!r} is running now ({last.get('percentComplete', '?')}% done); "
+                "wait for it."
+            )
+        plan = Plan(
+            f"Delete repository {name!r}",
+            details={
+                "repository": repo_row(current),
+                "last_backup": last or "none has run",
+                "method": "DELETE",
+                "path": f"{REPOS}/{quote(name, safe='')}",
+            },
+            side_effects=[
+                "The backup files on the server stay; ISE forgets the definition, so it can't restore from "
+                "or list them until the repository is added again.",
+                "The REST API shows no backup schedules, only the last backup's record: check "
+                "Administration > System > Backup & Restore (and log/report exports) for anything else that "
+                "uses this repository.",
+            ],
+            fingerprint={"current": repo_row(current), "scheduled": scheduled, "running": running},
+            blockers=blockers,
+        )
+        return await preview_or_apply(
+            ctx,
+            tool="ise_delete_repository",
+            args={"name": name},
+            confirm=confirm,
+            plan=plan,
+            apply=lambda: app.openapi.delete(f"{REPOS}/{quote(name, safe='')}"),
         )

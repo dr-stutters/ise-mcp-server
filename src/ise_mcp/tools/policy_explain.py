@@ -13,6 +13,7 @@ appliance. A live regression test compares its prediction with MnT's actual matc
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
+import ipaddress
 import re
 from typing import Annotated, Any, Literal
 
@@ -89,9 +90,11 @@ def nad_attributes(nad: dict[str, Any]) -> dict[str, str]:
     if nad.get("name"):
         out["Network Access:NetworkDeviceName"] = str(nad["name"])
     entries = [e for e in nad.get("NetworkDeviceIPList") or [] if isinstance(e, dict) and e.get("ipaddress")]
-    # Only a device with exactly one host address has a known NAS-IP-Address.
+    # Only a device with exactly one host address has a known NAS-IP-Address. ISE fills
+    # 'Network Access:Device IP Address' from the same NAD address, so a set on it evaluates too.
     if len(entries) == 1 and str(entries[0].get("mask", "32")) in ("32", "128"):
         out["Radius:NAS-IP-Address"] = str(entries[0]["ipaddress"])
+        out["Network Access:Device IP Address"] = str(entries[0]["ipaddress"])
     return out
 
 
@@ -183,7 +186,26 @@ def eval_operator(op: str, actual: str, expected: str) -> Result:
             "greaterOrEquals": na >= ne,
             "lessOrEquals": na <= ne,
         }[op]
+    if op in ("ipEquals", "ipNotEquals", "ipGreaterThan", "ipLessThan"):
+        return _eval_ip(op, a, e)
     return None  # unknown operator
+
+
+def _eval_ip(op: str, actual: str, expected: str) -> Result:
+    """ISE's IP operators. ipEquals takes an address or a subnet ('198.51.100.0/24') and matches an
+    address inside it; ipGreaterThan / ipLessThan compare addresses. None when either side isn't an IP."""
+    try:
+        addr = ipaddress.ip_address(actual)
+        net = ipaddress.ip_network(expected, strict=False)
+    except ValueError:
+        return None
+    if addr.version != net.version:
+        return op == "ipNotEquals" if op in ("ipEquals", "ipNotEquals") else None
+    if op in ("ipEquals", "ipNotEquals"):
+        res = addr in net
+        return res if op == "ipEquals" else not res
+    a_int, n_int = int(addr), int(net.network_address)
+    return a_int > n_int if op == "ipGreaterThan" else a_int < n_int
 
 
 def _attr_keys(cond: dict[str, Any]) -> list[str]:

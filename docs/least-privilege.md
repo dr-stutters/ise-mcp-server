@@ -71,7 +71,10 @@ policy-set deletes) needs Super Admin, so a write-only deployment cannot perform
 `ise_create_backup` (dangerous tier) starts a configuration backup, an Administration > System > Backup &
 Restore operation: run it with the dangerous-tier account (Super Admin). Its encryption key is a server secret
 (`ISE_BACKUP_ENCRYPTION_KEY`, `_FILE` or `_REF`), never a tool argument. Unit-tested only so far: the lab ISE has
-no repository (2026-10-22).
+no repository (2026-10-22). `ise_set_repository` (write tier) and `ise_delete_repository` (dangerous)
+change Administration > System > Maintenance > Repository, which needs System Admin or Super Admin (not
+functional groups such as Policy Admin); the repository password comes from an `ISE_REPOSITORY_*` server
+variable, never a tool argument.
 
 ## 3. Dedicated users
 

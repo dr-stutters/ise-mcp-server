@@ -179,6 +179,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_SPONSOR_PORTAL` | the only sponsor portal | Sponsor portal (name or id) sent as the guest API's `portalId` |
 | `ISE_GUEST_TIMEZONE` | unset | IANA time zone of the guest location; guest dates are in that local time |
 | `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. See [Backups](#backups) |
+| `ISE_REPOSITORY_<NAME>` | unset | Repository passwords `ise_set_repository(password_env='ISE_REPOSITORY_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_REPOSITORY_` names are read). See [Backups](#backups) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
 | `MCP_AUTH_TOKENS` | | `name:sha256:<hex>` entries; required for HTTP (`ise-mcp-server token <name>`) |
@@ -294,7 +295,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-163 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+166 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 88 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -321,7 +322,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_backup_status` | Status of the last configuration backup (name, repository, start/end time, status, progress). |
 | `ise_get_dacl` | One downloadable ACL with its full ACE text (one ACE per line), IP version and description. |
 | `ise_get_definition` | Describe a Cisco ISE API operation (parameters, request fields, required fields) or a schema (fields with types and enums). |
-| `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status. |
+| `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status (ENABLED, MONITOR: hits counted, traffic passes, or DISABLED). |
 | `ise_get_guest_locations` | Guest locations (each carries a time zone in the GUI; guest dates are in that local time) and the guest SSIDs sponsors can pick. |
 | `ise_get_guest_user` | One guest account: status (with what it means), guest type, validity window, location/SSID, sponsor, contact details, visit reason. |
 | `ise_get_internal_user` | One internal user: enabled state, identity group names, names/email, password store, expiry, created/modified dates and custom attributes. |
@@ -391,7 +392,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (54)
+### Write (55)
 
 | Tool | What it does |
 |---|---|
@@ -428,13 +429,14 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
 | `ise_set_custom_attribute` | Create an endpoint custom attribute definition (so endpoints can carry a value that policy matches as 'EndPoints:<name>'), or delete one. |
 | `ise_set_dacl` | Create a downloadable ACL, or replace an existing one's ACEs. |
-| `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply and the final catch-all. |
+| `ise_set_egress_policy` | Set the TrustSec policy for traffic from one SGT to another (one egress matrix cell): which SGACLs apply, the final catch-all, and the cell status (ENABLED, MONITOR or DISABLED). |
 | `ise_set_endpoint` | Add an endpoint by MAC or change an existing one's identity group, description and custom attribute values, e.g. |
 | `ise_set_guest_type` | Create a guest type, or change one: account duration (default and maximum, in days, hours or minutes, optionally from first login), login and device limits, the identity group guests get, and the sponsor groups that may use it. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
 | `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
+| `ise_set_repository` | Create a repository ISE copies configuration backups to (Administration > System > Maintenance > Repository), or update the one with this name, so ise_create_backup has somewhere to write. |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
 | `ise_set_sponsor_group` | Create a sponsor group, or change one: map AD groups (ise_add_ad_groups first, so the join point offers them) or ISE identity groups as sponsors, pick the guest types and locations they may use, what they manage, and REST access. |
@@ -450,7 +452,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (21)
+### Dangerous (23)
 
 | Tool | What it does |
 |---|---|
@@ -466,6 +468,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_nad` | Delete a network device. |
 | `ise_delete_policy_rule` | Delete one authentication/authorization rule or local exception from a policy set. |
 | `ise_delete_policy_set` | Delete a whole policy set with all its rules. |
+| `ise_delete_repository` | Delete a repository definition from ISE (the files on the server stay). |
 | `ise_delete_session` | Delete an endpoint's stale session record from ISE MnT, the classic fix when a session the switch already dropped still shows the host online or blocks CoA/ANC. |
 | `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
 | `ise_import_config` | Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans one step per object, matched by name, in dependency order (device and identity groups, custom attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets and shell profiles, NADs, then policy sets and their rules in rank order). |
@@ -474,6 +477,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |
 | `ise_reprofile_endpoint` | Make ISE re-evaluate an endpoint's profile now: sends a CoA reauthenticate through the PSN that owns its session, so the NAD re-authenticates, fresh RADIUS / device-sensor attributes reach the profiler, and the authorization result applies the current profile. |
 | `ise_reset_hitcounts` | Reset (zero) ISE policy hit counters: the clean baseline before a policy review or clean-up (zero the counters, wait a business cycle, then ise_policy_audit's zero-hit findings mean something). |
+| `ise_set_default_egress_rule` | Change the TrustSec matrix default (the ANY-ANY egress cell): the catch-all, SGACLs and status that apply to every source/destination SGT pair without an explicit cell. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
 ### Prompts (8)
@@ -589,17 +593,23 @@ Switches can download environment data and policy over ISE's TrustSec HTTPS serv
 empty), `ise_update_nad(trustsec_rest_user=, trustsec_rest_password=)` for the credentials `cts
 policy-server` sends, and `docs/trustsec.md` for the switch side. `ise_trustsec_device_report` shows the
 devices that report their downloads back (PUSH ID support, IOS XE 26.2.1+); others are checked on the switch.
+Staged enforcement: `ise_set_egress_policy(status='MONITOR')` per cell (devices count SGACL hits, traffic
+passes), `ise_get_egress_matrix(status='MONITOR')` lists what is left to enforce, then `status='ENABLED'`.
+Default-deny comes last: `ise_set_default_egress_rule(rule='DENY_IP')` (dangerous) changes the ANY-ANY cell;
+its preview lists the SGT pairs without an explicit cell and the live sessions per SGT.
 
 ### Backups
 Before a risky change (Catalyst Center's group-based policy migration makes ISE's TrustSec objects read-only;
 an upgrade), take a configuration backup: `ise_list_repositories` (an SFTP, FTP, NFS or disk repository must
-exist: Administration > System > Maintenance > Repository) -> `ise_create_backup(repository, name)`
+exist: `ise_set_repository(name, protocol, server, path, user, password_env='ISE_REPOSITORY_...')`, write
+tier, the password read from that server variable; for SFTP ISE must trust the host key first, CLI `crypto
+host_key add host <server>`) -> `ise_create_backup(repository, name)`
 (dangerous, preview-first; the key comes from `ISE_BACKUP_ENCRYPTION_KEY`) -> `ise_get_backup_status`;
 `ise_list_repositories(repository=...)` lists the backup files (`<name>-CFG10-<yymmdd>-<hhmm>.tar.gpg`). The
 preview refuses when no repository is configured, the repository is read-only (CDROM, HTTP, HTTPS), the key
 is not set or a backup is already running. The OpenAPI backs up the configuration only (no MnT data).
 Restoring is not automated: Administration > System > Backup & Restore > Restore with the file and the same
-key (it replaces the whole configuration and restarts ISE's services). Catalyst Center's half is catc-mcp-server's
+key (it replaces the whole configuration and restarts ISE's services). `ise_delete_repository` (dangerous) is refused while the last backup was a scheduled one to it. Catalyst Center's half is catc-mcp-server's
 `catc_create_backup`.
 
 ### Profiler

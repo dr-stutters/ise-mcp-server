@@ -24,6 +24,7 @@ from ise_mcp.tools import (
     config_import,
     dangerous,
     device_admin,
+    egress_default,
     endpoint_bulk,
     endpoints,
     guest,
@@ -99,7 +100,8 @@ then the signed bundle) for a consumer such as FMC. Guest access: ise_list_guest
 ise_list_sponsor_groups / ise_list_guest_portals (admin); guest accounts (ise_create_guest_user,
 ise_extend_guest_user, ise_suspend_guest_user, ...) run as the sponsor set in ISE_SPONSOR_USERNAME
 (ise_status shows guest_sponsor). Backups (before Catalyst Center's group-based policy migration or an
-upgrade): ise_list_repositories -> ise_create_backup (dangerous; key from ISE_BACKUP_ENCRYPTION_KEY) ->
+upgrade): ise_list_repositories (none? ise_set_repository, password from an ISE_REPOSITORY_* variable) ->
+ise_create_backup (dangerous; key from ISE_BACKUP_ENCRYPTION_KEY) ->
 ise_get_backup_status; restores are GUI-only. Names or ids are accepted wherever a tool
 takes an object. Shared secrets, SNMP communities and passwords are always masked (the exceptions:
 ise_issue_pxgrid_client_cert returns the consumer's new private key once, and ise_create_guest_user the
@@ -151,6 +153,7 @@ def create_server(
             device_admin.register,
             allowed_protocols.register,
             sxp.register,
+            egress_default.register,
             certs.register,
             ad.register,
             guest.register,
