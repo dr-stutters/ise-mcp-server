@@ -320,6 +320,111 @@ async def group_ids(app: IseApp, resource: str, names: list[str], what: str, lis
     return ids
 
 
+async def find_egress_cell(
+    app: IseApp, source_sgt: str, destination_sgt: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+    """(source SGT, destination SGT, the full egress cell or None) for an SGT name pair. ERS can't filter
+    cells by name ('Employees-Servers' is ambiguous when SGT names hold '-'), so the cells are filtered by
+    the two SGT names and matched on the SGT ids. NotFound for an unknown SGT."""
+    src = await app.ers_find("sgt", source_sgt)
+    dst = await app.ers_find("sgt", destination_sgt)
+    if not src or not dst:
+        raise NotFound(f"Unknown SGT {source_sgt if not src else destination_sgt!r}; see ise_list_sgts.", 404)
+    page = await app.ers_pager.fetch_page(
+        app.ers,
+        "/ers/config/egressmatrixcell",
+        {"filter": [f"sgtSrcName.EQ.{source_sgt}", f"sgtDstName.EQ.{destination_sgt}"]},
+        limit=5,
+    )
+    current = None
+    for c in page.items:
+        full = await app.ers_get("egressmatrixcell", str(c["id"]))
+        if full.get("sourceSgtId") == src["id"] and full.get("destinationSgtId") == dst["id"]:
+            current = full
+    return src, dst, current
+
+
+async def resolve_egress_cell(app: IseApp, target: str) -> tuple[dict[str, Any], str, str]:
+    """(full cell, source SGT name, destination SGT name) for ise_delete_object kind='egress_cell': the
+    target is 'SOURCE->DESTINATION' (SGT names), the cell id, or 'ANY-ANY'."""
+    key = target.strip()
+    if key.upper() in ("ANY-ANY", "ANY->ANY"):
+        key = "ANY->ANY"
+    if is_uuid(key):
+        cell = await app.ers_get("egressmatrixcell", key)
+        sgts = await ers_name_map(app, "sgt")
+        src_name = sgts.get(str(cell.get("sourceSgtId")), str(cell.get("sourceSgtId")))
+        dst_name = sgts.get(str(cell.get("destinationSgtId")), str(cell.get("destinationSgtId")))
+        return cell, src_name, dst_name
+    if "->" not in key:
+        raise InvalidRequest(
+            f"Give the egress cell as 'SOURCE->DESTINATION' (SGT names) or its id, not {target!r}; "
+            "ise_get_egress_matrix lists the cells"
+        )
+    src_name, dst_name = (p.strip() for p in key.split("->", 1))
+    if not src_name or not dst_name:
+        raise InvalidRequest(f"Give both SGT names: 'SOURCE->DESTINATION', not {target!r}")
+    src, dst, found = await find_egress_cell(app, src_name, dst_name)
+    if found is None:
+        raise NotFound(
+            f"No egress cell {src_name} -> {dst_name}: the pair uses the ANY-ANY default. "
+            "ise_get_egress_matrix lists the cells",
+            404,
+        )
+    return found, str(src.get("name") or src_name), str(dst.get("name") or dst_name)
+
+
+async def delete_egress_cell(ctx: Context, app: IseApp, target: str, confirm: str | None) -> dict[str, Any]:
+    """ise_delete_object kind='egress_cell': one explicit matrix cell, never the ANY-ANY default."""
+    cell, src_name, dst_name = await resolve_egress_cell(app, target)
+    acls = await ers_name_map(app, "sgacl")
+    sgacl_names = [acls.get(str(a), str(a)) for a in cell.get("sgacls") or []]
+    rule = cell.get("defaultRule") or "NONE"
+    status = cell.get("matrixCellStatus") or "ENABLED"
+    blockers: list[str] = []
+    if cell.get("name") == "ANY-ANY" or (src_name.upper() == "ANY" and dst_name.upper() == "ANY"):
+        blockers.append(
+            "ANY-ANY is the matrix default and can't be deleted: change its catch-all, SGACLs or status "
+            "with ise_set_default_egress_rule"
+        )
+    details = {
+        "cell": cell.get("name"),
+        "id": cell.get("id"),
+        "source_sgt": src_name,
+        "destination_sgt": dst_name,
+        "sgacls": sgacl_names,
+        "default_rule": rule,
+        "status": status,
+    }
+    side = [
+        f"Traffic from {src_name} to {dst_name} falls to the ANY-ANY default cell (ise_get_egress_matrix "
+        f"shows what it does)",
+        PUSH_REMINDER,
+    ]
+    if status == "DISABLED":
+        side.insert(0, "The cell is DISABLED: devices already apply the ANY-ANY default to this pair")
+    plan = Plan(
+        f"Delete egress cell {src_name} -> {dst_name}: {', '.join(sgacl_names) or '(no SGACL)'} then {rule} "
+        f"({status})",
+        details=details,
+        fingerprint=fingerprint(cell),
+        blockers=blockers,
+        side_effects=side,
+    )
+
+    async def apply() -> Any:
+        return await app.ers_request("DELETE", f"/ers/config/egressmatrixcell/{cell['id']}")
+
+    return await preview_or_apply(
+        ctx,
+        tool="ise_delete_object",
+        args={"kind": "egress_cell", "target": target},
+        confirm=confirm,
+        plan=plan,
+        apply=apply,
+    )
+
+
 # --- egress cells: the built-in catch-all SGACLs (#131) --------------------------------------------
 
 # ISE spells a cell's defaultRule as a built-in SGACL in its `sgacls` list too: the ANY-ANY cell reads
@@ -444,6 +549,7 @@ DELETE_KINDS = {
     "sponsor_group": "sponsorgroup",
     "guest_type": "guesttype",
     "allowed_protocols": "allowedprotocols",
+    "egress_cell": "egressmatrixcell",
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
@@ -2121,12 +2227,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "ANY -> ANY is the matrix default; change it with ise_set_default_egress_rule "
                 "(dangerous tier)"
             )
-        src = await app.ers_find("sgt", source_sgt)
-        dst = await app.ers_find("sgt", destination_sgt)
-        if not src or not dst:
-            raise NotFound(
-                f"Unknown SGT {source_sgt if not src else destination_sgt!r}; see ise_list_sgts.", 404
-            )
+        src, dst, current = await find_egress_cell(app, source_sgt, destination_sgt)
         # A built-in catch-all named in sgacls is the rule itself, not an SGACL (#131).
         real_names, blockers = split_catch_all(sgacls, default_rule)
         acl_ids = await group_ids(app, "sgacl", real_names, "SGACL", "ise_list_sgacls")
@@ -2140,17 +2241,6 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "defaultRule": default_rule,
             "sgacls": acl_ids,
         }
-        page = await app.ers_pager.fetch_page(
-            app.ers,
-            "/ers/config/egressmatrixcell",
-            {"filter": [f"sgtSrcName.EQ.{source_sgt}", f"sgtDstName.EQ.{destination_sgt}"]},
-            limit=5,
-        )
-        current = None
-        for c in page.items:
-            full = await app.ers_get("egressmatrixcell", str(c["id"]))
-            if full.get("sourceSgtId") == src["id"] and full.get("destinationSgtId") == dst["id"]:
-                current = full
         if current and cell_status is None:
             body["matrixCellStatus"] = current.get("matrixCellStatus") or "ENABLED"
         args = {
@@ -2254,22 +2344,32 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "sponsor_group",
                 "guest_type",
                 "allowed_protocols",
+                "egress_cell",
             ],
             Field(description="What to delete"),
         ],
-        target: Annotated[str, Field(description="Name or id (a MAC for endpoints)")],
+        target: Annotated[
+            str,
+            Field(
+                description="Name or id (a MAC for endpoints; for egress_cell 'SOURCE->DESTINATION' SGT "
+                "names, e.g. 'Employees->Servers', or the cell id)"
+            ),
+        ],
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Delete one endpoint, internal user, identity/endpoint group, authorization profile, dACL, SGT,
         SGACL, device group, ANC policy, TACACS+ command set / shell profile / external server / server
         sequence, AD join point (after ise_leave_ad), sponsor group, guest type (guest accounts:
-        ise_delete_guest_user) or allowed-protocols service (blocked while a policy set selects it).
-        Preview-first: shows
+        ise_delete_guest_user), allowed-protocols service (blocked while a policy set selects it) or
+        TrustSec egress matrix cell (its SGT pair then falls to the ANY-ANY default; the ANY-ANY cell itself
+        is changed with ise_set_default_egress_rule, never deleted). Preview-first: shows
         the object and what still references it (the ise_where_used scan: rules, profiles, sequences,
         matrix cells, IP-SGT mappings, devices, members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]
+        if kind == "egress_cell":
+            return await delete_egress_cell(ctx, app, target, confirm)
         if kind == "endpoint":
             mac_n = normalize_mac(target)
             page = await app.ers_pager.fetch_page(

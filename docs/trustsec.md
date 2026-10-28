@@ -160,6 +160,9 @@ to deny.
    everything). Undo: `ise_set_default_egress_rule(rule="PERMIT_IP")` and push. ISE lists the catch-all as
    an SGACL too (the ANY-ANY cell reads `defaultRule: PERMIT_IP`, `sgacls: [<Permit IP>]`): the tools treat
    `Permit IP`/`Deny IP` in `sgacls` as the rule and never send them in the list.
+5. **Remove a cell**: `ise_delete_object(kind="egress_cell", target="Employees->Servers")` (or the cell id).
+   The preview shows the SGTs, SGACLs, catch-all and status; the pair then falls to the ANY-ANY default, so
+   push again. The ANY-ANY cell can't be deleted (use `ise_set_default_egress_rule`).
 
 ## 4. When enforcement does not happen
 
