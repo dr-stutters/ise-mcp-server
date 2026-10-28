@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.16.0 (2026-10-28)
+
+Policy hygiene audit, bulk CoA by scope, allowed-protocols hardening presets, internal user lifecycle and bulk, admin access
+audit reads, MnT accounting and stale-session delete, and prompt `ise_deployment_health_review`. Core stays 0.15.0 (v0.17.0
+fails `test_suite_pack`: `suite_access_review` and `suite_decommission_site` call fmc/catc/catsdwan tools their committed
+manifests do not list yet). 162 tools (88 read, 54 write, 20 dangerous) and eight prompts.
+
+### Added
+- `ise_policy_audit` (I65, #43, #109): ranked policy hygiene findings (disabled and zero-hit rules, possibly shadowed rules,
+  permissive defaults, weak allowed protocols, dangling dACLs, policy sets on empty NDGs, users without expiry), each naming
+  its fix tool; `ise_unused_objects`: objects `ise_where_used` finds no use for.
+- `ise_coa_bulk` (I66, #44, #107, dangerous): CoA reauth/disconnect to every live session on a NAD, device group,
+  authorization profile, SGT, policy set, user or SSID; the preview lists each session, bounded by `max` and the blast-radius
+  limit. `ise_list_active_sessions` gains `authz_profile`, `sgt`, `policy_set` and `port` filters.
+- `ise_set_allowed_protocols` (I71, #49, #106): create or harden an allowed-protocols service from a preset (eap-tls-only,
+  peap-mschapv2, eap-tls-and-peap, mab-only); weak-protocol overrides are refused unless `allow_weak`, and the preview lists
+  the policy sets that use the service.
+- `ise_bulk_internal_users` (I73, #51, #110): create, update or delete internal users with one preview and a result per user.
+- `ise_list_admin_users`, `ise_list_admin_groups`, `ise_list_rbac_policies` and `ise_get_admin_access` (I74, #52, #108): admin
+  access audit, reads only; `ise_deployment_health` gains an `admins` section.
+- `ise_get_accounting` (I75, #53, #112): RADIUS accounting bytes, packets and session time per MAC; dangerous
+  `ise_delete_session` clears a stale MnT session record (the preview shows why it is stale). Both MnT calls are in
+  `ise_search_spec`.
+- Prompt `ise_deployment_health_review` (I47, #13, #111): a weekly or pre-change ISE review as one ranked report (health,
+  certificate expiry across ISE/FMC/Catalyst Center with renewal paths, licence, pxGrid, AD, SXP, admins, NAD coverage).
+
+### Changed
+- `ise_create_internal_user` / `ise_update_internal_user` set expiry date, change-password-at-login, password never expires,
+  AD/LDAP password store, TACACS+ enable password, custom attributes and alias (I73, #51, #110).
+
 ## 0.15.0 (2026-10-28)
 
 `ise_where_used` (references to an ISE object), prompt `ise_onboard_nad` (day-1 switch onboarding), MAC-less RADIUS in the
