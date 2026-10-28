@@ -125,7 +125,7 @@ async def test_import_pem_portal(mock: respx.MockRouter, tmp_path: Path, cert_pw
     assert preview["status"] == "preview", preview
     shown = preview["preview"]
     assert "data" not in shown and "privateKeyData" not in shown and PW not in json.dumps(preview)
-    assert shown["certificate"]["dns_names"] == ["portal.example.com", "portal.example.com"]
+    assert shown["certificate"]["dns_names"] == ["portal.example.com"]  # CN repeated in the SAN: once
     assert "Portal moves off: Default self-signed" in preview["side_effects"]
     assert not any("restarts" in s for s in preview["side_effects"])
     body = json.loads(post.calls.last.request.content)
@@ -296,7 +296,7 @@ def route_trust(
     ca = ca or LAB_CA
     mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
     mock.get(TRUST_PATH).respond(json={"response": [ca]})
-    mock.get(f"{TRUST_PATH}/t1").respond(json={"response": ca, "version": "1.0.1"})
+    mock.get(f"{TRUST_PATH}/t1", name="by_id").respond(json={"response": ca, "version": "1.0.1"})
     mock.get("/api/v1/certs/system-certificate/ise").respond(json={"response": system or []})
     return mock.put(f"{TRUST_PATH}/t1").respond(json={"response": {"id": "t1", "message": "ok"}})
 
@@ -397,3 +397,132 @@ async def test_set_trusted_cert_rejects_bad_url(mock: respx.MockRouter, tmp_path
         "ise_set_trusted_cert", {"cert": "Example-Lab-CA", "crl_url": "ldap://dc/crl"}, tmp_path
     )
     assert result.is_error
+
+
+# --- #159: CRL-only flags, stale confirm reads -----------------------------------------------------
+
+
+async def test_set_trusted_cert_crl_off_sends_crl_flags_off(mock: respx.MockRouter, tmp_path: Path) -> None:
+    # ISE's GET of a stock CA: CRL download off yet automaticCRLUpdate on. Copying that back is refused.
+    put = route_trust(mock, ca={**LAB_CA, "enableServerIdentityCheck": "on"})
+    preview, applied = await call(
+        "ise_set_trusted_cert", {"cert": "Example-Lab-CA", "description": "mcp test"}, tmp_path
+    )
+    assert preview["status"] == "preview", preview
+    shown = preview["preview"]
+    assert shown["changes"] == {"description": {"from": "", "to": "mcp test"}}
+    assert shown["required_by_ise"]["automaticCRLUpdate"] == {
+        "from": True,
+        "to": False,
+        "reason": "ISE requires this off while CRL download is off",
+    }
+    assert set(shown["required_by_ise"]) == {"automaticCRLUpdate", "enableServerIdentityCheck"}
+    body = json.loads(put.calls.last.request.content)
+    assert body["downloadCRL"] is False and body["description"] == "mcp test"
+    for key in ("automaticCRLUpdate", "authenticateBeforeCRLReceived", "ignoreCRLExpiration"):
+        assert body[key] is False, key
+    assert body["enableServerIdentityCheck"] is False
+    assert applied["status"] == "applied"
+
+
+async def test_set_trusted_cert_forced_flags_alone_are_no_change(
+    mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    put = route_trust(mock)
+    preview, _ = await call("ise_set_trusted_cert", {"cert": "Example-Lab-CA", "description": ""}, tmp_path)
+    assert preview["status"] == "no_change", preview
+    assert not put.called
+
+
+async def test_set_trusted_cert_explicit_auto_off_is_a_change(mock: respx.MockRouter, tmp_path: Path) -> None:
+    route_trust(mock)
+    preview, _ = await call(
+        "ise_set_trusted_cert", {"cert": "Example-Lab-CA", "crl_auto_update": False}, tmp_path, confirm=False
+    )
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["changes"] == {"automaticCRLUpdate": {"from": True, "to": False}}
+    assert "required_by_ise" not in preview["preview"]
+
+
+@pytest.mark.parametrize(
+    "arg",
+    ["server_identity_check", "crl_bypass_if_not_received", "ignore_crl_expiration", "crl_auto_update"],
+)
+async def test_set_trusted_cert_blocks_crl_flags_without_download(
+    mock: respx.MockRouter, tmp_path: Path, arg: str
+) -> None:
+    put = route_trust(mock)
+    preview, _ = await call("ise_set_trusted_cert", {"cert": "Example-Lab-CA", arg: True}, tmp_path)
+    assert preview["status"] == "blocked", preview
+    assert any(arg in b and "CRL download on" in b for b in preview["blockers"])
+    assert not put.called
+
+
+async def test_set_trusted_cert_crl_flag_with_download_is_fine(
+    mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    put = route_trust(mock)
+    args = {
+        "cert": "Example-Lab-CA",
+        "crl_download": True,
+        "crl_url": "http://pki.example.com/lab.crl",
+        "server_identity_check": True,
+        "crl_bypass_if_not_received": True,
+    }
+    preview, applied = await call("ise_set_trusted_cert", args, tmp_path)
+    assert preview["status"] == "preview", preview
+    body = json.loads(put.calls.last.request.content)
+    assert body["enableServerIdentityCheck"] is True and body["automaticCRLUpdate"] is True
+    assert body["authenticateBeforeCRLReceived"] is True
+    assert applied["status"] == "applied"
+
+
+async def _stale_confirm(
+    mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reads: list[dict[str, Any]]
+) -> tuple[Any, Any, respx.Route, respx.Route]:
+    """Preview against LAB_CA (description ''), then confirm while the by-id GET serves `reads`."""
+    monkeypatch.setattr("ise_mcp.tools.certs.STALE_READ_RETRY_SECONDS", 0)
+    put = route_trust(mock)
+    by_id = mock.routes["by_id"]
+    by_id.side_effect = [respx.MockResponse(json={"response": LAB_CA})] + [
+        respx.MockResponse(json={"response": r}) for r in reads
+    ]
+    args = {"cert": "Example-Lab-CA", "description": "restored"}
+    preview, applied = await call("ise_set_trusted_cert", args, tmp_path)
+    return preview, applied, put, by_id
+
+
+async def test_set_trusted_cert_confirm_stale_read_says_so(
+    mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    done = {**LAB_CA, "description": "restored"}
+    preview, applied, put, by_id = await _stale_confirm(mock, tmp_path, monkeypatch, [done, done])
+    assert preview["status"] == "preview"
+    assert applied["status"] == "read_disagrees", applied
+    assert "disagrees with the preview" in applied["summary"] and "Run it again" in applied["note"]
+    assert by_id.call_count == 3  # preview, confirm, one re-read
+    assert not put.called
+
+
+async def test_set_trusted_cert_confirm_stale_then_fresh_applies(
+    mock: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    preview, applied, put, by_id = await _stale_confirm(
+        mock, tmp_path, monkeypatch, [{**LAB_CA, "description": "restored"}, LAB_CA]
+    )
+    assert applied["status"] == "applied", applied
+    assert by_id.call_count == 3
+    assert json.loads(put.calls.last.request.content)["description"] == "restored"
+
+
+async def test_set_trusted_cert_no_change_without_token_skips_reread(
+    mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    put = route_trust(mock)
+    server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True, cert_dir=str(tmp_path))
+    async with Client(server) as c:
+        r = await c.call_tool(
+            "ise_set_trusted_cert", {"cert": "Example-Lab-CA", "description": "", "confirm": "nope"}
+        )
+    assert r.structured_content["status"] == "no_change"
+    assert not put.called and mock.routes["by_id"].call_count == 1  # an unknown token: no re-read
