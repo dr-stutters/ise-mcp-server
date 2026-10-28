@@ -62,6 +62,7 @@ PROMPT_SAMPLES = {
         "test_user": "alice",
     },
     "ise_deployment_health_review": {"cert_warn_days": "60", "site": "Global/SYD/Bldg-1", "role": "ACCESS"},
+    "ise_phased_8021x_rollout": {"ndg": "SYD#Bldg-1", "phase": "closed", "switch": "lab/sw1", "days": "3"},
 }
 # Prompts under the core snapshot kit (tests/snapshots/prompts/<name>.md). The kit reports any other
 # snapshot file as stale, so each snapshot test compares this whole set.

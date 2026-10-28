@@ -222,6 +222,55 @@
         "catsdwan"
       ]
     },
+    "ise_phased_8021x_rollout": {
+      "arguments": [
+        "ndg",
+        "phase",
+        "policy_set",
+        "days",
+        "switch",
+        "interfaces",
+        "name_prefix"
+      ],
+      "references": [
+        "ise_list_ndgs",
+        "ise_list_nads",
+        "ise_list_policy_sets",
+        "ise_get_policy_set",
+        "ise_policy_explain",
+        "ise_get_auth_list",
+        "ise_recent_auth_failures",
+        "ise_list_active_sessions",
+        "ise_list_endpoints",
+        "ise_endpoint_360",
+        "ise_list_endpoint_groups",
+        "ise_list_authz_profiles",
+        "ise_get_authz_profile",
+        "ise_list_dacls",
+        "ise_get_dacl",
+        "ise_snapshot",
+        "ise_compare_snapshot",
+        "ise_update_policy_rule",
+        "ise_set_dacl",
+        "ise_create_authz_profile",
+        "ise_update_authz_profile",
+        "ise_set_endpoint",
+        "catc_list_devices",
+        "catc_run_show_commands",
+        "catc_get_device_config",
+        "catc_create_template",
+        "catc_commit_template",
+        "catc_preview_template",
+        "cml_run_commands"
+      ],
+      "rendered": true,
+      "tier": "read",
+      "uses": [
+        "ise",
+        "catc",
+        "cml"
+      ]
+    },
     "ise_quarantine_host": {
       "arguments": [
         "reason",
@@ -907,6 +956,10 @@
       "tier": "read",
       "title": "List SGACLs"
     },
+    "ise_list_sgt_vn_vlan": {
+      "tier": "read",
+      "title": "List SGT-VN-VLAN mappings"
+    },
     "ise_list_sgts": {
       "tier": "read",
       "title": "List security group tags"
@@ -926,6 +979,10 @@
     "ise_list_sxp_connections": {
       "tier": "read",
       "title": "List SXP connections"
+    },
+    "ise_list_virtual_networks": {
+      "tier": "read",
+      "title": "List TrustSec virtual networks"
     },
     "ise_nad_radius_stats": {
       "tier": "read",
