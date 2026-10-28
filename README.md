@@ -88,7 +88,7 @@ You need: an ISE admin account for the server (read-only is enough to start: adm
 has a wheel with stutters-mcp-core bundled in; it needs only PyPI dependencies.
 
 ```bash
-WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.19.0/ise_mcp_server-0.19.0-py3-none-any.whl
+WHEEL=https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.20.0/ise_mcp_server-0.20.0-py3-none-any.whl
 export ISE_URL=https://ise.example.com ISE_USERNAME=mcp-ro ISE_PASSWORD='...'
 uvx --from "$WHEEL" ise-mcp-server check            # preflight: surfaces, TLS, login, admin groups, version
 claude mcp add ise -e ISE_URL=$ISE_URL -e ISE_USERNAME=$ISE_USERNAME -e ISE_PASSWORD="$ISE_PASSWORD" \
@@ -102,7 +102,7 @@ Claude Desktop (`claude_desktop_config.json`), same idea:
   "mcpServers": {
     "ise": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.19.0/ise_mcp_server-0.19.0-py3-none-any.whl", "ise-mcp-server"],
+      "args": ["--from", "https://github.com/dr-stutters/ise-mcp-server/releases/download/v0.20.0/ise_mcp_server-0.20.0-py3-none-any.whl", "ise-mcp-server"],
       "env": {"ISE_URL": "https://ise.example.com", "ISE_USERNAME": "mcp-ro", "ISE_PASSWORD": "..."}
     }
   }
@@ -311,7 +311,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list; randomized_mac says whether the MAC is a private (locally administered) one, with a note when ISE's RCM detection is off. |
 | `ise_endpoint_summary` | What is on the network, in one call: endpoint counts by device type, profile, endpoint identity group or network device group, largest first, each row with its share and the next tool (ise_set_profiling_rule for unclassified endpoints, ise_create_group / ise_set_sgt to segment a known type). |
 | `ise_explain_profile` | Why an endpoint has its profile: the profiling policy it matched and its parent chain (e.g. |
-| `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), allowed-protocols services, authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
+| `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), reusable library, time-and-date and network conditions, allowed-protocols services, authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_accounting` | RADIUS accounting totals for an endpoint MAC from MnT ("how much did this host move?"): packets and bytes in/out and session time per session, as the NAD last reported them (accounting Interim-Update or Stop), plus the sum over the window. |
@@ -478,7 +478,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_delete_repository` | Delete a repository definition from ISE (the files on the server stay). |
 | `ise_delete_session` | Delete an endpoint's stale session record from ISE MnT, the classic fix when a session the switch already dropped still shows the host online or blocks CoA/ANC. |
 | `ise_deploy_ip_sgt` | Push static IP-SGT mappings to their target devices: ISE logs in over SSH with the device configuration deployment credentials in each NAD's TrustSec settings and adds 'cts role-based sgt-map' lines. |
-| `ise_import_config` | Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans one step per object, matched by name, in dependency order (device and identity groups, custom attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets and shell profiles, NADs, then policy sets and their rules in rank order). |
+| `ise_import_config` | Apply an ise_export_config export to this ISE (another ISE's, or a saved baseline): plans one step per object, matched by name, in dependency order (device and identity groups, custom attributes, SGTs, SGACLs and egress cells, dACLs, authorization profiles, TACACS+ command sets and shell profiles, NADs, reusable conditions, then policy sets and their rules in rank order). |
 | `ise_join_ad` | Join one or all ISE nodes to the join point's AD domain (creates the computer account). |
 | `ise_leave_ad` | Take one or all ISE nodes out of the AD domain: AD-backed logins through this join point stop working there at once. |
 | `ise_push_trustsec_matrix` | Send a TrustSec CoA to every TrustSec network device so it downloads the current egress matrix / SGACLs / SGTs now instead of at its refresh timer: the 'Push' button in the ISE GUI. |

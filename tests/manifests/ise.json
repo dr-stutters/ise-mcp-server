@@ -612,6 +612,10 @@
       "tier": "dangerous",
       "title": "Delete a certificate"
     },
+    "ise_delete_condition": {
+      "tier": "write",
+      "title": "Delete a policy condition"
+    },
     "ise_delete_csr": {
       "tier": "write",
       "title": "Delete a CSR"
@@ -1044,6 +1048,10 @@
       "tier": "write",
       "title": "Create or replace a TACACS+ command set"
     },
+    "ise_set_condition": {
+      "tier": "write",
+      "title": "Create or update a policy condition"
+    },
     "ise_set_custom_attribute": {
       "tier": "write",
       "title": "Create or delete an endpoint custom attribute"
@@ -1185,5 +1193,5 @@
       "title": "Why did authentication fail?"
     }
   },
-  "version": "0.19.0"
+  "version": "0.20.0"
 }

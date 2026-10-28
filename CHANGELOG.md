@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.20.0 (2026-10-28)
+
+Library, time-and-date and network conditions, a phased wired 802.1X rollout prompt, randomized MAC flags on endpoints, and
+`no_change` answers from update tools that would change nothing. Core stays 0.19.0. 173 tools (92 read, 58 write, 23 dangerous)
+and thirteen prompts.
+
+### Added
+- `ise_set_condition` / `ise_delete_condition` (I57, #92, #148): manage library, time-and-date and network conditions for
+  network access and device admin; `ise_export_config` / `ise_import_config` carry a conditions section, and the rule tools
+  accept time and network condition names.
+- Prompt `ise_phased_8021x_rollout` (I87, #94, #149): wired 802.1X by Cisco's phases (monitor, low-impact, closed) per location
+  NDG, with a readiness gate from MnT, snapshots around each phase, and the switch CLI printed or staged as a previewed
+  template, never pushed.
+- `ise_endpoint_360` and `ise_list_endpoints` flag randomized (private) MACs, `ise_list_endpoints(randomized=...)` filters and
+  counts them per profile, and `ise_deployment_health` reports endpoint ownership and RCM (I89 follow-up, #144, #147).
+
+### Changed
+- Update tools (NAD, SGT, authz profile, dACL, allowed protocols, sponsor group, guest type, TrustSec settings, custom
+  attribute) answer `no_change` without a confirm token when nothing would change (C71, #136, #146).
+
+### Fixed
+- `ise_delete_object(kind='egress_cell')` with target `'ANY-ANY'` or `'ANY->ANY'` returns the ANY-ANY blocker instead of
+  "Unknown SGT 'ANY'" (#143, #145).
+
 ## 0.19.0 (2026-10-28)
 
 TrustSec virtual networks and SGT-VN-VLAN mappings, random and changing MAC (RCM) and endpoint ownership settings, deleting a
