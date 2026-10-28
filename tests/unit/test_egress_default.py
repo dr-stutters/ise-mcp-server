@@ -208,7 +208,7 @@ async def test_default_rule_monitor_and_warnings(mock: respx.MockRouter) -> None
     )
     side = " ".join(preview["side_effects"])
     assert "is counted (MONITOR) but passes" in side
-    assert "No TrustSec_Devices" not in side
+    assert "TrustSec_Devices -> TrustSec_Devices cell" not in side
     assert preview["preview"]["to"]["sgacls"] == ["Deny IP"]
     # Straight to ENABLED from an enforced PERMIT default: the preview says MONITOR comes first.
     preview, _ = await two_step("ise_set_default_egress_rule", {"rule": "DENY_IP"}, mcp_enable_dangerous=True)
@@ -236,3 +236,20 @@ async def test_default_rule_sessions_unreadable(mock: respx.MockRouter) -> None:
     assert "error" in preview["preview"]["sessions"]
     assert preview.get("blast_radius") is None
     assert "permitted again" in " ".join(preview["side_effects"])
+
+
+async def test_default_rule_disabled_cell_counts_as_uncovered(mock: respx.MockRouter) -> None:
+    # A DISABLED cell is not enforced: its pair falls to the default like a pair with no cell.
+    cells = [
+        any_any(status="MONITOR"),
+        cell(EMP_SRV_CELL, "Employees-Servers", EMP_ID, SRV_ID, "DISABLED", "NONE", [DENY_ACL]),
+        cell("c0000000-0000-4000-8000-000000000009", "TSD-TSD", TSD_ID, TSD_ID, "DISABLED", "PERMIT_IP", []),
+    ]
+    mock_matrix(mock, cells)
+    preview, _ = await two_step("ise_set_default_egress_rule", {"rule": "DENY_IP"}, mcp_enable_dangerous=True)
+    d = preview["preview"]
+    assert d["explicit_cells"] == 2 and d["explicit_cells_by_status"] == {"DISABLED": 2}
+    assert d["pairs_without_cell"] == 9
+    assert "Employees (4) -> Servers (16)" in d["pairs_without_cell_list"]
+    assert "2 DISABLED cell(s)" in d["disabled_cells_note"]
+    assert "No enabled TrustSec_Devices" in " ".join(preview["side_effects"])

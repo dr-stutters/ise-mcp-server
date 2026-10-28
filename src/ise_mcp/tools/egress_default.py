@@ -133,7 +133,12 @@ def register(reg: ToolRegistrar) -> None:
             app, "egressmatrixcell", limit=MATRIX_CELL_CAP, offset=0, detail=True, detail_cap=None
         )
         explicit = [c for c in cells_page.items if isinstance(c, dict) and c.get("name") != "ANY-ANY"]
-        covered = {(str(c.get("sourceSgtId")), str(c.get("destinationSgtId"))) for c in explicit}
+        # A DISABLED cell is not downloaded by the devices, so its pair falls back to the default too.
+        covered = {
+            (str(c.get("sourceSgtId")), str(c.get("destinationSgtId")))
+            for c in explicit
+            if str(c.get("matrixCellStatus") or "").upper() != "DISABLED"
+        }
         sessions = await sessions_per_sgt(app)
         live = sessions.get("by_sgt") or {}
 
@@ -165,6 +170,11 @@ def register(reg: ToolRegistrar) -> None:
             ],
             "sessions": sessions,
         }
+        if by_status.get("DISABLED"):
+            details["disabled_cells_note"] = (
+                f"{by_status['DISABLED']} DISABLED cell(s) are not enforced: their pairs fall back to the "
+                "default and are counted in pairs_without_cell"
+            )
         if len(uncovered) > PAIR_LIST_CAP:
             details["pairs_without_cell_note"] = (
                 f"First {PAIR_LIST_CAP} of {len(uncovered)} listed (pairs with live sessions first)"
@@ -190,8 +200,9 @@ def register(reg: ToolRegistrar) -> None:
             tsd = [s for s in real if s.get("value") == TRUSTSEC_DEVICES_TAG]
             if tsd and (str(tsd[0]["id"]), str(tsd[0]["id"])) not in covered:
                 side.append(
-                    "No TrustSec_Devices -> TrustSec_Devices cell: network device traffic tagged SGT 2 "
-                    "(routing, management between TrustSec devices) falls to DENY; add a permit cell first"
+                    "No enabled TrustSec_Devices -> TrustSec_Devices cell: network device traffic tagged "
+                    "SGT 2 (routing, management between TrustSec devices) falls to DENY; add a permit "
+                    "cell first"
                 )
             if any(str(a).lower().replace("_", " ") == "permit ip" for a in sgacls):
                 side.append(f"SGACL {sgacls!r} permits everything before the DENY_IP catch-all")

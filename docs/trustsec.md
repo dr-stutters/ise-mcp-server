@@ -153,9 +153,9 @@ to deny.
 4. **Default-deny** (dangerous tier): `ise_set_default_egress_rule(rule="DENY_IP", status="MONITOR")` first,
    read the counters on the default (`*` -> `*`) cell, then `ise_set_default_egress_rule(rule="DENY_IP")`
    and push. The preview counts the explicit cells (by status), lists the SGT pairs with no explicit cell
-   (they get the new default; pairs whose source has live sessions first), counts the live sessions per SGT
-   from MnT, and warns when TrustSec_Devices -> TrustSec_Devices (SGT 2, network device traffic) has no
-   permit cell or when the default was never in monitor. `sgacls` replaces the default cell's SGACL list:
+   (they get the new default; pairs whose source has live sessions first; a DISABLED cell is not
+   enforced, so its pair counts too), counts the live sessions per SGT from MnT, and warns when
+   TrustSec_Devices -> TrustSec_Devices (SGT 2, network device traffic) has no enabled cell or when the default was never in monitor. `sgacls` replaces the default cell's SGACL list:
    `[]` leaves only the catch-all (a `Permit IP` SGACL in front of `DENY_IP` would still permit
    everything). Undo: `ise_set_default_egress_rule(rule="PERMIT_IP", sgacls=["Permit IP"])` and push.
 
