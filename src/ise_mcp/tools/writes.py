@@ -2172,7 +2172,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         ise_delete_guest_user) or allowed-protocols service (blocked while a policy set selects it).
         Preview-first: shows
         the object and what still references it (the ise_where_used scan: rules, profiles, sequences,
-        matrix cells, devices, members), which blocks the delete.
+        matrix cells, IP-SGT mappings, devices, members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]

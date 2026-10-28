@@ -90,3 +90,6 @@ def mock_no_policy(mock: respx.MockRouter, *, own_sets: tuple[str, ...] = ()) ->
             mock.get(f"{base}/policy-set").respond(json={"response": []})
         mock.get(f"{base}/policy-set/global-exception").respond(json={"response": []})
         mock.get(f"{base}/condition").respond(json={"response": []})
+    # Static IP-SGT mappings and mapping groups (the SGT scan).
+    for resource in ("sgmapping", "sgmappinggroup"):
+        mock.get(f"/ers/config/{resource}").respond(json=ers_page([]))
