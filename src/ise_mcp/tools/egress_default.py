@@ -27,7 +27,17 @@ from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_list, ers_name_map, gather_limited
 from ise_mcp.tools.coa_bulk import DETAIL_CAP, active_rows, session_facts
 from ise_mcp.tools.trustsec import MATRIX_CELL_CAP
-from ise_mcp.tools.writes import PUSH_REMINDER, CellStatus, deep_merge, ers_put, fingerprint, group_ids
+from ise_mcp.tools.writes import (
+    PUSH_REMINDER,
+    CellStatus,
+    cell_sgacl_ids,
+    deep_merge,
+    ers_put,
+    fingerprint,
+    group_ids,
+    multiple_sgacls_blocker,
+    split_catch_all,
+)
 
 # The tag ISE gives the ANY pseudo-SGT (the ANY-ANY cell's source and destination).
 ANY_TAG = 65535
@@ -101,7 +111,9 @@ def register(reg: ToolRegistrar) -> None:
             list[str],
             Field(
                 description="SGACLs applied before the catch-all, in order (see ise_list_sgacls); replaces "
-                "the cell's list, so [] leaves only the catch-all"
+                "the cell's list, so [] leaves only the catch-all. The built-in 'Permit IP'/'Deny IP' are "
+                "the catch-all itself (rule), not SGACLs. With multiple SGACLs per cell off (ISE's default, "
+                "ise_get_trustsec_settings) the default cell takes none"
             ),
         ] = [],  # noqa: B006 - FastMCP schema default; never mutated
         status: Annotated[
@@ -122,9 +134,17 @@ def register(reg: ToolRegistrar) -> None:
         Preview-first."""
         app: IseApp = get_client(ctx)
         current = await any_any_cell(app)
-        acl_ids = await group_ids(app, "sgacl", sgacls, "SGACL", "ise_list_sgacls")
+        acls = await ers_name_map(app, "sgacl")
+        # ISE lists the catch-all as an SGACL too ('Permit IP' for PERMIT_IP): it is the rule, never
+        # sent in the list (#131). Naming another catch-all than `rule` blocks.
+        real_names, blockers = split_catch_all(sgacls, rule)
+        acl_ids = await group_ids(app, "sgacl", real_names, "SGACL", "ise_list_sgacls")
+        current_ids = cell_sgacl_ids(current, acls)
         desired = deep_merge(current, {"defaultRule": rule, "matrixCellStatus": status, "sgacls": acl_ids})
         desired["sgacls"] = acl_ids  # a list replaces, never merges
+        multi = await multiple_sgacls_blocker(app, len(acl_ids), rule)
+        if multi:
+            blockers.append(multi)
 
         sgt_page = await ers_list(app, "sgt", limit=5000, offset=0, detail=True, detail_cap=None)
         sgts = [s for s in sgt_page.items if isinstance(s, dict) and s.get("id")]
@@ -151,16 +171,15 @@ def register(reg: ToolRegistrar) -> None:
         for c in explicit:
             key = str(c.get("matrixCellStatus") or "UNKNOWN")
             by_status[key] = by_status.get(key, 0) + 1
-        acls = await ers_name_map(app, "sgacl")
         details: dict[str, Any] = {
             "cell": "ANY-ANY",
-            "changes": field_changes(current, desired, replace=True),
+            "changes": field_changes({**current, "sgacls": current_ids}, desired, replace=True),
             "from": {
                 "default_rule": current.get("defaultRule"),
-                "sgacls": [acls.get(str(a), a) for a in current.get("sgacls") or []],
+                "sgacls": [acls.get(a, a) for a in current_ids],
                 "status": current.get("matrixCellStatus"),
             },
-            "to": {"default_rule": rule, "sgacls": sgacls, "status": status},
+            "to": {"default_rule": rule, "sgacls": real_names, "status": status},
             "explicit_cells": len(explicit),
             "explicit_cells_by_status": by_status,
             "sgts": len(real),
@@ -204,8 +223,8 @@ def register(reg: ToolRegistrar) -> None:
                     "SGT 2 (routing, management between TrustSec devices) falls to DENY; add a permit "
                     "cell first"
                 )
-            if any(str(a).lower().replace("_", " ") == "permit ip" for a in sgacls):
-                side.append(f"SGACL {sgacls!r} permits everything before the DENY_IP catch-all")
+            if any(str(a).lower().replace("_", " ").startswith("permit ip") for a in real_names):
+                side.append(f"SGACL {real_names!r} permits everything before the DENY_IP catch-all")
         elif rule == "PERMIT_IP" and current.get("defaultRule") == "DENY_IP":
             side.append(
                 f"The {len(uncovered)} SGT pair(s) without an explicit cell are permitted again "
@@ -215,14 +234,14 @@ def register(reg: ToolRegistrar) -> None:
             side.append("A DISABLED default cell is not enforced: pairs without a cell are not filtered")
         side.append(PUSH_REMINDER)
 
-        blockers = []
         if (
-            current.get("defaultRule") == rule
+            not blockers
+            and current.get("defaultRule") == rule
             and current.get("matrixCellStatus") == status
-            and [str(a) for a in current.get("sgacls") or []] == acl_ids
+            and current_ids == acl_ids
         ):
             blockers.append(f"ANY-ANY is already {rule} {status} with these SGACLs")
-        acl_text = ", ".join(sgacls) or "(no SGACL)"
+        acl_text = ", ".join(real_names) or "(no SGACL)"
         plan = Plan(
             f"Set the ANY-ANY default egress rule: {acl_text} then {rule} ({status})",
             details=details,

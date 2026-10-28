@@ -33,6 +33,7 @@ from ise_mcp.tools import (
     health_review,
     hitcounts,
     identity,
+    lsd,
     mnt_depth,
     network,
     policy,
@@ -49,6 +50,7 @@ from ise_mcp.tools import (
     system,
     troubleshoot,
     trustsec,
+    virtual_networks,
     where_used,
     workflows,
     writes,
@@ -69,7 +71,9 @@ after (suite_change_check across products); "is it the network or ISE?" (per-NAD
 timeouts) -> ise_nad_radius_stats; "which NAD is 10.1.2.3?" -> ise_get_nad (NAD names may be partial);
 "what does policy do?" -> ise_list_policy_sets then ise_get_policy_set; "which rule would a MAB/802.1X
 login from switch X hit?" -> ise_policy_explain(nad=X, flow='wired-mab'); "can SGT A talk to B?" ->
-ise_get_egress_matrix(source, destination); "what uses this profile / SGT / group / condition before I
+ise_get_egress_matrix(source, destination); "does ISE know this SD-Access VN, which SGTs are in it?" ->
+ise_list_virtual_networks / ise_list_sgt_vn_vlan (read only: Catalyst Center owns them; compare with
+catc_get_sda_fabric); "what uses this profile / SGT / group / condition before I
 change or delete it?" -> ise_where_used(kind, name); "clean-up / inherited ISE review" ->
 ise_policy_audit (ranked findings with fix tools) and ise_unused_objects (zero-hit baseline:
 ise_reset_hitcounts, dangerous); "why is this device
@@ -142,6 +146,7 @@ def create_server(
             network.register,
             endpoints.register,
             endpoint_summary.register,
+            lsd.register,
             identity.register,
             policy.register,
             trustsec.register,
@@ -157,6 +162,7 @@ def create_server(
             device_admin.register,
             allowed_protocols.register,
             sxp.register,
+            virtual_networks.register,
             egress_default.register,
             certs.register,
             ad.register,

@@ -295,17 +295,17 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-167 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 89 read tools plus `ise_api_call` (GET-only) are registered. Everything
+171 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 92 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (89)
+### Read (92)
 
 | Tool | What it does |
 |---|---|
 | `ise_admin_policy_explain` | Predict what a TACACS+ device-admin login gets, client-side (ISE has no evaluate API and no TACACS+ live-log REST API): which device-admin policy set the NAD and user select, the authentication rule (identity source), the authorization rule (with its hit count), the shell profile (priv-lvl etc.; Deny All Shell Profile means the login fails) and, for each `command`, the command-set verdict and the line that decided it. |
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
-| `ise_compare_snapshot` | Compare a ise_snapshot blob from before a change with one from after it (or, when `after` is empty, a fresh snapshot of the same scope taken now) and name what changed, most severe first: major = got unhealthy (session down, metric past its limit, healthy item gone), minor = changed but not clearly bad, info = recovered or improved. |
+| `ise_compare_snapshot` | Compare a ise_snapshot blob from before a change with one from after it (or, when `after` is empty, a fresh snapshot of the same scope taken now) and name what changed, most severe first: major = got unhealthy (session down, metric past its limit, healthy item gone), minor = changed but not clearly bad (including configuration objects added, removed or changed), info = recovered or improved. |
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16); and an admins review (Super Admin count, disabled, never-disabled, external; I74). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
@@ -328,6 +328,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_guest_user` | One guest account: status (with what it means), guest type, validity window, location/SSID, sponsor, contact details, visit reason. |
 | `ise_get_internal_user` | One internal user: enabled state, identity group names, names/email, password store, expiry, created/modified dates and custom attributes. |
 | `ise_get_license_status` | Licensing summary: smart-licensing registration state, connection type, evaluation period, and per-tier (Essentials/Advantage/Premier/Device Admin/...) status, compliance and consumption. |
+| `ise_get_mac_randomization` | ISE's random and changing MAC (RCM) and endpoint ownership settings (Light Session Directory): whether ISE tracks which PSN owns each endpoint and whether it detects a device that comes back with a new private/randomized MAC (iOS, Android and Windows private Wi-Fi addresses), which otherwise breaks MAB, profiling and guest remember-me. |
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
 | `ise_get_policy_set` | One policy set with all of its rules in order: authentication rules (condition -> identity source, if-fail/if-not-found actions), authorization rules (condition -> profiles and SGT) and local exceptions, each with hit counts and ids. |
 | `ise_get_pxgrid_client` | One pxGrid client: state, the product that registered it, description, groups, and what to do next (approve a pending one; a 'created' account never activated). |
@@ -372,11 +373,13 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_rbac_policies` | ISE admin RBAC policies (Administration > System > Admin Access > Authorization > Policy): name, enabled, the admin groups they apply to, and the menu-access and data-access permission sets they grant. |
 | `ise_list_repositories` | Repositories ISE copies configuration backups to (Administration > System > Maintenance > Repository): name, protocol (SFTP, FTP, NFS, DISK, ...), server, path and user; passwords are never shown. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
+| `ise_list_sgt_vn_vlan` | List the SGT-VN-VLAN mappings (ERS sgtvnvlan): for each security group, the virtual networks it belongs to (and which one is its default) and the VLANs per VN, with the SGT id resolved to its name. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
 | `ise_list_shell_profiles` | List TACACS+ shell profiles (device administration): the attributes sent at login, e.g. |
 | `ise_list_sponsor_groups` | Sponsor groups: member groups (ISE identity groups, or AD groups as '<join point>:<domain>/<path>/<group>'), the guest types and locations their sponsors may use, which guests they manage (own / group / all), whether they may use the guest REST API (rest_access, needed by ISE_SPONSOR_USERNAME) and their other permissions. |
 | `ise_list_sxp_bindings` | List the IP-SGT bindings ISE advertises over SXP (static mappings sent to an SXP domain): IP or subnet, SGT and the SXP domains / virtual networks. |
 | `ise_list_sxp_connections` | List SXP (SGT Exchange Protocol) connections between ISE nodes and network devices: peer IP and name, the PEER's role (peer_role LISTENER = the device learns IP-SGT bindings from ISE; SPEAKER = ISE learns from the device), SXP version, domain, ISE node and whether it is enabled. |
+| `ise_list_virtual_networks` | List the TrustSec virtual networks ISE knows (Work Centers > TrustSec > Components > Virtual Networks): name, last update, additional attributes and id, and with include_sgts the security groups mapped to each VN. |
 | `ise_nad_radius_stats` | ISE's own view of each NAD's RADIUS traffic over a window, from MnT auth history (queried when called): attempts, failures, timeouts (the NAD or supplicant stopped answering: 5411, 5440, ...), average/median/worst response time overall and per method (EAP vs MAB), the PSN that answered, and the NADs that stand out against the others (or against the previous window with compare_previous=true). |
 | `ise_policy_audit` | Policy hygiene audit, for a pre-audit, a quarterly clean-up or an inherited ISE: ranked findings (high, medium, low, info), each with where it is and the tool that fixes it. |
 | `ise_policy_explain` | Predict which policy set and authorization rule a request would match, client-side (ISE has no evaluate API). |
@@ -384,7 +387,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_pxgrid_status` | Is pxGrid usable for an external consumer such as FMC? |
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
-| `ise_snapshot` | Take a compact, versioned snapshot of Cisco ISE health for a pre/post change check: failure % and timeouts per NAD over the 15 minutes before the snapshot (MnT), node persona and sync state, pxGrid client states. |
+| `ise_snapshot` | Take a compact, versioned snapshot of Cisco ISE health for a pre/post change check: failure % and timeouts per NAD over the 15 minutes before the snapshot (MnT), node persona and sync state, pxGrid client states, endpoint device types. |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
@@ -393,7 +396,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (55)
+### Write (56)
 
 | Tool | What it does |
 |---|---|
@@ -435,6 +438,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_guest_type` | Create a guest type, or change one: account duration (default and maximum, in days, hours or minutes, optionally from first login), login and device limits, the identity group guests get, and the sponsor groups that may use it. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
+| `ise_set_mac_randomization` | Turn ISE's random and changing MAC (RCM) detection and endpoint ownership (Light Session Directory settings) on or off. |
 | `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
 | `ise_set_repository` | Create a repository ISE copies configuration backups to (Administration > System > Maintenance > Repository), or update the one with this name, so ise_create_backup has somewhere to write. |
