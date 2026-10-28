@@ -1044,6 +1044,10 @@
       "tier": "dangerous",
       "title": "Reset policy hit counters"
     },
+    "ise_run_snmp_scan": {
+      "tier": "write",
+      "title": "Start, stop, enable or disable SNMP scans"
+    },
     "ise_search_spec": {
       "tier": "read",
       "title": "Search the Cisco ISE API spec"
@@ -1120,6 +1124,10 @@
       "tier": "write",
       "title": "Create or update a TACACS+ shell profile"
     },
+    "ise_set_snmp_scan": {
+      "tier": "write",
+      "title": "Create or update a profiler SNMP scan"
+    },
     "ise_set_sponsor_group": {
       "tier": "write",
       "title": "Create or update a sponsor group"
@@ -1147,6 +1155,10 @@
     "ise_snapshot": {
       "tier": "read",
       "title": "Cisco ISE snapshot"
+    },
+    "ise_snmp_scan_history": {
+      "tier": "read",
+      "title": "SNMP scans and their history"
     },
     "ise_status": {
       "tier": "read",

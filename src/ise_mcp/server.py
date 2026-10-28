@@ -49,6 +49,7 @@ from ise_mcp.tools import (
     sdwan_onboard,
     sessions,
     snapshot,
+    snmp_scan,
     sxp,
     system,
     troubleshoot,
@@ -81,7 +82,8 @@ change or delete it?" -> ise_where_used(kind, name); "clean-up / inherited ISE r
 ise_policy_audit (ranked findings with fix tools) and ise_unused_objects (zero-hit baseline:
 ise_reset_hitcounts, dangerous); "why is this device
 profiled as X?" -> ise_explain_profile
-(custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status). Everything is queried from
+(custom profiling rules: ise_set_profiling_rule; probes: ise_profiler_status; SNMP scans of IoT segments:
+ise_set_snmp_scan -> ise_run_snmp_scan -> ise_snmp_scan_history). Everything is queried from
 ISE when called: MnT keeps per-MAC auth history (CoA results are labelled kind=coa, not logins) and has
 nothing when no RADIUS reached ISE, or for a router's 'test aaa' / device-admin RADIUS login (no
 accounting: GUI Live Logs only); it leaves out repeated successful logins, which the session
@@ -168,6 +170,7 @@ def create_server(
             conditions.register,
             policy_explain.register,
             profiler_posture.register,
+            snmp_scan.register,
             device_admin.register,
             allowed_protocols.register,
             sxp.register,
