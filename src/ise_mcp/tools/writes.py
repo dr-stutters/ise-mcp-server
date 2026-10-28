@@ -8,16 +8,19 @@ never echoed: previews show only whether they are set.
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
+import contextlib
 import difflib
 import hashlib
 import ipaddress
 import json
 import re
+from datetime import date
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastmcp import Context
-from pydantic import Field
+from fastmcp.exceptions import ToolError
+from pydantic import BaseModel, Field
 
 from ise_mcp._core import (
     Confirm,
@@ -31,9 +34,9 @@ from ise_mcp._core import (
     get_client,
     preview_or_apply,
 )
-from ise_mcp._core.formatting import MASK, is_secret_key, mask_secrets
+from ise_mcp._core.formatting import MASK, NOT_SECRET_KEYS, is_secret_key, mask_secrets
 from ise_mcp.client import IseApp
-from ise_mcp.tools._common import ers_name_map, ers_resolve, is_uuid, normalize_mac
+from ise_mcp.tools._common import ers_name_map, ers_resolve, gather_limited, is_uuid, normalize_mac
 from ise_mcp.tools.endpoint_bulk import check_custom_values, custom_attribute_defs
 from ise_mcp.tools.network import resolve_nad
 from ise_mcp.tools.policy import av_pair_text, rules_using_profile
@@ -353,6 +356,220 @@ DELETE_KINDS = {
 }
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
+
+
+# --- internal users (I73) ----------------------------------------------------------------------
+
+INTERNAL_STORE = "Internal Users"
+# ERS fields holding a user's secrets. GET returns a placeholder for `password` (and nothing for
+# `enablePassword`): sending the placeholder back would set it, so they go out only when given.
+USER_SECRETS = ("password", "enablePassword")
+USER_BULK_MAX = 500
+USER_BULK_SAMPLE = 5
+# Flags and counters whose names match the core secret pattern ("password"): show their values.
+NOT_SECRET_KEYS.update({"changePassword", "passwordNeverExpires", "daysForPasswordExpiration"})
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+NO_EXPIRY = ("", "none", "never")
+
+
+class InternalUserSpec(BaseModel):
+    """One internal user (a bulk item, or the arguments of the single-user tools). None = not given."""
+
+    name: str = Field(description="Username")
+    password: str | None = Field(
+        default=None,
+        description="Password (create: required for the 'Internal Users' password store; never echoed)",
+    )
+    enable_password: str | None = Field(
+        default=None, description="TACACS+ enable password (device admin 'enable'; never echoed)"
+    )
+    groups: list[str] | None = Field(
+        default=None, description="Identity group names (update: replaces the membership)"
+    )
+    email: str | None = Field(default=None, description="Email address")
+    first_name: str | None = Field(default=None, description="First name")
+    last_name: str | None = Field(default=None, description="Last name")
+    description: str | None = Field(default=None, description="Free-text description")
+    enabled: bool | None = Field(default=None, description="Whether the account can authenticate")
+    expiry_date: str | None = Field(
+        default=None,
+        description="Account expiry date 'YYYY-MM-DD' (the account stops authenticating after it); "
+        "'' or 'never' removes the expiry",
+    )
+    change_password_on_login: bool | None = Field(
+        default=None, description="Force a password change at the next login"
+    )
+    password_never_expires: bool | None = Field(
+        default=None, description="Exempt the password from ISE's password lifetime policy"
+    )
+    password_store: str | None = Field(
+        default=None,
+        description="Where the password is checked: 'Internal Users' (default) or an AD join point / "
+        "LDAP server name (ise_list_identity_sources); an AD-backed user needs no password here",
+    )
+    custom_attributes: dict[str, str] | None = Field(
+        default=None,
+        description="User custom attribute values by name (defined in ISE under Identity Management > "
+        "Settings > User Custom Attributes); update merges into the existing values",
+    )
+    account_name_alias: str | None = Field(
+        default=None, description="Account name alias (ISE mails password-expiry notices to it)"
+    )
+
+
+def expiry_fields(value: str) -> dict[str, Any]:
+    text = value.strip()
+    if text.lower() in NO_EXPIRY:
+        return {"expiryDateEnabled": False, "expiryDate": ""}
+    try:
+        if not DATE_RE.fullmatch(text):
+            raise ValueError
+        date.fromisoformat(text)
+    except ValueError:
+        raise InvalidRequest(
+            f"expiry_date {value!r}: give a date as YYYY-MM-DD, or '' / 'never' for no expiry"
+        ) from None
+    return {"expiryDateEnabled": True, "expiryDate": text}
+
+
+def expired(fields: dict[str, Any]) -> bool:
+    return (
+        bool(fields.get("expiryDateEnabled")) and date.fromisoformat(str(fields["expiryDate"])) < date.today()
+    )
+
+
+async def resolve_password_store(app: IseApp, store: str) -> str:
+    """'Internal Users' or the exact name of an AD join point / LDAP server."""
+    key = store.strip().lower()
+    if key in (INTERNAL_STORE.lower(), "internal"):
+        return INTERNAL_STORE
+    names: list[str] = []
+    for resource in ("activedirectory", "ldap"):
+        with contextlib.suppress(UpstreamError):  # no LDAP servers / ERS resource on this release
+            names += list((await ers_name_map(app, resource)).values())
+    for n in names:
+        if n.lower() == key:
+            return n
+    raise NotFound(
+        f"No password store {store!r}: give 'Internal Users' or an AD join point / LDAP server name "
+        "(see ise_list_identity_sources)",
+        404,
+    )
+
+
+async def user_patch(app: IseApp, spec: InternalUserSpec) -> dict[str, Any]:
+    """The ERS InternalUser fields for the values `spec` gives. Raises on a bad date, group or store."""
+    patch: dict[str, Any] = {}
+    if spec.password is not None:
+        patch["password"] = spec.password
+    if spec.enable_password is not None:
+        patch["enablePassword"] = spec.enable_password
+    if spec.enabled is not None:
+        patch["enabled"] = spec.enabled
+    if spec.groups is not None:
+        gids = await group_ids(
+            app, "identitygroup", spec.groups, "identity group", "ise_list_identity_groups"
+        )
+        patch["identityGroups"] = ",".join(gids)
+    for attr, key in (
+        ("email", "email"),
+        ("first_name", "firstName"),
+        ("last_name", "lastName"),
+        ("description", "description"),
+        ("account_name_alias", "accountNameAlias"),
+    ):
+        if (value := getattr(spec, attr)) is not None:
+            patch[key] = value
+    if spec.change_password_on_login is not None:
+        patch["changePassword"] = spec.change_password_on_login
+    if spec.password_never_expires is not None:
+        patch["passwordNeverExpires"] = spec.password_never_expires
+    if spec.expiry_date is not None:
+        patch.update(expiry_fields(spec.expiry_date))
+    if spec.password_store is not None:
+        patch["passwordIDStore"] = await resolve_password_store(app, spec.password_store)
+    if spec.custom_attributes is not None:
+        patch["customAttributes"] = dict(spec.custom_attributes)
+    return patch
+
+
+def store_problems(user: dict[str, Any]) -> list[str]:
+    store = user.get("passwordIDStore") or INTERNAL_STORE
+    if store != INTERNAL_STORE and user.get("changePassword"):
+        return [
+            f"{user.get('name')}: change_password_on_login applies to the 'Internal Users' password "
+            f"store only; {store} owns this user's password"
+        ]
+    return []
+
+
+def user_create_body(spec: InternalUserSpec, patch: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """POST body and blockers for a new internal user."""
+    body: dict[str, Any] = {
+        "name": spec.name,
+        "enabled": True,
+        "changePassword": False,
+        "identityGroups": "",
+        "passwordIDStore": INTERNAL_STORE,
+        "email": "",
+        "firstName": "",
+        "lastName": "",
+        "description": "",
+        **patch,
+    }
+    blockers = store_problems(body)
+    if body["passwordIDStore"] == INTERNAL_STORE and not body.get("password"):
+        blockers.append(f"{spec.name}: a password is required for the 'Internal Users' password store")
+    if expired(body):
+        blockers.append(
+            f"{spec.name}: expiry_date {body['expiryDate']} is in the past (account born expired)"
+        )
+    return body, blockers
+
+
+def user_preview(body: dict[str, Any], groups: list[str] | None) -> dict[str, Any]:
+    """A user body without its secrets: which ones are set is listed instead."""
+    shown: dict[str, Any] = {k: v for k, v in body.items() if k not in (*USER_SECRETS, "identityGroups")}
+    if groups is not None:
+        shown["groups"] = groups
+    given = [
+        label for key, label in (("password", "password"), ("enablePassword", "enable")) if body.get(key)
+    ]
+    if given:
+        shown["credentials_set"] = given
+    out: dict[str, Any] = compact(shown)
+    return out
+
+
+def user_update_body(
+    current: dict[str, Any], patch: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any], list[str], list[str]]:
+    """(PUT body, masked changes, blockers, side effects) for an update of `current` by `patch`."""
+    desired = deep_merge(current, patch)
+    for key in USER_SECRETS:
+        if key not in patch:
+            desired.pop(key, None)  # placeholder (or absent): ISE keeps the stored value
+    if "password" not in patch and "passwordIDStore" not in patch:
+        desired.pop("passwordIDStore", None)  # ISE keeps it; sending it alone has asked for a password
+    shown = {k: v for k, v in current.items() if k in desired}
+    name = current.get("name")
+    blockers = store_problems(desired)
+    old_store = current.get("passwordIDStore") or INTERNAL_STORE
+    if patch.get("passwordIDStore") == INTERNAL_STORE != old_store and "password" not in patch:
+        blockers.append(f"{name}: moving the password store to 'Internal Users' needs a password")
+    side: list[str] = []
+    if expired(patch):
+        side.append(f"{name} is expired from now on ({patch['expiryDate']} is past): its logins fail")
+    if patch.get("enabled") is False:
+        side.append(f"{name} can no longer authenticate (802.1X/PAP/TACACS+)")
+    return desired, masked_changes(shown, desired, replace=True), blockers, side
+
+
+def without_secrets(text: str, *secrets: str | None) -> str:
+    for s in secrets:
+        if s:
+            text = text.replace(s, MASK)
+    return text
 
 
 def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block per tool
@@ -768,8 +985,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         ctx: Context,
         name: Annotated[str, Field(description="Username")],
         password: Annotated[
-            str, Field(description="Initial password (ISE password policy applies; never echoed)")
-        ],
+            str | None,
+            Field(
+                description="Initial password (ISE password policy applies; never echoed). Required for "
+                "the 'Internal Users' password store"
+            ),
+        ] = None,
         groups: Annotated[
             list[str] | None, Field(description="Identity group names (see ise_list_identity_groups)")
         ] = None,
@@ -778,46 +999,71 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         last_name: Annotated[str | None, Field(description="Last name")] = None,
         description: Annotated[str | None, Field(description="Free-text description")] = None,
         enabled: Annotated[bool, Field(description="Whether the account can authenticate")] = True,
+        expiry_date: Annotated[
+            str | None,
+            Field(description="Account expiry date 'YYYY-MM-DD' (contractor/lab accounts); none by default"),
+        ] = None,
+        change_password_on_login: Annotated[
+            bool, Field(description="Force a password change at the first login")
+        ] = False,
+        password_never_expires: Annotated[
+            bool | None, Field(description="Exempt the password from ISE's password lifetime policy")
+        ] = None,
+        password_store: Annotated[
+            str | None,
+            Field(
+                description="Where the password is checked: 'Internal Users' (default) or an AD join "
+                "point / LDAP server name (the user is then AD-backed and needs no password here)"
+            ),
+        ] = None,
+        enable_password: Annotated[
+            str | None,
+            Field(description="TACACS+ enable password for device admin accounts (never echoed)"),
+        ] = None,
+        custom_attributes: Annotated[
+            dict[str, str] | None, Field(description="User custom attribute values by name")
+        ] = None,
+        account_name_alias: Annotated[
+            str | None, Field(description="Account name alias (ISE mails password-expiry notices to it)")
+        ] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given
-        identity groups. Preview-first; the password is never shown. Blocked if the username exists."""
+        identity groups, with optional lifecycle settings: an account expiry date, change password at
+        first login, password never expires, an AD/LDAP-backed password, and a TACACS+ enable password.
+        Preview-first; passwords are never shown (the preview lists which are set). Blocked if the
+        username exists. For many users use ise_bulk_internal_users."""
         app: IseApp = get_client(ctx)
-        gids = await group_ids(
-            app, "identitygroup", groups or [], "identity group", "ise_list_identity_groups"
+        spec = InternalUserSpec(
+            name=name,
+            password=password,
+            enable_password=enable_password,
+            groups=groups,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            description=description,
+            enabled=enabled,
+            expiry_date=expiry_date,
+            change_password_on_login=change_password_on_login,
+            password_never_expires=password_never_expires,
+            password_store=password_store,
+            custom_attributes=custom_attributes,
+            account_name_alias=account_name_alias,
         )
-        body = {
-            "name": name,
-            "password": password,
-            "enabled": enabled,
-            "changePassword": False,
-            "identityGroups": ",".join(gids),
-            "passwordIDStore": "Internal Users",
-            "email": email or "",
-            "firstName": first_name or "",
-            "lastName": last_name or "",
-            "description": description or "",
-        }
-        blockers = [f"User {name!r} already exists"] if await exists(app, "internaluser", name) else []
-        preview = {
-            **{k: v for k, v in body.items() if k not in ("password", "passwordIDStore")},
-            "groups": groups or [],
-        }
+        body, blockers = user_create_body(spec, await user_patch(app, spec))
+        if await exists(app, "internaluser", name):
+            blockers.insert(0, f"User {name!r} already exists")
         return await preview_or_apply(
             ctx,
             tool="ise_create_internal_user",
-            args={
-                "name": name,
-                "password": password,
-                "groups": groups,
-                "email": email,
-                "first_name": first_name,
-                "last_name": last_name,
-                "description": description,
-                "enabled": enabled,
-            },
+            args=spec.model_dump(),
             confirm=confirm,
-            plan=Plan(f"Create internal user {name}", details=compact(preview), blockers=blockers),
+            plan=Plan(
+                f"Create internal user {name}",
+                details=user_preview(body, groups or []),
+                blockers=blockers,
+            ),
             apply=lambda: ers_post(app, "internaluser", "InternalUser", body),
         )
 
@@ -832,56 +1078,243 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         ] = None,
         email: Annotated[str | None, Field(description="New email")] = None,
         description: Annotated[str | None, Field(description="New description")] = None,
+        first_name: Annotated[str | None, Field(description="New first name")] = None,
+        last_name: Annotated[str | None, Field(description="New last name")] = None,
+        expiry_date: Annotated[
+            str | None,
+            Field(description="Account expiry date 'YYYY-MM-DD'; '' or 'never' removes the expiry"),
+        ] = None,
+        change_password_on_login: Annotated[
+            bool | None, Field(description="Force a password change at the next login")
+        ] = None,
+        password_never_expires: Annotated[
+            bool | None, Field(description="Exempt the password from ISE's password lifetime policy")
+        ] = None,
+        password_store: Annotated[
+            str | None,
+            Field(description="'Internal Users' or an AD join point / LDAP server name"),
+        ] = None,
+        enable_password: Annotated[
+            str | None, Field(description="Set the TACACS+ enable password (never echoed)")
+        ] = None,
+        custom_attributes: Annotated[
+            dict[str, str] | None,
+            Field(description="User custom attribute values to set (merged into the existing ones)"),
+        ] = None,
+        account_name_alias: Annotated[str | None, Field(description="New account name alias")] = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
-        """Enable/disable an internal user, reset their password, or change groups/email/description.
-        Only the given fields change. Preview-first with a diff (password shown only as changed)."""
+        """Enable/disable an internal user, reset their password or enable password, set or remove the
+        account expiry date, force a password change at next login, or change groups, names, email,
+        description, password store and custom attributes. Only the given fields change; stored
+        passwords are kept unless a new one is given. Preview-first with a diff (passwords shown only
+        as changed)."""
         app: IseApp = get_client(ctx)
         current = await ers_resolve(
             app, "internaluser", user, what="internal user", list_tool="ise_list_internal_users"
         )
-        patch: dict[str, Any] = {}
-        if enabled is not None:
-            patch["enabled"] = enabled
-        if password is not None:
-            patch["password"] = password
-        if groups is not None:
-            gids = await group_ids(app, "identitygroup", groups, "identity group", "ise_list_identity_groups")
-            patch["identityGroups"] = ",".join(gids)
-        if email is not None:
-            patch["email"] = email
-        if description is not None:
-            patch["description"] = description
+        spec = InternalUserSpec(
+            name=str(current.get("name")),
+            password=password,
+            enable_password=enable_password,
+            groups=groups,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            description=description,
+            enabled=enabled,
+            expiry_date=expiry_date,
+            change_password_on_login=change_password_on_login,
+            password_never_expires=password_never_expires,
+            password_store=password_store,
+            custom_attributes=custom_attributes,
+            account_name_alias=account_name_alias,
+        )
+        patch = await user_patch(app, spec)
         if not patch:
             raise InvalidRequest("Nothing to change: give at least one field")
-        desired = deep_merge(current, patch)
-        shown = current
-        if "password" not in patch:
-            # GET returns a placeholder ("*******"); sending it back would reset the password to it.
-            # ISE keeps the stored password when the PUT omits these, so they are not removals.
-            kept = ("password", "enablePassword", "passwordIDStore")
-            for key in kept:
-                desired.pop(key, None)
-            shown = {k: v for k, v in current.items() if k not in kept}
+        desired, changes, blockers, side = user_update_body(current, patch)
         plan = Plan(
             f"Update internal user {current.get('name')}",
-            details={"changes": masked_changes(shown, desired, replace=True)},  # ERS PUT replaces
+            details={"changes": changes},  # ERS PUT replaces
+            blockers=blockers,
+            side_effects=side,
             fingerprint=fingerprint(current),
         )
         return await preview_or_apply(
             ctx,
             tool="ise_update_internal_user",
-            args={
-                "user": user,
-                "enabled": enabled,
-                "password": password,
-                "groups": groups,
-                "email": email,
-                "description": description,
-            },
+            args={"user": user, **spec.model_dump(exclude={"name"})},
             confirm=confirm,
             plan=plan,
             apply=lambda: ers_put(app, "internaluser", "InternalUser", desired),
+        )
+
+    @reg.write(title="Bulk create, update or delete internal users", destructive=True)
+    async def ise_bulk_internal_users(  # noqa: C901 - one preview for three actions
+        ctx: Context,
+        action: Annotated[
+            Literal["create", "update", "delete"],
+            Field(description="create new users, update existing ones (only the given fields), or delete"),
+        ],
+        users: Annotated[
+            list[InternalUserSpec],
+            Field(
+                description="Users, same fields as ise_create_internal_user (delete: only the name)",
+                min_length=1,
+            ),
+        ],
+        max_items: Annotated[
+            int,
+            Field(ge=1, le=USER_BULK_MAX, description="Refuse requests larger than this (safety cap)"),
+        ] = 200,
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Create, update or delete many internal users with one preview, such as a batch of contractor
+        accounts with an expiry date or a cleanup. ERS has no bulk endpoint for users, so the confirm
+        runs one ERS call per user in order and reports a result per user; a failure does not stop
+        the rest. Preview-first: counts, a sample, problems (unknown group, bad date, missing
+        password) and conflicts (create: the user exists; update/delete: unknown user), which are
+        left out of the run. Passwords are never shown. At most 500 users per call."""
+        app: IseApp = get_client(ctx)
+        seen: dict[str, InternalUserSpec] = {}
+        blockers: list[str] = []
+        for u in users:
+            key = u.name.strip().lower()
+            if not key:
+                blockers.append("A user without a name")
+                continue
+            if key in seen:
+                if seen[key] != u:
+                    blockers.append(f"{u.name} is listed more than once with different settings")
+                continue
+            seen[key] = u
+        if len(seen) > max_items:
+            blockers.append(
+                f"{len(seen)} users exceed max_items={max_items}; split the request or raise max_items"
+            )
+
+        names = [u.name for u in seen.values()]
+        found = await gather_limited(names, lambda n: app.ers_find("internaluser", n))
+        hits = dict(zip(names, found, strict=True))
+        conflicts = [n for n in names if (hits[n] is not None) == (action == "create")]
+        todo = [seen[n.strip().lower()] for n in names if n not in conflicts]
+
+        problems: list[str] = []
+        work: list[dict[str, Any]] = []  # per user: name, method, path, body
+        rows: list[dict[str, Any]] = []
+        unchanged: list[str] = []
+        currents: list[dict[str, Any]] = []
+        if action == "delete":
+            for u in todo:
+                hit = hits[u.name] or {}
+                work.append({"name": u.name, "method": "DELETE", "id": str(hit.get("id"))})
+                rows.append({"name": u.name})
+        else:
+            fulls: list[dict[str, Any]] = []
+            if action == "update":
+                fulls = await gather_limited(
+                    todo, lambda u: app.ers_get("internaluser", str((hits[u.name] or {}).get("id")))
+                )
+            for i, u in enumerate(todo):
+                try:
+                    patch = await user_patch(app, u)
+                except (InvalidRequest, NotFound) as e:
+                    problems.append(f"{u.name}: {e}")
+                    continue
+                if action == "create":
+                    body, item_blockers = user_create_body(u, patch)
+                    problems += item_blockers
+                    work.append({"name": u.name, "method": "POST", "body": body, "spec": u})
+                    rows.append(user_preview(body, u.groups))
+                    continue
+                current = fulls[i]
+                currents.append(current)
+                desired, changes, item_blockers, side = user_update_body(current, patch)
+                problems += item_blockers
+                if not changes:
+                    unchanged.append(u.name)
+                    continue
+                work.append(
+                    {"name": u.name, "method": "PUT", "body": desired, "spec": u, "id": str(current["id"])}
+                )
+                rows.append({"name": u.name, "changes": changes, **({"side_effects": side} if side else {})})
+        if problems:
+            blockers += problems[:10]
+            if len(problems) > 10:
+                blockers.append(f"... and {len(problems) - 10} more problems")
+        if not work and not blockers:
+            blockers.append(
+                "Nothing to do: every user "
+                + {"create": "already exists", "update": "is unknown or unchanged", "delete": "is unknown"}[
+                    action
+                ]
+            )
+
+        details: dict[str, Any] = {
+            "action": action,
+            "users_in_run": len(work),
+            "sample": rows[:USER_BULK_SAMPLE],
+        }
+        if len(rows) > USER_BULK_SAMPLE:
+            details["more_users"] = [r["name"] for r in rows[USER_BULK_SAMPLE:]][:50]
+        if conflicts:
+            details["left_out_conflicts"] = {
+                "reason": "already exists" if action == "create" else "not found in ISE",
+                "count": len(conflicts),
+                "names": conflicts[:20],
+            }
+        if unchanged:
+            details["left_out_unchanged"] = unchanged[:20]
+        side_effects = {
+            "create": ["Each user can authenticate as soon as it is created (unless disabled)"],
+            "update": ["Changes apply at each user's next authentication"],
+            "delete": ["Deleted users can no longer authenticate; their sessions stay until reauth"],
+        }[action]
+        plan = Plan(
+            f"Bulk {action} of {len(work)} internal user(s)",
+            details=details,
+            blockers=blockers,
+            side_effects=side_effects,
+            fingerprint=fingerprint([[w["name"] for w in work], conflicts, currents]),
+            blast_radius=len(work),  # users changed; bound with MCP_MAX_BLAST_RADIUS
+        )
+
+        async def apply() -> Any:
+            results: list[dict[str, Any]] = []
+            for w in work:
+                spec: InternalUserSpec | None = w.get("spec")
+                try:
+                    if w["method"] == "POST":
+                        out = await ers_post(app, "internaluser", "InternalUser", w["body"])
+                        results.append({"name": w["name"], "status": "created", "id": out.get("id")})
+                    elif w["method"] == "PUT":
+                        await ers_put(app, "internaluser", "InternalUser", w["body"])
+                        results.append({"name": w["name"], "status": "updated"})
+                    else:
+                        await app.ers_request("DELETE", f"/ers/config/internaluser/{quote(w['id'], safe='')}")
+                        results.append({"name": w["name"], "status": "deleted"})
+                except ToolError as e:
+                    secrets = (spec.password, spec.enable_password) if spec else ()
+                    results.append(
+                        {"name": w["name"], "status": "failed", "error": without_secrets(str(e), *secrets)}
+                    )
+            failed = [r for r in results if r["status"] == "failed"]
+            return {
+                "action": action,
+                "total": len(results),
+                "succeeded": len(results) - len(failed),
+                "failed": len(failed),
+                "results": results,
+            }
+
+        return await preview_or_apply(
+            ctx,
+            tool="ise_bulk_internal_users",
+            args={"action": action, "users": [u.model_dump() for u in users], "max_items": max_items},
+            confirm=confirm,
+            plan=plan,
+            apply=apply,
         )
 
     @reg.write(title="Create identity or endpoint group")
