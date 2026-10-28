@@ -809,6 +809,10 @@
       "tier": "dangerous",
       "title": "Reprofile an endpoint (CoA)"
     },
+    "ise_reset_hitcounts": {
+      "tier": "dangerous",
+      "title": "Reset policy hit counters"
+    },
     "ise_search_spec": {
       "tier": "read",
       "title": "Search the Cisco ISE API spec"
