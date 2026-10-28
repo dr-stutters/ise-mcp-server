@@ -89,6 +89,9 @@ def degraded_mnt() -> dict[str, str]:
     return out
 
 
+# /api/v1/endpoint/deviceType/summary as the lab ISE 3.5 answers it (a bare list, totals as strings).
+DEVICE_TYPES = [{"deviceType": "unknown", "total": "43"}, {"deviceType": "Cisco-IP-Phone", "total": "2"}]
+
 SESSIONS = ((M1, HQ_IP), (M2, HQ_IP), (M3, BR1_IP), (M4, BR1_IP))
 
 
@@ -98,8 +101,12 @@ def mock_ise(
     *,
     clients: list[dict[str, Any]] | None = None,
     nads: list[dict[str, Any]] | None = None,
+    device_types: list[dict[str, Any]] | None = None,
 ) -> None:
     nads = NADS if nads is None else nads
+    mock.get("/api/v1/endpoint/deviceType/summary").respond(
+        json=DEVICE_TYPES if device_types is None else device_types
+    )
     mock_mnt(mock, histories, auth_list(*SESSIONS))
     mock.get("/api/v1/endpoint").respond(json=[])
     nodes = fixture_json("openapi_deployment_node.json")
@@ -145,7 +152,11 @@ async def test_snapshot_blob_sections_and_no_volatile_fields(mock: respx.MockRou
     parse(blob, prefix="ise")  # valid schema 1 blob, digest intact
     assert blob["prefix"] == "ise" and blob["server"] == "ise-mcp-server" and blob["scope"] == {}
     s = blob["sections"]
-    assert set(s) == {"nad_auth", "nodes", "pxgrid_clients"}
+    assert set(s) == {"nad_auth", "nodes", "pxgrid_clients", "endpoint_summary"}
+    assert s["endpoint_summary"]["items"] == {
+        "device_type:Cisco-IP-Phone": {"label": "Cisco-IP-Phone"},
+        "device_type:unknown": {"label": "unknown"},
+    }
     assert s["nad_auth"]["items"] == {
         "nad:br1-edge": {"ok": True, "failure_pct": 0, "timeouts": 0},
         "nad:br10-edge": {"ok": True, "failure_pct": 0, "timeouts": 0},  # quiet NAD: stable item
@@ -175,7 +186,7 @@ async def test_unchanged_deployment_compares_as_no_change(mock: respx.MockRouter
     before = await snapshot()
     after = await snapshot()
     out = await compare(before, after)
-    assert out["verdict"] == "No change (6 items compared)."
+    assert out["verdict"] == "No change (8 items compared)."
     assert out["counts"] == {"major": 0, "minor": 0, "info": 0} and not out.get("changes")
     # An empty `after` takes a fresh snapshot of the same scope: still no change.
     fresh = await compare(before)
@@ -196,7 +207,27 @@ async def test_degraded_branch_names_the_nad_and_client(mock: respx.MockRouter) 
     assert "healthy -> unhealthy" in br1["what"] and "failure_pct 0 -> 100" in br1["what"]
     assert "timeouts 0 -> 2" in br1["what"] and "5411 Supplicant stopped responding" in br1["what"]
     assert "state enabled -> disabled" in major["pxgrid:iseagent-fmc-1"]["what"]
-    assert out["counts"]["major"] == 2 and out["unchanged_items"] == 4  # hq-sw1, br10-edge, node, catc
+    assert out["counts"]["major"] == 2 and out["unchanged_items"] == 6  # hq, br10, node, catc, 2 types
+
+
+async def test_new_device_type_shows_in_the_compare(mock: respx.MockRouter) -> None:
+    mock_ise(mock, healthy_mnt())
+    before = await snapshot()
+    mock.reset()
+    mock.routes.clear()
+    # Counts move all the time and are not compared; a device type that appears is.
+    mock_ise(
+        mock,
+        healthy_mnt(),
+        device_types=[
+            {"deviceType": "unknown", "total": "40"},
+            {"deviceType": "Cisco-IP-Phone", "total": "5"},
+            {"deviceType": "Axis-Camera", "total": "3"},
+        ],
+    )
+    out = await compare(before, await snapshot())
+    changes = [(c["severity"], c["kind"], c["section"], c["item"]) for c in out["changes"]]
+    assert changes == [("minor", "added", "endpoint_summary", "device_type:Axis-Camera")]
 
 
 async def test_site_is_an_ndg_location_or_a_name_prefix(mock: respx.MockRouter) -> None:

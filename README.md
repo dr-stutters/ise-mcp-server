@@ -295,11 +295,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-166 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 88 read tools plus `ise_api_call` (GET-only) are registered. Everything
+167 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 89 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (88)
+### Read (89)
 
 | Tool | What it does |
 |---|---|
@@ -309,6 +309,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16); and an admins review (Super Admin count, disabled, never-disabled, external; I74). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
+| `ise_endpoint_summary` | What is on the network, in one call: endpoint counts by device type, profile, endpoint identity group or network device group, largest first, each row with its share and the next tool (ise_set_profiling_rule for unclassified endpoints, ise_create_group / ise_set_sgt to segment a known type). |
 | `ise_explain_profile` | Why an endpoint has its profile: the profiling policy it matched and its parent chain (e.g. |
 | `ise_export_config` | Export ISE configuration as reviewable YAML: policy sets with their authentication, authorization and local exception rules (network access and device admin), authorization profiles, dACLs, NADs and NDGs (shared secrets and SNMP communities masked), identity and endpoint groups, endpoint custom attributes, SGTs, SGACLs, the TrustSec egress matrix, TACACS+ command sets and shell profiles. |
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
@@ -614,6 +615,9 @@ key (it replaces the whole configuration and restarts ISE's services). `ise_dele
 
 ### Profiler
 
+"What is on the network?" -> `ise_endpoint_summary(by='device_type'|'profile'|'identity_group'|'ndg')`:
+endpoint counts largest first, randomized MACs, custom-rule matches, and the next tool per row (the visibility
+phase before enforcement). `ise_snapshot` records the device types, so `ise_compare_snapshot` names new ones.
 "Why is this printer profiled as a workstation?" -> `ise_explain_profile` (matched policy and parent chain,
 static assignment, the endpoint labels and the custom rules that set them, the profile at the last
 authentication). `ise_profiler_status` shows each PSN's probes. Classify devices over the API with custom

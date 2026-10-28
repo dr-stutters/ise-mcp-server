@@ -26,6 +26,7 @@ from ise_mcp.tools import (
     device_admin,
     egress_default,
     endpoint_bulk,
+    endpoint_summary,
     endpoints,
     guest,
     health,
@@ -60,7 +61,8 @@ internal users, identity/endpoint groups, SGTs, SGACLs, authorization profiles, 
 (/admin/API/mnt: live sessions, auth history, failure reasons, CoA). Call ise_status first if anything
 fails: it reports which surfaces answer (ERS is often disabled or firewalled).
 Start here: "why can't X connect?" -> ise_why_auth_failed (MAC preferred); "what is this device?" ->
-ise_endpoint_360; "who failed / what connected in the last hour?" -> ise_recent_auth_failures and
+ise_endpoint_360; "what is on the network?" (by device type, profile, identity group, NDG) ->
+ise_endpoint_summary; "who failed / what connected in the last hour?" -> ise_recent_auth_failures and
 ise_get_auth_list (by NAD or user, no MAC needed); "is the deployment healthy?" ->
 ise_deployment_health; "did my change break anything?" -> ise_snapshot(site) before, ise_compare_snapshot
 after (suite_change_check across products); "is it the network or ISE?" (per-NAD RADIUS latency and
@@ -139,6 +141,7 @@ def create_server(
             radius.register,
             network.register,
             endpoints.register,
+            endpoint_summary.register,
             identity.register,
             policy.register,
             trustsec.register,
