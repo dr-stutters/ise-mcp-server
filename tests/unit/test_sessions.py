@@ -16,6 +16,7 @@ from tests.unit.conftest import (
     xml,
 )
 
+LSD = "/api/v1/lsd/updateLsdSettings"
 MAC_OK = "02:00:5E:00:00:01"
 MAC_BAD = "02:00:5E:00:00:02"
 NAD_ID = "b47cd5b0-c7c9-11f1-a449-d6ebb9f74d33"
@@ -27,6 +28,7 @@ def text_of(out: object) -> dict:  # type: ignore[type-arg]
 
 
 def mock_common(mock: respx.MockRouter) -> None:
+    mock.get(LSD).respond(json={"enableEPO": True, "enableRCM": True})  # endpoint 360 on a random MAC
     mock.get("/admin/API/mnt/FailureReasons").respond(text=FAILURE_REASONS_XML)
     mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{MAC_BAD}/86400/50/All").respond(
         text=fixture_text("mnt_authstatus_fail.xml")
@@ -212,6 +214,7 @@ async def test_endpoint_360(mock: respx.MockRouter) -> None:
     assert out["session"]["matched_policy"]["policy_set"] == "Default"
     assert out["recent_auths"][0]["result"] == "PASS"
     assert out["anc_policy"] == "none"
+    assert out["randomized_mac"] is True and "randomized_note" not in out  # RCM on
 
 
 COA_NAK = (
@@ -535,6 +538,7 @@ def mock_360(mock: respx.MockRouter, *, history: str, session: str) -> None:
     mock.get("/ers/config/endpointgroup").respond(json=ers_page([]))
     mock.get("/ers/config/ancendpoint").respond(json=ers_page([]))
     mock.get("/api/v1/endpoint/getRejected").respond(json={"response": []})
+    mock.get(LSD).respond(json={"enableEPO": True, "enableRCM": True})
 
 
 @pytest.mark.parametrize("session_newer", [True, False], ids=["session-newer", "session-not-newer"])
@@ -575,3 +579,41 @@ async def test_endpoint_360_empty_history_and_a_session(
     assert ("newest_login" in out) is noted and ("history_note" in out) is noted
     if noted:
         assert out["newest_login"]["time"] == auth_at
+
+
+@pytest.mark.parametrize(
+    ("lsd", "noted"),
+    [
+        ({"enableEPO": True, "enableRCM": False}, True),
+        ({"enableEPO": False, "enableRCM": True}, True),  # ownership off forces RCM off
+        ({"enableEPO": True, "enableRCM": True}, False),
+    ],
+    ids=["rcm-off", "epo-off", "rcm-on"],
+)
+async def test_endpoint_360_randomized_mac_note(
+    mock: respx.MockRouter, lsd: dict[str, bool], noted: bool
+) -> None:
+    """I89: a 52:54:00 (locally administered) MAC is flagged; the note only when RCM is off in effect."""
+    mock_360(mock, history=EMPTY_WINDOW, session=ended_session())
+    mock.get(LSD).respond(json=lsd)
+    out = await call_tool(make_server(), "ise_endpoint_360", {"mac": EAPTLS_MAC})
+    assert out["randomized_mac"] is True
+    assert out["endpoint"]["randomized_mac"] is True
+    assert ("randomized_note" in out) is noted
+    if noted:
+        assert "ise_get_mac_randomization" in out["randomized_note"]
+
+
+async def test_endpoint_360_global_mac_skips_lsd(mock: respx.MockRouter) -> None:
+    """A globally administered MAC: randomized_mac false and the LSD settings are not read."""
+    mac = "00:50:56:00:00:01"
+    mock.get(f"/admin/API/mnt/AuthStatus/MACAddress/{mac}/86400/5/All").respond(text=EMPTY_WINDOW)
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{mac}").respond(text=ended_session())
+    mock.get(f"/api/v1/endpoint/{mac}").respond(json={"mac": mac, "id": "ep-2"})
+    mock.get("/ers/config/endpointgroup").respond(json=ers_page([]))
+    mock.get("/ers/config/ancendpoint").respond(json=ers_page([]))
+    mock.get("/api/v1/endpoint/getRejected").respond(json={"response": []})
+    lsd = mock.get(LSD).respond(json={"enableEPO": True, "enableRCM": False})
+    out = await call_tool(make_server(), "ise_endpoint_360", {"mac": mac})
+    assert out["randomized_mac"] is False and "randomized_note" not in out
+    assert not lsd.called

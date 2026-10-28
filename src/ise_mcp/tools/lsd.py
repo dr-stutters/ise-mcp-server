@@ -18,6 +18,7 @@ from pydantic import Field
 
 from ise_mcp._core import (
     Confirm,
+    NotFound,
     Plan,
     ToolRegistrar,
     UpstreamError,
@@ -66,6 +67,25 @@ def lsd_view(data: dict[str, Any]) -> dict[str, Any]:
             "ise_set_mac_randomization(rcm=true) turns detection on"
         )
     return out
+
+
+async def lsd_state(app: IseApp) -> dict[str, Any]:
+    """{endpoint_ownership, rcm} for other tools (health, endpoint 360): each a bool, or 'unknown' when
+    the settings can't be read (older release, no OpenAPI, a missing role) so the caller never fails."""
+    try:
+        data = await read_lsd(app)
+    except (UpstreamError, NotFound):
+        return {"endpoint_ownership": "unknown", "rcm": "unknown"}
+    epo, rcm = _flag(data, "enableEPO"), _flag(data, "enableRCM")
+    return {
+        "endpoint_ownership": "unknown" if epo is None else epo,
+        "rcm": "unknown" if rcm is None else rcm,
+    }
+
+
+def rcm_off(state: dict[str, Any]) -> bool:
+    """RCM is known to be off in effect (RCM off, or endpoint ownership off, which forces it off)."""
+    return state.get("endpoint_ownership") is False or state.get("rcm") is False
 
 
 def register(reg: ToolRegistrar) -> None:

@@ -28,8 +28,9 @@ from ise_mcp.tools._common import (
     normalize_mac,
 )
 from ise_mcp.tools.ad import ad_diagnosis
-from ise_mcp.tools.endpoints import endpoint_row, profile_name
+from ise_mcp.tools.endpoints import endpoint_row, is_randomized, profile_name
 from ise_mcp.tools.identity import user_row
+from ise_mcp.tools.lsd import lsd_state, rcm_off
 from ise_mcp.tools.network import find_nads_for_ip, nad_summary
 from ise_mcp.tools.policy import rules_using_profile
 from ise_mcp.tools.sessions import (
@@ -490,9 +491,11 @@ def register(reg: ToolRegistrar) -> None:
         """Everything ISE knows about one endpoint, in one call: the endpoint record (identity group,
         static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN),
         the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE
-        has it on the rejected-endpoints list. When the session authenticated after the newest history
-        record (MnT leaves out repeated successful logins), newest_login has that authentication and
-        history_note says why. Start here for 'what is this device and what happened to it?'."""
+        has it on the rejected-endpoints list; randomized_mac says whether the MAC is a private
+        (locally administered) one, with a note when ISE's RCM detection is off. When the session
+        authenticated after the newest history record (MnT leaves out repeated successful logins),
+        newest_login has that authentication and history_note says why. Start here for 'what is this
+        device and what happened to it?'."""
         app: IseApp = get_client(ctx)
         mac_n = normalize_mac(mac)
         endpoint, session, history, anc, groups, rejected = await asyncio.gather(
@@ -503,7 +506,13 @@ def register(reg: ToolRegistrar) -> None:
             _safe(ers_name_map(app, "endpointgroup")),
             _safe(is_rejected(app, mac_n)),
         )
-        out: dict[str, Any] = {"mac": mac_n}
+        out: dict[str, Any] = {"mac": mac_n, "randomized_mac": is_randomized(mac_n)}
+        if out["randomized_mac"] and rcm_off(await lsd_state(app)):
+            out["randomized_note"] = (
+                "Randomized (private) MAC and ISE's RCM detection is off: when the device picks a new MAC "
+                "it becomes a new endpoint (MAB, profile, guest remember-me start over); see "
+                "ise_get_mac_randomization"
+            )
         if isinstance(endpoint, dict) and "error" not in endpoint:
             row = endpoint_row(endpoint, groups if isinstance(groups, dict) and "error" not in groups else {})
             pid = row.pop("profile_id", None)

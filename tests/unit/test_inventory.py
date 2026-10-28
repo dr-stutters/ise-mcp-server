@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
 import respx
 
 from ise_mcp._core.testing import call_tool
@@ -459,3 +460,68 @@ async def test_audit_nads_expected_refuses_bad_ips(mock: respx.MockRouter) -> No
             "ise_audit_nads", {"expected": [{"name": "x", "ip": "not-an-ip"}]}, raise_on_error=False
         )
     assert r.is_error and "not-an-ip" in r.content[0].text
+
+
+RANDOM_EPS = [
+    {"id": "e1", "mac": "52:54:00:12:34:56", "groupId": "g1", "profileId": "p1"},
+    {"id": "e2", "mac": "00:50:56:00:00:01", "groupId": "g1", "profileId": "p1"},
+    {"id": "e3", "mac": "DA:A1:19:00:00:01", "groupId": "g1"},
+    {"id": "e4", "mac": "02:00:5E:00:00:09", "groupId": "g1", "profileId": "p1"},
+]
+
+
+def mock_random_eps(mock: respx.MockRouter) -> respx.Route:
+    route = mock.get("/api/v1/endpoint").respond(json=RANDOM_EPS)
+    mock.get("/ers/config/endpointgroup").respond(json=ers_page([{"id": "g1", "name": "Unknown"}]))
+    mock.get("/ers/config/profilerprofile/p1").respond(
+        json={"ProfilerProfile": {"id": "p1", "name": "Apple-iPhone"}}
+    )
+    return route
+
+
+async def test_list_endpoints_randomized_column(mock: respx.MockRouter) -> None:
+    """I89: every row says whether its MAC is randomized (locally administered bit)."""
+    mock_random_eps(mock)
+    out = as_json(await call_tool(make_server(), "ise_list_endpoints", {"response_format": "json"}))
+    flags = {r["mac"]: r["randomized_mac"] for r in out["results"]}
+    assert flags == {
+        "52:54:00:12:34:56": True,
+        "00:50:56:00:00:01": False,
+        "DA:A1:19:00:00:01": True,
+        "02:00:5E:00:00:09": True,
+    }
+    assert "randomized_filter" not in out
+
+
+async def test_list_endpoints_randomized_filter(mock: respx.MockRouter) -> None:
+    route = mock_random_eps(mock)
+    out = as_json(
+        await call_tool(
+            make_server(), "ise_list_endpoints", {"randomized": True, "limit": 2, "response_format": "json"}
+        )
+    )
+    assert [r["mac"] for r in out["results"]] == ["52:54:00:12:34:56", "DA:A1:19:00:00:01"]
+    assert out["total"] == 3 and out["next_offset"] == 2
+    assert out["scanned"] == 4 and out["matched"] == 3
+    assert out["by_profile"] == {"Apple-iPhone": 2, "(unprofiled)": 1}
+    assert "filter" not in route.calls.last.request.url.params  # not an ISE filter
+
+    out = as_json(
+        await call_tool(make_server(), "ise_list_endpoints", {"randomized": False, "response_format": "json"})
+    )
+    assert [r["mac"] for r in out["results"]] == ["00:50:56:00:00:01"]
+    assert out["by_profile"] == {"Apple-iPhone": 1}
+
+
+async def test_list_endpoints_randomized_scan_cut(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ise_mcp.tools import endpoints
+
+    monkeypatch.setattr(endpoints, "RANDOMIZED_SCAN", 2)
+    mock_random_eps(mock)
+    out = as_json(
+        await call_tool(make_server(), "ise_list_endpoints", {"randomized": True, "response_format": "json"})
+    )
+    assert out["scanned"] == 2 and out["matched"] == 1 and out.get("partial") is True
+    assert "only the first 2 endpoints were scanned" in out["note"]

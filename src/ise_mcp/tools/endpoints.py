@@ -2,6 +2,7 @@
 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
+from collections import Counter
 from typing import Annotated, Any
 
 from fastmcp import Context
@@ -9,12 +10,26 @@ from fastmcp.tools import ToolResult
 from pydantic import Field
 
 from ise_mcp._core import NotFound, ResponseFormat, ToolRegistrar, get_client
-from ise_mcp._core.http import PageNumber
+from ise_mcp._core.http import Page, PageNumber
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import ers_list, ers_name_map, is_uuid, list_result
 
 ENDPOINT_PAGER = PageNumber(items=None, total=None, max_size=100)
-ENDPOINT_COLUMNS = ["mac", "group", "static_group", "profile", "ip", "description", "id"]
+ENDPOINT_COLUMNS = ["mac", "randomized_mac", "group", "static_group", "profile", "ip", "description", "id"]
+# randomized=true/false is not an ISE filter (it is a bit of the MAC): scan this many endpoints for it.
+RANDOMIZED_SCAN = 2000
+
+
+def is_randomized(mac: Any) -> bool:
+    """A locally administered unicast MAC (second hex digit 2, 6, A or E): a private / randomized MAC."""
+    text = str(mac or "").replace(":", "").replace("-", "").replace(".", "")
+    if len(text) < 2:
+        return False
+    try:
+        first = int(text[:2], 16)
+    except ValueError:
+        return False
+    return bool(first & 0x02) and not first & 0x01
 
 
 async def profile_name(app: IseApp, profile_id: str | None) -> str | None:
@@ -32,6 +47,7 @@ async def profile_name(app: IseApp, profile_id: str | None) -> str | None:
 def endpoint_row(ep: dict[str, Any], groups: dict[str, str]) -> dict[str, Any]:
     row = {
         "mac": ep.get("mac") or ep.get("name"),
+        "randomized_mac": is_randomized(ep.get("mac") or ep.get("name")),
         "group": groups.get(str(ep.get("groupId")), ep.get("groupId")),
         "static_group": ep.get("staticGroupAssignment"),
         "profile_id": ep.get("profileId"),
@@ -59,6 +75,45 @@ async def resolve_group_id(app: IseApp, resource: str, name_or_id: str, what: st
     return str(hit["id"])
 
 
+async def randomized_page(
+    app: IseApp, params: dict[str, Any] | None, randomized: bool, limit: int, offset: int
+) -> tuple[Page, dict[str, Any]]:
+    """ise_list_endpoints(randomized=...): ISE can't filter on the locally administered bit, so scan up
+    to RANDOMIZED_SCAN endpoints (with ISE's own filters), keep the matches, page them here and count
+    them per profile."""
+    scan = await ENDPOINT_PAGER.fetch_page(
+        app.openapi, "/api/v1/endpoint", params, limit=RANDOMIZED_SCAN, offset=0
+    )
+    eps = [e for e in scan.items if isinstance(e, dict)]
+    hits = [e for e in eps if is_randomized(e.get("mac") or e.get("name")) is randomized]
+    cut = not scan.complete
+    by_profile: Counter[str] = Counter()
+    for e in hits:
+        pid = e.get("profileId")
+        by_profile[(await profile_name(app, str(pid)) if pid else None) or "(unprofiled)"] += 1
+    extra: dict[str, Any] = {
+        "randomized_filter": randomized,
+        "scanned": len(eps),
+        "matched": len(hits),
+        "by_profile": dict(by_profile.most_common()),
+    }
+    note = None
+    if cut:
+        note = (
+            f"randomized= is checked here, not by ISE: only the first {len(eps)} endpoints were scanned, "
+            "so more matches may exist. Narrow with mac/group/ip/static_only."
+        )
+    page = Page(
+        hits[offset : offset + limit],
+        offset,
+        total=None if cut else len(hits),
+        more=cut and offset + limit < len(hits),
+        partial=cut,
+        note=note,
+    )
+    return page, extra
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="List endpoints")
     async def ise_list_endpoints(
@@ -71,13 +126,23 @@ def register(reg: ToolRegistrar) -> None:
         static_only: Annotated[
             bool, Field(description="Only endpoints with a static group assignment")
         ] = False,
+        randomized: Annotated[
+            bool | None,
+            Field(
+                description="Filter: true = only randomized (private, locally administered) MACs, false = "
+                "only globally administered ones. Checked here, not by ISE: scans up to 2000 endpoints "
+                "(after the other filters) and counts the matches per profile"
+            ),
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
         offset: Annotated[int, Field(ge=0)] = 0,
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
-        """List endpoints ISE knows about (seen via RADIUS/profiling or added by hand): MAC, endpoint
-        identity group, whether the group is static, profile, IP and description. Use ise_endpoint_360
-        for everything about one endpoint (sessions, auth history, ANC)."""
+        """List endpoints ISE knows about (seen via RADIUS/profiling or added by hand): MAC, whether the
+        MAC is randomized (a private Wi-Fi address: locally administered bit set), endpoint identity
+        group, whether the group is static, profile, IP and description. randomized=true lists only the
+        randomized MACs with a count per profile (RCM settings: ise_get_mac_randomization). Use
+        ise_endpoint_360 for everything about one endpoint (sessions, auth history, ANC)."""
         app: IseApp = get_client(ctx)
         filters = []
         if mac:
@@ -92,9 +157,13 @@ def register(reg: ToolRegistrar) -> None:
         if static_only:
             filters.append("staticGroupAssignment.EQ.true")
         params = {"filter": filters} if filters else None
-        page = await ENDPOINT_PAGER.fetch_page(
-            app.openapi, "/api/v1/endpoint", params, limit=limit, offset=offset
-        )
+        extra: dict[str, Any] | None = None
+        if randomized is None:
+            page = await ENDPOINT_PAGER.fetch_page(
+                app.openapi, "/api/v1/endpoint", params, limit=limit, offset=offset
+            )
+        else:
+            page, extra = await randomized_page(app, params, randomized, limit, offset)
         groups = await ers_name_map(app, "endpointgroup")
         rows = []
         for ep in page.items:
@@ -103,7 +172,7 @@ def register(reg: ToolRegistrar) -> None:
                 row["profile"] = await profile_name(app, row.pop("profile_id", None))
                 rows.append(row)
         page.items = rows
-        return list_result(page, fmt=response_format, columns=ENDPOINT_COLUMNS)
+        return list_result(page, fmt=response_format, columns=ENDPOINT_COLUMNS, extra=extra)
 
     @reg.read(title="List endpoint identity groups")
     async def ise_list_endpoint_groups(
