@@ -47,6 +47,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 - **Prompt `ise_onboard_sdwan_edges`** (write tier, with the cat-sdwan server): a Catalyst SD-WAN site's edges as
   NADs at their service-VPN loopbacks, a location group per site, device-admin policy, the edges' AAA parcel with
   the loopback as source, a deploy preview and test logins.
+- **Prompt `ise_deployment_health_review`** (read tier; fmc and catc rows when connected): a weekly or pre-change
+  review as one ranked report: deployment health, certificate expiry across ISE, FMC and Catalyst Center with the
+  renewal path per row, licence, pxGrid, AD join, SXP, the admin access review and NAD coverage of a site.
 - **Certificate lifecycle with any CA**: CSR -> export -> sign -> trust -> bind, plus certificate profiles and
   identity sequences for EAP-TLS.
 - **TrustSec writes**: static IP-SGT mappings, SXP connections/bindings, the TrustSec CoA push and SSH deploy.
@@ -286,7 +289,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-155 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+155 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 85 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -460,7 +463,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_reprofile_endpoint` | Make ISE re-evaluate an endpoint's profile now: sends a CoA reauthenticate through the PSN that owns its session, so the NAD re-authenticates, fresh RADIUS / device-sensor attributes reach the profiler, and the authorization result applies the current profile. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (7)
+### Prompts (8)
 
 | Prompt | What it does |
 |---|---|
@@ -470,6 +473,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_onboard_nad` | Day-1 onboarding of an access switch into ISE, the same way every time: the location and device-type groups, the NAD with its RADIUS and/or TACACS+ secret, the switch's AAA config (a preview through cml_configure_node, Catalyst Center's site AAA settings or a template), a test login seen in ISE, the endpoint session, a recorded undo (ISE and the switch's 'no' lines), and a closing coverage check of the site against ISE's NADs. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
+| `ise_deployment_health_review` | A weekly or pre-change review of the whole ISE deployment as one ranked report with next steps: ise_deployment_health (nodes, redundancy, patches, backup, certificates, licence, AD, admins), then certificate expiry (system and trusted), licence compliance, pxGrid (persona, certificate, pending clients), AD join per node, SXP connections and bindings, the admin access review (Super Admins, never-disabled, external), FMC's certificates and Catalyst Center's trust of the ISE certificate sorted by days left with the renewal path per row, and NAD coverage of a Catalyst Center site. |
 | `suite_change_check` | Did anything else break? |
 
 ### Config export, diff and import

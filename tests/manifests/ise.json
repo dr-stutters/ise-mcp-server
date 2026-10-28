@@ -48,6 +48,50 @@
         "win"
       ]
     },
+    "ise_deployment_health_review": {
+      "arguments": [
+        "cert_warn_days",
+        "site",
+        "role"
+      ],
+      "references": [
+        "ise_deployment_health",
+        "ise_list_nodes",
+        "ise_list_certificates",
+        "ise_get_license_status",
+        "ise_pxgrid_status",
+        "ise_list_pxgrid_clients",
+        "ise_list_identity_sources",
+        "ise_get_ad_join_point",
+        "ise_list_sxp_connections",
+        "ise_list_sxp_bindings",
+        "ise_list_admin_users",
+        "ise_list_admin_groups",
+        "ise_get_admin_access",
+        "ise_audit_nads",
+        "ise_get_backup_status",
+        "ise_list_csrs",
+        "ise_generate_csr",
+        "ise_export_csr",
+        "ise_bind_certificate",
+        "ise_import_trusted_cert",
+        "fmc_list_certificates",
+        "fmc_enroll_certificate",
+        "fmc_import_certificate_files",
+        "catc_get_policy_servers",
+        "catc_accept_ise_certificate",
+        "catc_list_devices",
+        "win_sign_csr"
+      ],
+      "rendered": true,
+      "tier": "read",
+      "uses": [
+        "ise",
+        "fmc",
+        "catc",
+        "win"
+      ]
+    },
     "ise_incident_timeline": {
       "arguments": [
         "mac",
@@ -445,6 +489,10 @@
       "tier": "read",
       "title": "Get an AD join point (config + join status)"
     },
+    "ise_get_admin_access": {
+      "tier": "read",
+      "title": "Explain an ISE admin's access"
+    },
     "ise_get_auth_history": {
       "tier": "read",
       "title": "Authentication history for a MAC"
@@ -540,6 +588,14 @@
     "ise_list_ad_groups": {
       "tier": "read",
       "title": "Search an AD domain's groups"
+    },
+    "ise_list_admin_groups": {
+      "tier": "read",
+      "title": "List ISE admin groups"
+    },
+    "ise_list_admin_users": {
+      "tier": "read",
+      "title": "List ISE admin users"
     },
     "ise_list_allowed_protocols": {
       "tier": "read",
@@ -664,6 +720,10 @@
     "ise_list_pxgrid_clients": {
       "tier": "read",
       "title": "List pxGrid clients"
+    },
+    "ise_list_rbac_policies": {
+      "tier": "read",
+      "title": "List ISE RBAC policies"
     },
     "ise_list_repositories": {
       "tier": "read",
@@ -856,6 +916,10 @@
     "ise_update_policy_set": {
       "tier": "write",
       "title": "Update policy set"
+    },
+    "ise_where_used": {
+      "tier": "read",
+      "title": "Where is an ISE object used"
     },
     "ise_why_auth_failed": {
       "tier": "read",
