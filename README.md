@@ -295,7 +295,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-171 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+171 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 92 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -485,7 +485,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_default_egress_rule` | Change the TrustSec matrix default (the ANY-ANY egress cell): the catch-all, SGACLs and status that apply to every source/destination SGT pair without an explicit cell. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (12)
+### Prompts (13)
 
 | Prompt | What it does |
 |---|---|
@@ -496,6 +496,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `ise_deployment_health_review` | A weekly or pre-change review of the whole ISE deployment as one ranked report with next steps: ise_deployment_health (nodes, redundancy, patches, backup, certificates, licence, AD, admins), then certificate expiry (system and trusted), licence compliance, pxGrid (persona, certificate, pending clients), AD join per node, SXP connections and bindings, the admin access review (Super Admins, never-disabled, external), FMC's certificates and Catalyst Center's trust of the ISE certificate sorted by days left with the renewal path per row, and NAD coverage of a Catalyst Center site. |
+| `ise_phased_8021x_rollout` | Roll wired 802.1X out by Cisco's phases for one location NDG: a readiness gate from MnT (who fails, who only gets in by the open policy's Default rule, MAB endpoints with no profile or static group) and each switch's current mode from Catalyst Center, then per phase an ise_snapshot, the ISE side (monitor permits and logs, low-impact adds dACLs, closed makes the Default rule DenyAccess) through the preview-first write tools, the switch CLI printed or staged as a previewed template (never pushed), ise_compare_snapshot and the rollback. |
 | `suite_access_review` | Who can change what, on every connected platform: admin accounts, roles and the external groups that grant them on ISE, Catalyst Center, FMC, SD-WAN Manager and CML, with Active Directory resolving those groups to people. |
 | `suite_asbuilt_drift` | Has the documentation drifted from the wiring? |
 | `suite_change_check` | Did anything else break? |
