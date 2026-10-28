@@ -480,7 +480,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_default_egress_rule` | Change the TrustSec matrix default (the ANY-ANY egress cell): the catch-all, SGACLs and status that apply to every source/destination SGT pair without an explicit cell. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (8)
+### Prompts (12)
 
 | Prompt | What it does |
 |---|---|
@@ -491,7 +491,11 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `ise_deployment_health_review` | A weekly or pre-change review of the whole ISE deployment as one ranked report with next steps: ise_deployment_health (nodes, redundancy, patches, backup, certificates, licence, AD, admins), then certificate expiry (system and trusted), licence compliance, pxGrid (persona, certificate, pending clients), AD join per node, SXP connections and bindings, the admin access review (Super Admins, never-disabled, external), FMC's certificates and Catalyst Center's trust of the ISE certificate sorted by days left with the renewal path per row, and NAD coverage of a Catalyst Center site. |
+| `suite_access_review` | Who can change what, on every connected platform: admin accounts, roles and the external groups that grant them on ISE, Catalyst Center, FMC, SD-WAN Manager and CML, with Active Directory resolving those groups to people. |
+| `suite_asbuilt_drift` | Has the documentation drifted from the wiring? |
 | `suite_change_check` | Did anything else break? |
+| `suite_decommission_site` | Remove one site everywhere it exists, without leaving orphans: SD-WAN edges and their configuration group association, ISE NADs and the site's location group, the Catalyst Center site with its devices, fabric site and pool reservations, FMC network objects for the site's subnets, and the Windows DHCP scope and DNS records. |
+| `suite_maintenance_window` | Run one maintenance window at a site across products: inventory what runs where, write one plan (order, blast radius, rollback, go/no-go), take the pre snapshots, then upgrade product by product with each product's preview-first upgrade tool: SD-WAN edges (install, activate), Catalyst Center switches (SWIM distribute, then activate one device at a time) and the ISE patch check with a backup first (ISE patches install from its GUI). |
 
 ### Config export, diff and import
 
