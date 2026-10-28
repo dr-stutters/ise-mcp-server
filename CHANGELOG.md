@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.21.0 (2026-10-28)
+
+Certificate depth (system certificate import, trusted-certificate usages), a RADIUS proxy (external RADIUS servers and
+sequences), patch and upgrade pre-checks, profiler SNMP scans, and `no_change` from the policy rule and set update tools. Core
+stays 0.19.0. 182 tools (94 read, 64 write, 24 dangerous) and thirteen prompts.
+
+### Added
+- `ise_import_system_certificate` (dangerous) and `ise_set_trusted_cert` (I58, #96, #154): import a system certificate as PEM
+  or PKCS#12 from `ISE_CERT_DIR` (password by env reference, wildcard and trust-chain checks); set trusted-certificate usages,
+  enable/disable and CRL/OCSP revocation checking, blocked from disabling the CA of an in-use Admin/EAP certificate.
+- `ise_set_external_radius_server` and `ise_set_radius_server_sequence` (I88, #95, #153): RADIUS proxy for an NPS migration or
+  partner realms; secrets by `ISE_RADIUS_SECRET_*` reference, Message-Authenticator required by default; `ise_delete_object`
+  deletes both, blocked while in use.
+- `ise_patch_readiness` (write) and `ise_get_patch_readiness` (read) (I92, #101, #155): run and read ISE's patch, upgrade and
+  rollback pre-checks as a per-node pass/warn/fail report with fixes; nothing is installed.
+- `ise_set_snmp_scan`, `ise_run_snmp_scan` and `ise_snmp_scan_history` (I61, #102, #156): profiler endpoint SNMP scans for IoT
+  segments; credentials from `ISE_SNMP_*` env vars, and each run's history links to `ise_explain_profile`.
+
+### Changed
+- `ise_update_policy_rule` / `ise_update_policy_set` answer `no_change` (no confirm token) when the rule or set is already as
+  requested, instead of an error (C71, #151, #152).
+
 ## 0.20.0 (2026-10-28)
 
 Library, time-and-date and network conditions, a phased wired 802.1X rollout prompt, randomized MAC flags on endpoints, and
