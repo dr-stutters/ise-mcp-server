@@ -13,7 +13,14 @@ from ise_mcp._core.testing import call_tool
 from ise_mcp.knowledge import FAILURE_HINTS
 from ise_mcp.tools.policy_edit import check_attribute
 from ise_mcp.tools.policy_explain import eval_multi, evaluate
-from tests.unit.conftest import FAILURE_REASONS_XML, MISSING_SESSION, ers_page, fixture_text, make_server
+from tests.unit.conftest import (
+    FAILURE_REASONS_XML,
+    MISSING_SESSION,
+    ers_page,
+    fixture_text,
+    make_server,
+    mock_no_policy,
+)
 from tests.unit.test_policy_edit import ATTRS, EXT, EXT_RULE, authz_mocks
 from tests.unit.test_writes import two_step
 
@@ -217,6 +224,8 @@ async def test_test_ad_user_not_found(mock: respx.MockRouter) -> None:
 
 async def test_delete_join_point_blocked_while_joined(mock: respx.MockRouter) -> None:
     mock_jp(mock)
+    mock_no_policy(mock)
+    mock.get("/ers/config/idstoresequence").respond(json=ers_page([]))
     preview, _ = await two_step("ise_delete_object", {"kind": "ad_join_point", "target": "CORP"})
     assert preview["status"] == "blocked"
     assert "ise_leave_ad first" in preview["blockers"][0]
