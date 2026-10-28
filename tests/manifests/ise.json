@@ -707,6 +707,10 @@
       "tier": "read",
       "title": "ISE license status"
     },
+    "ise_get_mac_randomization": {
+      "tier": "read",
+      "title": "Random MAC (RCM) and endpoint ownership settings"
+    },
     "ise_get_nad": {
       "tier": "read",
       "title": "Get a network device"
@@ -1014,6 +1018,10 @@
     "ise_set_ip_sgt": {
       "tier": "write",
       "title": "Create or update a static IP-SGT mapping"
+    },
+    "ise_set_mac_randomization": {
+      "tier": "write",
+      "title": "Set random MAC (RCM) and endpoint ownership"
     },
     "ise_set_profiling_rule": {
       "tier": "write",

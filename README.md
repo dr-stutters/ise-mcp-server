@@ -295,11 +295,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-167 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 89 read tools plus `ise_api_call` (GET-only) are registered. Everything
+169 tools and 12 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 90 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (89)
+### Read (90)
 
 | Tool | What it does |
 |---|---|
@@ -328,6 +328,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_guest_user` | One guest account: status (with what it means), guest type, validity window, location/SSID, sponsor, contact details, visit reason. |
 | `ise_get_internal_user` | One internal user: enabled state, identity group names, names/email, password store, expiry, created/modified dates and custom attributes. |
 | `ise_get_license_status` | Licensing summary: smart-licensing registration state, connection type, evaluation period, and per-tier (Essentials/Advantage/Premier/Device Admin/...) status, compliance and consumption. |
+| `ise_get_mac_randomization` | ISE's random and changing MAC (RCM) and endpoint ownership settings (Light Session Directory): whether ISE tracks which PSN owns each endpoint and whether it detects a device that comes back with a new private/randomized MAC (iOS, Android and Windows private Wi-Fi addresses), which otherwise breaks MAB, profiling and guest remember-me. |
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
 | `ise_get_policy_set` | One policy set with all of its rules in order: authentication rules (condition -> identity source, if-fail/if-not-found actions), authorization rules (condition -> profiles and SGT) and local exceptions, each with hit counts and ids. |
 | `ise_get_pxgrid_client` | One pxGrid client: state, the product that registered it, description, groups, and what to do next (approve a pending one; a 'created' account never activated). |
@@ -393,7 +394,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (55)
+### Write (56)
 
 | Tool | What it does |
 |---|---|
@@ -435,6 +436,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_guest_type` | Create a guest type, or change one: account duration (default and maximum, in days, hours or minutes, optionally from first login), login and device limits, the identity group guests get, and the sponsor groups that may use it. |
 | `ise_set_identity_sequence` | An identity source sequence lets one authentication rule handle both certificate (EAP-TLS, via cert_profile) and password users (the stores, tried in order). |
 | `ise_set_ip_sgt` | Map a host or subnet to a security group tag, the way servers and other non-802.1X hosts get into TrustSec policy. |
+| `ise_set_mac_randomization` | Turn ISE's random and changing MAC (RCM) detection and endpoint ownership (Light Session Directory settings) on or off. |
 | `ise_set_profiling_rule` | Create or update a CUSTOM profiling rule (ISE 3.3+): when its conditions match an endpoint's profiler attributes, ISE sets the given labels (endpoint type, manufacturer, model, OS), which authorization rules can match as EndPoints:MFCInfoEndpointType etc. |
 | `ise_set_pxgrid_settings` | Set pxGrid's approval policy (Administration > pxGrid Services > Settings). |
 | `ise_set_repository` | Create a repository ISE copies configuration backups to (Administration > System > Maintenance > Repository), or update the one with this name, so ise_create_backup has somewhere to write. |
