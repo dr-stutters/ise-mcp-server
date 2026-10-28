@@ -295,11 +295,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-173 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 92 read tools plus `ise_api_call` (GET-only) are registered. Everything
+175 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 93 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (92)
+### Read (93)
 
 | Tool | What it does |
 |---|---|
@@ -330,6 +330,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_license_status` | Licensing summary: smart-licensing registration state, connection type, evaluation period, and per-tier (Essentials/Advantage/Premier/Device Admin/...) status, compliance and consumption. |
 | `ise_get_mac_randomization` | ISE's random and changing MAC (RCM) and endpoint ownership settings (Light Session Directory): whether ISE tracks which PSN owns each endpoint and whether it detects a device that comes back with a new private/randomized MAC (iOS, Android and Windows private Wi-Fi addresses), which otherwise breaks MAB, profiling and guest remember-me. |
 | `ise_get_nad` | Full configuration of one network device: IPs/subnets, device groups, device profile, RADIUS settings (KeyWrap, DTLS, CoA port), TACACS+, SNMP and TrustSec settings. |
+| `ise_get_patch_readiness` | The last (or a given) patch / upgrade / rollback pre-check report: each check per node as pass / warn / fail with the fix ISE names, and whether the deployment is `ready`. |
 | `ise_get_policy_set` | One policy set with all of its rules in order: authentication rules (condition -> identity source, if-fail/if-not-found actions), authorization rules (condition -> profiles and SGT) and local exceptions, each with hit counts and ids. |
 | `ise_get_pxgrid_client` | One pxGrid client: state, the product that registered it, description, groups, and what to do next (approve a pending one; a 'created' account never activated). |
 | `ise_get_tacacs_servers` | List TACACS+ external servers (other TACACS+ servers ISE proxies device-admin requests to: host, port, timeout, single-connect, whether a shared secret is set, never its value) and TACACS+ server sequences (the ordered server lists a device-admin policy set can proxy to, with accounting and username prefix/suffix stripping). |
@@ -396,7 +397,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (58)
+### Write (59)
 
 | Tool | What it does |
 |---|---|
@@ -427,6 +428,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
 | `ise_import_trusted_cert` | Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth). |
 | `ise_issue_pxgrid_client_cert` | Issue the certificate an external pxGrid consumer (FMC, a SIEM) authenticates to ISE with. |
+| `ise_patch_readiness` | Run ISE's own patch / upgrade / rollback pre-checks on the whole deployment and report each check per node as pass / warn / fail with the fix ISE names, and `ready` ('is this deployment ready for patch N?'). |
 | `ise_reinstate_guest_user` | Reinstate a suspended guest account as the sponsor (logins work again until valid_to). |
 | `ise_release_rejected_endpoint` | Release endpoints from ISE's rejected list (Context Visibility > Rejected Endpoints), e.g. |
 | `ise_set_allowed_protocols` | Create an allowed-protocols service (the one a policy set selects) from a hardening preset, or harden or adjust an existing one. |
@@ -626,6 +628,12 @@ none containing `cisco` in any case. The preview names the rule the key breaks a
 Restoring is not automated: Administration > System > Backup & Restore > Restore with the file and the same
 key (it replaces the whole configuration and restarts ISE's services). `ise_delete_repository` (dangerous) is refused while the last backup was a scheduled one to it. Catalyst Center's half is catc-mcp-server's
 `catc_create_backup`.
+
+Before the patch or upgrade itself, `ise_patch_readiness(kind='patch'|'upgrade'|'rollback', repository, bundle)`
+(write tier, preview-first) runs ISE's own pre-checks from the Primary PAN and reports each check per node as
+pass / warn / fail with the fix ISE names, and `ready`; `ise_get_patch_readiness` reads the last report again.
+The preview refuses a repository ISE doesn't have or a bundle that isn't in it. Installing, rolling back and
+upgrading stay in the GUI (Administration > System > Maintenance): the server never runs them.
 
 ### Profiler
 
