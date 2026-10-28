@@ -38,6 +38,7 @@ from ise_mcp.tools import (
     lsd,
     mnt_depth,
     network,
+    patch_readiness,
     policy,
     policy_audit,
     policy_edit,
@@ -114,8 +115,10 @@ ise_extend_guest_user, ise_suspend_guest_user, ...) run as the sponsor set in IS
 (ise_status shows guest_sponsor). Backups (before Catalyst Center's group-based policy migration or an
 upgrade): ise_list_repositories (none? ise_set_repository, password from an ISE_REPOSITORY_* variable) ->
 ise_create_backup (dangerous; key from ISE_BACKUP_ENCRYPTION_KEY) ->
-ise_get_backup_status; restores are GUI-only. Names or ids are accepted wherever a tool
-takes an object. Shared secrets, SNMP communities and passwords are always masked (the exceptions:
+ise_get_backup_status; restores are GUI-only. Before a patch or upgrade:
+ise_patch_readiness(kind, repository, bundle) runs ISE's own pre-checks (nothing is installed). Names or
+ids are accepted wherever a tool takes an object. Shared secrets, SNMP communities and passwords are always
+masked (the exceptions:
 ise_issue_pxgrid_client_cert returns the consumer's new private key once, and ise_create_guest_user the
 guest's password once, on confirm). For anything without
 a tool: ise_search_spec -> ise_get_definition -> ise_api_call(source=openapi|ers|mnt).
@@ -157,6 +160,7 @@ def create_server(
             trustsec.register,
             system.register,
             backup.register,
+            patch_readiness.register,
             health.register,
             admin_audit.register,
             writes.register,
