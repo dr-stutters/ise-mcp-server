@@ -213,7 +213,9 @@ On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_T
   sessions on the target switch port; if more than one shares it (an uplink or trunk) the action is
   blocked unless `ISE_COA_ALLOW_SHARED_PORT=true`.
 - **Blast radius** (bound with `MCP_MAX_BLAST_RADIUS` / `MCP_BLAST_RADIUS_OVERRIDES`): reported by
-  `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_apply_anc` / `ise_clear_anc`
+  `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_coa_bulk` (sessions in the
+  scope; it also takes its own `max`, refuses if any session is protected, and never bounces or shuts a
+  port in bulk), `ise_apply_anc` / `ise_clear_anc`
   (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
   certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
@@ -279,7 +281,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-150 tools and 5 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+152 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 81 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -426,7 +428,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (18)
+### Dangerous (19)
 
 | Tool | What it does |
 |---|---|
@@ -434,6 +436,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_apply_anc` | Put an Adaptive Network Control policy on an endpoint (quarantine, port bounce, shutdown or reauthenticate, depending on the policy's actions). |
 | `ise_bind_certificate` | Install a CA-signed certificate on the node that generated its CSR and put it into service for the given roles (EAP, Admin, RADIUS DTLS, portal, pxGrid, SAML, messaging, TACACS). |
 | `ise_clear_anc` | Remove the ANC policy from an endpoint (release it from quarantine). |
+| `ise_coa_bulk` | Send a CoA to every live session in a scope (all sessions on a NAD or device group, with an authorization profile, SGT or policy set, of a user, or on an SSID), so a policy change (dACL, profile, SGT, rule) applies now instead of at each endpoint's next reauthentication. |
 | `ise_coa_disconnect` | Send a RADIUS CoA disconnect for an endpoint's live session: terminate it, bounce the switch port, or shut the port down (stays down until an admin re-enables it). |
 | `ise_coa_reauth` | Send a RADIUS Change of Authorization (reauthenticate) for an endpoint's live session, so new policy (group, profile, ANC) applies now instead of at the next reauth. |
 | `ise_create_backup` | Take an on-demand ISE configuration backup to a repository, before Catalyst Center's group-based policy migration or an upgrade. |
@@ -456,8 +459,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_quarantine_host` | Contain a host in minutes, each step previewed and verified: find its session, check that an ANC quarantine policy and its authorization rule exist, apply ANC (ISE sends the CoA), verify the quarantine dACL/SGT on the switch, optionally block the IP on the FTDs through FMC, and finish with the exact undo steps. |
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join and a user test), the Catalyst Center to ISE integration (policy server state and next action, Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source with name resolution. |
-| `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_nad` | Day-1 onboarding of an access switch into ISE, the same way every time: the location and device-type groups, the NAD with its RADIUS and/or TACACS+ secret, the switch's AAA config (a preview through cml_configure_node, Catalyst Center's site AAA settings or a template), a test login seen in ISE, the endpoint session, a recorded undo (ISE and the switch's 'no' lines), and a closing coverage check of the site against ISE's NADs. |
+| `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `suite_change_check` | Did anything else break? |
 

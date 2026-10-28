@@ -336,6 +336,41 @@ async def _nad_names(app: IseApp, ips: set[str], cap: int = 20) -> dict[str, str
     return out
 
 
+async def _detail_filter(
+    app: IseApp, rows: list[dict[str, Any]], **filters: str | None
+) -> tuple[list[dict[str, Any]], int]:
+    """ActiveList rows kept by the detail filters (authz_profile, sgt, policy_set, port), and how many
+    sessions MnT couldn't place. A port the list already carries is checked without a lookup."""
+    from ise_mcp.tools.coa_bulk import DETAIL_CAP, fact_matches, port_matches, session_facts
+
+    wanted = {k: v for k, v in filters.items() if v}
+    port = wanted.get("port")
+    if port and any(r.get("nas_port_id") for r in rows):
+        rows = [r for r in rows if port_matches(port, r.get("nas_port_id"))]
+        wanted.pop("port")
+    if not wanted:
+        return rows, 0
+    if len(rows) > DETAIL_CAP:
+        raise InvalidRequest(
+            f"{len(rows)} sessions would each need a detail lookup for {', '.join(wanted)} (cap "
+            f"{DETAIL_CAP}); narrow with nad or user first"
+        )
+    need_authz = bool(wanted.keys() & {"authz_profile", "sgt"})
+    facts = await gather_limited(rows, lambda r: session_facts(app, r, need_authz=need_authz), limit=5)
+    kept, unknown = [], 0
+    for row, f in zip(rows, facts, strict=True):
+        if f.get("error") or f.get("active") is False:
+            continue
+        hits = [fact_matches(scope, str(v), f) for scope, v in wanted.items()]
+        if any(h is False for h in hits):
+            continue
+        if any(h is None for h in hits):
+            unknown += 1
+            continue
+        kept.append({**row, "nas_port_id": f.get("port") or row.get("nas_port_id")})
+    return kept, unknown
+
+
 def register(reg: ToolRegistrar) -> None:
     @reg.read(title="List active sessions")
     async def ise_list_active_sessions(
@@ -346,13 +381,28 @@ def register(reg: ToolRegistrar) -> None:
             Field(description="Filter: sessions through this NAD: name (or part of it), or a NAS IP"),
         ] = None,
         nas_ip: Annotated[str | None, Field(description="Deprecated: use nad")] = None,
+        authz_profile: Annotated[
+            str | None, Field(description="Filter: sessions authorized with this profile (detail lookups)")
+        ] = None,
+        sgt: Annotated[
+            str | None, Field(description="Filter: sessions with this SGT, name or tag (detail lookups)")
+        ] = None,
+        policy_set: Annotated[
+            str | None, Field(description="Filter: sessions matched by this policy set (detail lookups)")
+        ] = None,
+        port: Annotated[
+            str | None, Field(description="Filter: NAS port, e.g. 'Gi1/0/5' (combine with nad)")
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
         offset: Annotated[int, Field(ge=0)] = 0,
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
         """List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN,
         audit session id), plus total, posture and profiler session counts. An empty list is normal
-        when no endpoint is connected. Drill into one with ise_find_session or ise_endpoint_360."""
+        when no endpoint is connected. The authz_profile, sgt and policy_set filters (and port, when
+        MnT's list leaves the port out) look up each session's detail, so narrow by nad or user first on
+        a busy deployment; sessions MnT can't place are counted as undetermined. Drill into one with
+        ise_find_session or ise_endpoint_360; CoA a whole set with ise_coa_bulk."""
         app: IseApp = get_client(ctx)
 
         async def count(path: str) -> dict[str, Any]:
@@ -378,6 +428,11 @@ def register(reg: ToolRegistrar) -> None:
             if flt is not None:
                 f = flt
                 rows = [r for r in rows if f.matches(r.get("nas_ip_address"))]
+        undetermined = 0
+        if authz_profile or sgt or policy_set or port:
+            rows, undetermined = await _detail_filter(
+                app, rows, authz_profile=authz_profile, sgt=sgt, policy_set=policy_set, port=port
+            )
         page = page_of(rows, limit=limit, offset=offset)
         names = await _nad_names(
             app, {str(r.get("nas_ip_address")) for r in page.items if r.get("nas_ip_address")}
@@ -389,6 +444,7 @@ def register(reg: ToolRegistrar) -> None:
                 "ip": r.get("framed_ip_address"),
                 "nas_ip": r.get("nas_ip_address"),
                 "nad": names.get(str(r.get("nas_ip_address"))),
+                "port": r.get("nas_port_id"),
                 "psn": r.get("server"),
                 "audit_session_id": r.get("audit_session_id"),
             }
@@ -399,6 +455,7 @@ def register(reg: ToolRegistrar) -> None:
             "posture_sessions": posture.get("count"),
             "profiler_sessions": profiler.get("count"),
             "nad_filter": flt.label if flt else None,
+            "undetermined": undetermined or None,
         }
         return list_result(
             page_of([_clean(r) for r in rows], limit=limit, offset=offset),
