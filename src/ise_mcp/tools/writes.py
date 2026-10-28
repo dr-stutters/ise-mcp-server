@@ -2165,7 +2165,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         sequence, AD join point (after ise_leave_ad), sponsor group or guest type (guest accounts:
         ise_delete_guest_user). Preview-first: shows
         the object and what still references it (the ise_where_used scan: rules, profiles, sequences,
-        matrix cells, devices, members), which blocks the delete.
+        matrix cells, IP-SGT mappings, devices, members), which blocks the delete.
         Network devices and policy are deleted with the dangerous-tier tools."""
         app: IseApp = get_client(ctx)
         resource = DELETE_KINDS[kind]

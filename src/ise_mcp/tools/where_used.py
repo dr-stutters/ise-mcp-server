@@ -4,9 +4,10 @@ devices reference an ISE object.
 ISE has no "where used" API. This reads the policy (network access and device admin: policy sets,
 authentication and authorization rules, local and global exceptions, the library conditions they
 reference) and the ERS objects that point at other objects (authorization profiles -> dACLs, identity
-sequences -> identity stores and certificate profiles, egress cells -> SGTs and SGACLs, NADs -> device
-groups), and reports every reference with where it sits. Conditions are followed through library
-conditions (`via` names the library condition a match came through), using the same reference
+sequences -> identity stores and certificate profiles, egress cells -> SGTs and SGACLs, static IP-SGT
+mappings and mapping groups -> SGTs, NADs -> device groups), and reports every reference with where
+it sits. Conditions are followed through library conditions (`via` names the library condition a match
+came through), using the same reference
 resolution as ise_policy_explain.
 
 `find_references` is the shared scan: ise_delete_object builds its "still in use" blockers from it.
@@ -81,6 +82,9 @@ LIST_TOOL = {
 POLICY_KINDS = ("network-access", "device-admin")
 MATRIX_CELL_CAP = 2000
 PROFILE_CAP = 5000
+# Static IP-SGT mappings and mapping groups read per scan (one detail GET each).
+MAPPING_CAP = 5000
+MAPPING_HINT = " (re-point them with ise_set_ip_sgt or remove them with ise_delete_trustsec_object first)"
 # The sections of a policy set, as ISE's OpenAPI paths name them, and how a reference is labelled.
 SECTIONS = {
     "authentication": "authentication rule",
@@ -223,6 +227,7 @@ class Scan:
         self._sets: dict[str, list[dict[str, Any]] | None] = {}
         self._entries: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         self._libraries: dict[str, dict[str, Any]] = {}
+        self._details: dict[str, list[dict[str, Any]]] = {}
 
     def _note(self, what: str, err: Exception) -> None:
         self.incomplete.append(f"{what}: {str(err)[:160]}")
@@ -278,13 +283,20 @@ class Scan:
         return self._libraries[kind]
 
     async def ers_details(self, resource: str, cap: int) -> list[dict[str, Any]]:
+        """Every object of an ERS resource in detail (up to `cap`), read once per scan."""
+        if resource in self._details:
+            return self._details[resource]
         try:
             page = await ers_list(self.app, resource, limit=cap, offset=0, detail=True, detail_cap=None)
         except (UpstreamError, NotFound) as e:
             self._note(f"{resource} not readable", e)
+            self._details[resource] = []
             return []
         self.scanned.append(resource)
-        return [i for i in page.items if isinstance(i, dict)]
+        if page.more:
+            self.incomplete.append(f"Only the first {cap} {resource} objects were checked")
+        self._details[resource] = [i for i in page.items if isinstance(i, dict)]
+        return self._details[resource]
 
 
 def _rule_ref(
@@ -366,6 +378,55 @@ async def _condition_refs(scan: Scan, match: Match) -> list[dict[str, Any]]:
     return out
 
 
+def _deploy_label(m: dict[str, Any]) -> str:
+    dtype = str(m.get("deployType") or "ALL")
+    return "all TrustSec devices" if dtype == "ALL" else f"{dtype} {m.get('deployTo')}"
+
+
+async def _mapping_refs(scan: Scan, sgt_id: str) -> list[dict[str, Any]]:
+    """Static IP-SGT mappings and mapping groups bound to an SGT (ERS 'sgt' holds the SGT's id). A
+    mapping in a group takes the group's SGT: it is reported with 'via' the group."""
+    if not sgt_id:
+        return []
+    out: list[dict[str, Any]] = []
+    groups = await scan.ers_details("sgmappinggroup", MAPPING_CAP)
+    group_names = {str(g.get("id")): str(g.get("name")) for g in groups}
+    via_group: dict[str, str] = {}
+    for g in groups:
+        if str(g.get("sgt") or "") == sgt_id:
+            via_group[str(g.get("id"))] = str(g.get("name"))
+            out.append(
+                {
+                    "where": "IP-SGT mapping group",
+                    "group": g.get("name"),
+                    "id": g.get("id"),
+                    "field": "sgt",
+                    "deploy_to": _deploy_label(g),
+                    "label": str(g.get("name")),
+                }
+            )
+    for m in await scan.ers_details("sgmapping", MAPPING_CAP):
+        group = str(m.get("mappingGroup") or "")
+        direct = str(m.get("sgt") or "") == sgt_id
+        if not direct and group not in via_group:
+            continue
+        host = str(m.get("hostIp") or m.get("name"))
+        ref: dict[str, Any] = {
+            "where": "IP-SGT mapping",
+            "mapping": host,
+            "id": m.get("id"),
+            "field": "sgt" if direct else "mappingGroup",
+            "deploy_to": _deploy_label(m),
+            "label": host,
+        }
+        if not direct:
+            ref["via"] = via_group[group]
+        elif group:
+            ref["group"] = group_names.get(group, group)
+        out.append(ref)
+    return out
+
+
 async def _members(app: IseApp, kind: str, obj: dict[str, Any]) -> dict[str, Any]:
     name, oid = str(obj.get("name")), str(obj.get("id"))
 
@@ -435,6 +496,7 @@ async def find_references(  # noqa: C901
                     {"where": "egress cell", "field": field, "cell": cell.get("name"), "id": cell.get("id")}
                 )
         scan.scanned.append("egress matrix")
+        refs += await _mapping_refs(scan, oid)
     elif kind == "sgacl":
         for cell in await scan.ers_details("egressmatrixcell", MATRIX_CELL_CAP):
             if oid in [str(a) for a in cell.get("sgacls") or []]:
@@ -554,7 +616,8 @@ def delete_blockers(result: dict[str, Any]) -> tuple[list[str], list[str]]:
     for where, labels in grouped.items():
         labels = list(dict.fromkeys(labels))
         shown = ", ".join(labels[:10]) + (f" and {len(labels) - 10} more" if len(labels) > 10 else "")
-        blockers.append(f"Used by {where}(s): {shown}")
+        hint = MAPPING_HINT if where.startswith("IP-SGT mapping") else ""
+        blockers.append(f"Used by {where}(s): {shown}{hint}")
     warnings = [f"Not checked ({i})" for i in result.get("incomplete") or []]
     return blockers, warnings
 
@@ -579,9 +642,9 @@ def register(reg: ToolRegistrar) -> None:
         global exceptions, network access and device admin, each with the policy set, rule and field
         (conditions are followed through library conditions: 'via'); library conditions; authorization
         profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress
-        matrix cells (SGTs, SGACLs); network devices (device groups); and group members (internal users,
-        endpoints). 'incomplete' lists anything ISE wouldn't return, so an empty result there is not
-        proof of no use."""
+        matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices
+        (device groups); and group members (internal users, endpoints). 'incomplete' lists anything ISE
+        wouldn't return, so an empty result there is not proof of no use."""
         app: IseApp = get_client(ctx)
         obj = await resolve_target(app, kind, name)
         return object_result(await find_references(app, kind, obj))

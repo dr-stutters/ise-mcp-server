@@ -110,7 +110,16 @@ BUILTIN = {
     "dacl": {d.lower() for d in BUILTIN_DACLS},
     "sgt": {"unknown", "any", "trustsec_devices"},
     "sgacl": {"permit ip", "deny ip", "deny_ip_log", "permit_ip_log"},
-    "identity_group": {"all_accounts (default)", "group_accounts (default)", "own_accounts (default)"},
+    # GuestType_* (default): the identity group of each default guest type (ISE ships them).
+    "identity_group": {
+        "all_accounts (default)",
+        "group_accounts (default)",
+        "own_accounts (default)",
+        "guesttype_contractor (default)",
+        "guesttype_daily (default)",
+        "guesttype_weekly (default)",
+        "guesttype_sociallogin (default)",
+    },
     "endpoint_group": {"unknown", "profiled", "registereddevices", "blocked list", "guestendpoints"},
     "ndg": {
         "device type#all device types",
@@ -120,10 +129,20 @@ BUILTIN = {
         "ipsec#is ipsec device#no",
     },
 }
+
+
+def is_builtin(kind: str, name: str) -> bool:
+    """An object ISE ships with; also any 'GuestType_<type> (default)' identity group."""
+    low = name.lower()
+    if kind == "identity_group" and low.startswith("guesttype_") and low.endswith(" (default)"):
+        return True
+    return low in BUILTIN.get(kind, set())
+
+
 UnusedKind = Literal["authz_profile", "dacl", "sgt", "sgacl", "identity_group", "endpoint_group", "ndg"]
 DEFAULT_UNUSED_KINDS = ["authz_profile", "dacl", "sgt", "identity_group", "endpoint_group"]
 NOT_CHECKED = {
-    "sgt": "static IP-SGT mappings, SXP bindings and NAD TrustSec settings are not checked",
+    "sgt": "SXP bindings learned from peers and NAD TrustSec settings are not checked",
     "identity_group": "guest types and sponsor groups are not checked",
     "endpoint_group": "profiling policies that create matching groups are not checked",
     "authz_profile": "ANC policies and guest portals are not checked",
@@ -687,7 +706,7 @@ async def run_unused(app: IseApp, kinds: list[str], include_builtin: bool) -> di
             if result["used"]:
                 continue
             name = str(obj.get("name"))
-            if name.lower() in BUILTIN.get(kind, set()) and not include_builtin:
+            if is_builtin(kind, name) and not include_builtin:
                 builtin_unused.setdefault(kind, []).append(name)
                 continue
             rows.append(
@@ -771,8 +790,9 @@ def register(reg: ToolRegistrar) -> None:
         identity and endpoint groups, network device groups for which the ise_where_used scan (policy
         sets and rules, library conditions, profiles, identity sequences, egress matrix, devices, group
         members) finds no use, each with its ise_delete_object call. Built-in objects are listed apart
-        unless include_builtin. 'not_checked' names what the scan does not cover per kind (e.g. IP-SGT
-        mappings for SGTs) and 'incomplete' anything ISE wouldn't return: check those before deleting.
-        Up to 300 objects per kind. Read-only."""
+        unless include_builtin (the GuestType_* (default) groups among them). SGTs bound in static IP-SGT
+        mappings or mapping groups count as used. 'not_checked' names what the scan does not cover per
+        kind (e.g. SXP bindings learned from peers) and 'incomplete' anything ISE wouldn't return:
+        check those before deleting. Up to 300 objects per kind. Read-only."""
         app: IseApp = get_client(ctx)
         return object_result(await run_unused(app, list(kinds or DEFAULT_UNUSED_KINDS), include_builtin))

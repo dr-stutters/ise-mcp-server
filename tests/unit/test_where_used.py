@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import httpx
@@ -400,3 +401,97 @@ async def test_delete_sgt_lists_rules_and_cells(mock: respx.MockRouter) -> None:
         "2 egress matrix cell(s) use this SGT",
         "Used by authorization rule(s): Lab-Wired / Lab-Employees",
     ]
+
+
+# --- static IP-SGT mappings (#123) ----------------------------------------------------------------
+
+# ERS shapes as ISE 3.5 returns them: 'sgt' is the SGT's id; a mapping in a group has 'mappingGroup'
+# (the group's id) and takes the group's SGT.
+MAPPED_SGTS = [
+    {"id": "t3", "name": "DC_Services", "value": 36},
+    {"id": "t4", "name": "Printers", "value": 40},
+]
+SGMAPPINGGROUPS = [
+    {"id": "mg1", "name": "Printers-Floor1", "sgt": "t4", "deployType": "NDG", "deployTo": "n1"},
+]
+SGMAPPINGS = [
+    {
+        "id": "sm1",
+        "name": "192.0.2.10/32",
+        "hostIp": "192.0.2.10/32",
+        "sgt": "t3",
+        "deployType": "ALL",
+        "sgtDomain": ["default"],
+        "resolvingNodes": [],
+    },
+    {
+        "id": "sm2",
+        "name": "192.0.2.11/32",
+        "hostIp": "192.0.2.11/32",
+        "sgt": "t3",
+        "deployType": "ALL",
+        "sgtDomain": ["default"],
+    },
+    {"id": "sm3", "name": "198.51.100.0/24", "hostIp": "198.51.100.0/24", "mappingGroup": "mg1"},
+]
+
+
+@pytest.fixture
+def mapped(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
+    data = copy.deepcopy(ERS)
+    data["sgt"] += copy.deepcopy(MAPPED_SGTS)
+    data["sgmapping"] = copy.deepcopy(SGMAPPINGS)
+    data["sgmappinggroup"] = copy.deepcopy(SGMAPPINGGROUPS)
+    monkeypatch.setitem(globals(), "ERS", data)
+    return data
+
+
+async def test_sgt_bound_in_static_mappings(mock: respx.MockRouter, mapped: dict[str, Any]) -> None:
+    mock_policy(mock)
+    out = await where("sgt", "DC_Services")
+    assert out["used"] is True
+    assert out["by_where"] == {"IP-SGT mapping": 2}
+    assert [(r["mapping"], r["field"], r["deploy_to"]) for r in out["references"]] == [
+        ("192.0.2.10/32", "sgt", "all TrustSec devices"),
+        ("192.0.2.11/32", "sgt", "all TrustSec devices"),
+    ]
+    assert {"sgmapping", "sgmappinggroup"} <= set(out["scanned"])
+
+
+async def test_sgt_bound_through_mapping_group(mock: respx.MockRouter, mapped: dict[str, Any]) -> None:
+    mock_policy(mock)
+    out = await where("sgt", "Printers")
+    assert out["by_where"] == {"IP-SGT mapping group": 1, "IP-SGT mapping": 1}
+    group, member = out["references"]
+    assert (group["group"], group["deploy_to"]) == ("Printers-Floor1", "NDG n1")
+    assert (member["mapping"], member["field"], member["via"]) == (
+        "198.51.100.0/24",
+        "mappingGroup",
+        "Printers-Floor1",
+    )
+    # No mapping names the Employees SGT.
+    assert "IP-SGT mapping" not in (await where("sgt", "Employees"))["by_where"]
+
+
+async def test_delete_sgt_blocked_by_static_mappings(mock: respx.MockRouter, mapped: dict[str, Any]) -> None:
+    mock_policy(mock)
+    preview, _ = await two_step("ise_delete_object", {"kind": "sgt", "target": "DC_Services"})
+    assert preview["status"] == "blocked"
+    assert preview["blockers"] == [
+        "Used by IP-SGT mapping(s): 192.0.2.10/32, 192.0.2.11/32 (re-point them with ise_set_ip_sgt or "
+        "remove them with ise_delete_trustsec_object first)"
+    ]
+    preview, _ = await two_step("ise_delete_object", {"kind": "sgt", "target": "Printers"})
+    assert preview["status"] == "blocked"
+    assert [b.split(":")[0] for b in preview["blockers"]] == [
+        "Used by IP-SGT mapping group(s)",
+        "Used by IP-SGT mapping(s)",
+    ]
+    assert "198.51.100.0/24 (via Printers-Floor1)" in preview["blockers"][1]
+
+
+async def test_unreadable_mappings_are_incomplete(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/sgmapping").respond(500, json={})  # before fake_ers' catch-all route
+    mock_policy(mock)
+    out = await where("sgt", "Employees")
+    assert any(i.startswith("sgmapping not readable") for i in out["incomplete"])

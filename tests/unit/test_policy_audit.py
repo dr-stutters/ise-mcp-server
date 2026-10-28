@@ -458,3 +458,37 @@ async def test_unused_reads_policy_once(mock: respx.MockRouter, ers: dict[str, A
         r["name"] for r in out.get("unused", {}).get("identity_group", [])
     ]  # a library condition uses it
     assert "Cisco-IP-Phone" not in [r["name"] for r in out.get("unused", {}).get("endpoint_group", [])]
+
+
+async def test_unused_sgts_in_static_mappings_are_used(mock: respx.MockRouter, ers: dict[str, Any]) -> None:
+    """#123: SGTs bound in IP-SGT mappings (directly or through a mapping group) are not unused, and the
+    mappings are read once for the whole run."""
+    ers["sgt"] += copy.deepcopy(wu.MAPPED_SGTS)
+    ers["sgmapping"] = copy.deepcopy(wu.SGMAPPINGS)
+    ers["sgmappinggroup"] = copy.deepcopy(wu.SGMAPPINGGROUPS)
+    wu.mock_policy(mock)
+    out = await call_tool(make_server(), "ise_unused_objects", {"kinds": ["sgt"]})
+    assert isinstance(out, dict)
+    assert [r["name"] for r in out["unused"]["sgt"]] == ["Spare"]
+    assert out["counts"]["sgt"] == {"checked": 5, "unused": 1}
+    assert not any("IP-SGT" in n for n in out.get("not_checked", []))
+    lists = [
+        c for c in mock.calls if c.request.url.path in ("/ers/config/sgmapping", "/ers/config/sgmappinggroup")
+    ]
+    assert len(lists) == 2
+
+
+async def test_unused_guest_type_groups_are_built_in(mock: respx.MockRouter, ers: dict[str, Any]) -> None:
+    guest_groups = [
+        "GuestType_Contractor (default)",
+        "GuestType_Daily (default)",
+        "GuestType_SocialLogin (default)",
+        "GuestType_Weekly (default)",
+    ]
+    ers["identitygroup"] += [{"id": f"gg{i}", "name": n} for i, n in enumerate(guest_groups)]
+    ers["identitygroup"].append({"id": "gg9", "name": "Lab_Spare"})
+    wu.mock_policy(mock)
+    out = await call_tool(make_server(), "ise_unused_objects", {"kinds": ["identity_group"]})
+    assert isinstance(out, dict)
+    assert [r["name"] for r in out["unused"]["identity_group"]] == ["Lab_Spare"]
+    assert out["built_in_unused"]["identity_group"] == guest_groups
