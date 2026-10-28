@@ -41,6 +41,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   CLI (cml or catc server) to a diagnosis and a preview-only fix.
 - **Prompt `ise_quarantine_host`**: contain a host with ANC + CoA, verify the quarantine dACL/SGT on the switch,
   optionally block its IP on the FTDs (`fmc_contain_host`), and record the undo.
+- **Prompt `ise_onboard_nad`** (write tier, with the cml or catc server): an access switch into ISE the same way
+  every time: location and device-type groups, the NAD, the switch's AAA lines as a preview, a test login, the
+  session, a recorded undo and a coverage check of the site.
 - **Prompt `ise_onboard_sdwan_edges`** (write tier, with the cat-sdwan server): a Catalyst SD-WAN site's edges as
   NADs at their service-VPN loopbacks, a location group per site, device-admin policy, the edges' AAA parcel with
   the loopback as source, a deploy preview and test logins.
@@ -445,7 +448,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_reprofile_endpoint` | Make ISE re-evaluate an endpoint's profile now: sends a CoA reauthenticate through the PSN that owns its session, so the NAD re-authenticates, fresh RADIUS / device-sensor attributes reach the profiler, and the authorization result applies the current profile. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (6)
+### Prompts (7)
 
 | Prompt | What it does |
 |---|---|
@@ -453,6 +456,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_incident_timeline` | Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst Center, each queried on demand and merged by timestamp. |
 | `ise_aaa_chain_check` | '802.1X is down' / 'users can't log in' across the whole chain: the switch's AAA config and RADIUS counters, the ISE NAD (coverage, secret, silent drops), ISE's identity sources (AD join and a user test), the Catalyst Center to ISE integration (policy server state and next action, Catalyst Center's AAA health numbers), pxGrid consumers, and FMC's realm and identity source with name resolution. |
 | `ise_troubleshoot_endpoint_access` | Why can't this endpoint get on the network? |
+| `ise_onboard_nad` | Day-1 onboarding of an access switch into ISE, the same way every time: the location and device-type groups, the NAD with its RADIUS and/or TACACS+ secret, the switch's AAA config (a preview through cml_configure_node, Catalyst Center's site AAA settings or a template), a test login seen in ISE, the endpoint session, a recorded undo (ISE and the switch's 'no' lines), and a closing coverage check of the site against ISE's NADs. |
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `suite_change_check` | Did anything else break? |
 

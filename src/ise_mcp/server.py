@@ -73,7 +73,8 @@ admin (TACACS+): kind='device-admin' on the policy tools, plus ise_set_command_s
 ise_set_shell_profile; the node needs the DeviceAdmin service. Catalyst SD-WAN Manager admins: sdwan_group
 on ise_create_authz_profile (RADIUS Viptela-Group-Name; ISE ships no Viptela dictionary, the preview names
 the GUI step) or ise_set_shell_profile (TACACS+); SD-WAN edges as NADs at their service-VPN loopbacks:
-prompt ise_onboard_sdwan_edges. Quarantine: an authz rule on
+prompt ise_onboard_sdwan_edges; a switch (groups, NAD, AAA lines, test login, undo): prompt ise_onboard_nad.
+Quarantine: an authz rule on
 'Session:ANCPolicy equals <policy>' first, then ise_apply_anc. Active Directory: ise_create_ad_join_point
 -> ise_join_ad -> ise_list_ad_groups -> ise_add_ad_groups, then rules on '<join point>:ExternalGroups
 equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_user (a user's groups) for

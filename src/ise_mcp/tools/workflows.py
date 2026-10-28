@@ -3,11 +3,11 @@
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field
 
-from ise_mcp._core import InvalidRequest, ToolRegistrar, tool_ref
+from ise_mcp._core import InvalidRequest, Tier, ToolRegistrar, tool_ref
 from ise_mcp.tools._common import DEFAULT_LOOKBACK_MINUTES, normalize_mac, parse_ip
 
 # Prompt arguments are interpolated into instructions, so they are held to strict shapes.
@@ -74,6 +74,7 @@ def register(reg: ToolRegistrar) -> None:
     register_quarantine(reg)
     register_incident_timeline(reg)
     register_aaa_chain_check(reg)
+    register_onboard_nad(reg)
 
     @reg.prompt(
         title="Troubleshoot endpoint network access",
@@ -599,3 +600,421 @@ cml_* the cml-mcp server and win_* the Windows_Server server: if one is not conn
    Show each preview and wait for the user's approval; never pass confirm yourself. End with the one
    link most likely to explain the outage, and what proves it fixed (step 1's counters, a pass in
    ise_get_auth_list)."""
+
+
+SAFE_HOST = re.compile(r"^[\w.-]{1,64}$")
+SAFE_GROUP_PATH = re.compile(r"^[\w .-]{1,64}(#[\w .-]{1,64}){0,5}$")
+SAFE_INTERFACE = re.compile(r"^[A-Za-z][\w./-]{0,47}$")
+SAFE_VRF = re.compile(r"^[\w.-]{1,32}$")
+# Switch-side names the prompt configures and the undo removes again.
+RADIUS_GROUP = "ISE-RADIUS"
+TACACS_GROUP = "ISE-TACACS"
+ADMIN_LIST = "ISE-ADMIN"
+
+
+def _onboard_undo_text(enabled: set[str], name: str) -> str:
+    """The ISE half of ise_onboard_nad's undo: ise_delete_nad with the dangerous tier, else the GUI."""
+    if "ise_delete_nad" in enabled:
+        nad = (
+            f'{tool_ref("ise_delete_nad")} with device="{name}" (dangerous tier; preview first, the user\n'
+            "     approves it)"
+        )
+    else:
+        nad = (
+            "the ISE GUI, Administration > Network Resources > Network Devices > select it > Delete\n"
+            "     (ise_delete_nad needs MCP_ENABLE_DANGEROUS)"
+        )
+    return (
+        f"   - ISE: {nad}; then the groups created in step 3, children first, with\n"
+        f'     {tool_ref("ise_delete_object")} kind="ndg", target=<path> (only groups this run created and\n'
+        "     no other NAD uses: the preview shows what still references them)."
+    )
+
+
+def _switch_aaa_lines(
+    *, radius: bool, tacacs: bool, ise: str, source: str, vrf: str
+) -> tuple[list[str], list[str]]:
+    """(config lines, undo lines) for an IOS XE access switch, Cisco's campus NAC defaults."""
+    vrf_fwd = [f" ip vrf forwarding {vrf}"] if vrf else []
+    vrf_kw = f" vrf {vrf}" if vrf else ""
+    lines = [
+        "aaa new-model",
+        "aaa authentication login default local",
+        "aaa authorization exec default local",
+    ]
+    undo: list[str] = []
+    if radius:
+        lines += [
+            "radius server ISE-PSN1",
+            f" address ipv4 {ise} auth-port 1812 acct-port 1813",
+            " key <the RADIUS secret>",
+            f"aaa group server radius {RADIUS_GROUP}",
+            " server name ISE-PSN1",
+            *vrf_fwd,
+            f" ip radius source-interface {source}",
+            f"aaa authentication dot1x default group {RADIUS_GROUP}",
+            f"aaa authorization network default group {RADIUS_GROUP}",
+            f"aaa accounting dot1x default start-stop group {RADIUS_GROUP}",
+            "aaa server radius dynamic-author",
+            f" client {ise}{vrf_kw} server-key <the RADIUS secret>",
+            "radius-server attribute 6 on-for-login-auth",
+            "radius-server attribute 8 include-in-access-req",
+            "radius-server attribute 25 access-request include",
+            "radius-server dead-criteria time 5 tries 3",
+            "radius-server deadtime 15",
+            "dot1x system-auth-control",
+        ]
+        undo += [
+            "no aaa server radius dynamic-author",
+            f"no aaa accounting dot1x default start-stop group {RADIUS_GROUP}",
+            f"no aaa authorization network default group {RADIUS_GROUP}",
+            f"no aaa authentication dot1x default group {RADIUS_GROUP}",
+            f"no aaa group server radius {RADIUS_GROUP}",
+            "no radius server ISE-PSN1",
+            "no radius-server attribute 6 on-for-login-auth",
+            "no radius-server attribute 8 include-in-access-req",
+            "no radius-server attribute 25 access-request include",
+            "no radius-server dead-criteria time 5 tries 3",
+            "no radius-server deadtime 15",
+            "no dot1x system-auth-control   (only if step 1 found it off)",
+        ]
+    if tacacs:
+        lines += [
+            "tacacs server ISE-PSN1",
+            f" address ipv4 {ise}",
+            " key <the TACACS+ key>",
+            f"aaa group server tacacs+ {TACACS_GROUP}",
+            " server name ISE-PSN1",
+            *vrf_fwd,
+            f" ip tacacs source-interface {source}",
+            f"aaa authentication login {ADMIN_LIST} group {TACACS_GROUP} local",
+            f"aaa authorization exec {ADMIN_LIST} group {TACACS_GROUP} local",
+            f"aaa accounting commands 15 {ADMIN_LIST} start-stop group {TACACS_GROUP}",
+            "line vty 0 15",
+            f" login authentication {ADMIN_LIST}",
+            f" authorization exec {ADMIN_LIST}",
+            f" accounting commands 15 {ADMIN_LIST}",
+        ]
+        undo = [
+            "line vty 0 15",
+            f" no login authentication {ADMIN_LIST}",
+            f" no authorization exec {ADMIN_LIST}",
+            f" no accounting commands 15 {ADMIN_LIST}",
+            "exit",
+            f"no aaa accounting commands 15 {ADMIN_LIST} start-stop group {TACACS_GROUP}",
+            f"no aaa authorization exec {ADMIN_LIST} group {TACACS_GROUP} local",
+            f"no aaa authentication login {ADMIN_LIST} group {TACACS_GROUP} local",
+            f"no aaa group server tacacs+ {TACACS_GROUP}",
+            "no tacacs server ISE-PSN1",
+            *undo,
+        ]
+    return lines, undo
+
+
+def register_onboard_nad(reg: ToolRegistrar) -> None:
+    enabled = set(reg.tiers)
+
+    @reg.prompt(
+        title="Onboard a switch into ISE",
+        uses=["ise", "cml", "catc"],
+        tier=Tier.WRITE,
+        example={"name": "syd-acc-sw01", "ip": "192.0.2.21", "location": "SYD", "switch": "lab/sw1"},
+        tools=[
+            "ise_get_nad",
+            "ise_list_ndgs",
+            "ise_list_nodes",
+            "ise_create_ndg",
+            "ise_create_nad",
+            "ise_update_nad",
+            "ise_audit_nads",
+            "ise_policy_explain",
+            "ise_admin_policy_explain",
+            "ise_get_auth_list",
+            "ise_recent_auth_failures",
+            "ise_find_session",
+            "ise_delete_object",
+            "cml_run_commands",
+            "cml_configure_node",
+            "catc_get_device",
+            "catc_list_devices",
+            "catc_run_show_commands",
+            "catc_get_site_settings",
+            "catc_update_site_aaa_settings",
+            "catc_provision_devices",
+            "catc_create_template",
+            "catc_commit_template",
+            "catc_preview_template",
+            "catc_deploy_template",
+        ],
+    )
+    def ise_onboard_nad(
+        name: Annotated[str, Field(description="The switch's NAD name in ISE, normally its host name")],
+        ip: Annotated[
+            str,
+            Field(description="The address its AAA comes from (the source interface's IP); empty: find it"),
+        ] = "",
+        switch: Annotated[
+            str,
+            Field(
+                description="Where to configure the switch: 'lab/node' for a CML node (e.g. lab/sw1), or "
+                "its Catalyst Center name or IP. Empty: Catalyst Center with the NAD IP"
+            ),
+        ] = "",
+        location: Annotated[
+            str,
+            Field(
+                description="Location group under 'Location#All Locations', e.g. 'SYD' or 'SYD#Bldg-1' "
+                "(created if missing)"
+            ),
+        ] = "",
+        device_type: Annotated[
+            str,
+            Field(description="Device type group under 'Device Type#All Device Types' (created if missing)"),
+        ] = "Switch",
+        protocols: Annotated[
+            Literal["radius", "tacacs", "both"],
+            Field(description="RADIUS (802.1X/MAB to ISE), TACACS+ (admin logins on the vty lines), or both"),
+        ] = "radius",
+        source_interface: Annotated[
+            str,
+            Field(
+                description="Switch interface that sources AAA, e.g. 'Vlan10' or 'Loopback0'; empty: the "
+                "interface that holds the NAD IP"
+            ),
+        ] = "",
+        vrf: Annotated[
+            str,
+            Field(description="VRF the source interface is in, e.g. 'Mgmt-vrf'; empty: the global table"),
+        ] = "",
+        ise_address: Annotated[
+            str, Field(description="ISE PSN address the switch sends AAA to; empty: from ise_list_nodes")
+        ] = "",
+        site: Annotated[
+            str,
+            Field(
+                description="Catalyst Center site path for the closing coverage check, e.g. "
+                "'Global/SYD/Bldg-1'"
+            ),
+        ] = "",
+        test_user: Annotated[
+            str, Field(description="Optional: the account for the test login (never its password)")
+        ] = "",
+        mac: Annotated[
+            str, Field(description="Optional: an endpoint on an 802.1X/MAB port of this switch, to verify")
+        ] = "",
+    ) -> str:
+        """Day-1 onboarding of an access switch into ISE, the same way every time: the location and
+        device-type groups, the NAD with its RADIUS and/or TACACS+ secret, the switch's AAA config (a
+        preview through cml_configure_node, Catalyst Center's site AAA settings or a template), a test
+        login seen in ISE, the endpoint session, a recorded undo (ISE and the switch's 'no' lines), and
+        a closing coverage check of the site against ISE's NADs. Every change is a preview the user
+        approves."""
+        name = name.strip()
+        if not SAFE_HOST.match(name):
+            raise InvalidRequest("name: a host name (letters, digits, . - _)")
+        mac, test_user, ip, switch = _validated(mac, test_user, ip, switch)
+        location = location.strip().strip("#")
+        device_type = device_type.strip().strip("#")
+        for label, value in (("location", location), ("device_type", device_type)):
+            if value and not SAFE_GROUP_PATH.match(value):
+                raise InvalidRequest(f"{label}: group names (letters, digits, spaces, . - _) joined by '#'")
+        if not device_type:
+            raise InvalidRequest("device_type: give a device type group, e.g. 'Switch'")
+        source_interface = source_interface.strip()
+        if source_interface and not SAFE_INTERFACE.match(source_interface):
+            raise InvalidRequest("source_interface: an interface name like 'Vlan10' or 'Loopback0'")
+        vrf = vrf.strip()
+        if vrf and not SAFE_VRF.match(vrf):
+            raise InvalidRequest("vrf: a VRF name like 'Mgmt-vrf'")
+        ise = ""
+        if ise_address.strip():
+            parsed = parse_ip(ise_address.strip())
+            if parsed is None:
+                raise InvalidRequest(f"ise_address {ise_address.strip()!r} is not an IP address")
+            ise = parsed
+        site = site.strip()
+        if site and not SAFE_SITE.match(site):
+            raise InvalidRequest("site must be a site path like 'Global/Area/Building'")
+
+        radius = protocols in ("radius", "both")
+        tacacs = protocols in ("tacacs", "both")
+        what = {"both": "RADIUS and TACACS+", "radius": "RADIUS", "tacacs": "TACACS+"}[protocols]
+        ip_text = ip or "<the NAD IP from step 1>"
+        ise_text = ise or "<the PSN address from step 1>"
+        src_text = source_interface or "<the interface that holds the NAD IP>"
+        loc_group = f"Location#All Locations#{location}" if location else ""
+        type_group = f"Device Type#All Device Types#{device_type}"
+        groups = [g for g in (loc_group, type_group) if g]
+        groups_arg = ", ".join(f'"{g}"' for g in groups)
+        kinds = [k for k, on in (("radius", radius), ("tacacs", tacacs)) if on]
+        nad_secrets = ", ".join(f"{k}_secret=<from the user>" for k in kinds)
+        secrets = " and ".join({"radius": "the RADIUS secret", "tacacs": "the TACACS+ key"}[k] for k in kinds)
+        lines, undo = _switch_aaa_lines(radius=radius, tacacs=tacacs, ise=ise_text, source=src_text, vrf=vrf)
+        lines_text = "\n".join(f"     {line}" for line in lines)
+        undo_text = "\n".join(f"       {line}" for line in undo)
+
+        if switch and "/" in switch:
+            lab, node = switch.split("/", 1)
+            cli = f'{tool_ref("cml_run_commands")} with lab="{lab}", nodes=["{node}"]'
+            where = f"the CML node {node} in lab {lab}"
+            configure = tool_ref("cml_configure_node")
+            apply_text = f"""   {configure} with lab="{lab}", node="{node}", lines=[the lines above],
+   save=false, WITHOUT confirm. Show the preview and wait for the user's approval. Save only after
+   step 6 passes: the same tool with mode="exec", lines=["write memory"] (a preview again)."""
+            switch_undo = f'{tool_ref("cml_configure_node")} with lab="{lab}", node="{node}" and these lines'
+            catc_check = ""
+        else:
+            target = switch or ip_text
+            cli = f'{tool_ref("catc_run_show_commands")} with devices=["{target}"]'
+            where = f"the Catalyst Center device {target}"
+            get_device = tool_ref("catc_get_device")
+            catc_check = (
+                f'\n   - Catalyst Center: {get_device} with device="{target}": provisioned to a site whose\n'
+                "     AAA is ISE? Then Catalyst Center creates the NAD (step 5); step 4 only checks it."
+            )
+            apply_text = f"""   Catalyst Center decides how (step 1 found which):
+   - Provisioned to a site whose AAA is ISE ({tool_ref("catc_get_site_settings")} with the site, AAA
+     section): Catalyst Center owns the switch's AAA. Set the site's network/client AAA to ISE with
+     {tool_ref("catc_update_site_aaa_settings")} and re-provision with {tool_ref("catc_provision_devices")}
+     (both previews; provisioning is dangerous tier on the catc server). Catalyst Center then pushes
+     its own AAA lines and creates or updates the NAD in ISE.
+   - Not provisioned (or AAA not managed there): a template.
+     {tool_ref("catc_create_template")} with name="ise-onboard-{name}", software_type="IOS-XE",
+     content=<the lines above>, then {tool_ref("catc_commit_template")}, {tool_ref("catc_preview_template")}
+     with device="{target}" (the rendered CLI) and {tool_ref("catc_deploy_template")} with
+     devices=["{target}"] WITHOUT confirm (dangerous tier on the catc server). Show each preview and
+     wait for the user's approval."""
+            switch_undo = (
+                "a negation template with these lines (create, commit, preview, deploy as in step\n"
+                "     5), or for a provisioned switch the site's previous AAA settings and a re-provision"
+            )
+
+        loc_step = (
+            f'   - {tool_ref("ise_create_ndg")} with path="{loc_group}" if step 2 found it missing (each\n'
+            "     missing parent first: the tool refuses a group whose parent doesn't exist)."
+            if loc_group
+            else "   - No location given: ask which location group the switch belongs in (policy conditions\n"
+            "     usually match on it). Only the default 'All Locations' is a finding in step 8."
+        )
+        admin_user = test_user or "<the test account>"
+        tacacs_test = (
+            f"""   - TACACS+: the user opens a NEW SSH session to {ip_text} with
+     {test_user or "a test account"} (keep the current session open until it works).
+     {tool_ref("ise_admin_policy_explain")} with user="{admin_user}", nad="{name}" shows the
+     device-admin rule it lands on (a device-admin policy set must match the NAD's groups). ISE has
+     no REST live log for TACACS+: on the switch 'show tacacs' counts it, and the user reads
+     Operations > TACACS > Live Logs.
+   - Lockout check (TACACS+): log in once more with the LOCAL account on the console. It must still
+     work; if it doesn't, undo step 5 at once."""
+            if tacacs
+            else ""
+        )
+        radius_test = (
+            f"""   - RADIUS: the user types on the switch console (never here):
+       test aaa group {RADIUS_GROUP} {test_user or "<user>"} <password> new-code
+     Then {tool_ref("ise_get_auth_list")} with nad="{name}", since_minutes=15{
+                f', user="{test_user}"' if test_user else ""
+            }: the attempt
+     with NAS IP {ip_text}. A reject still proves the path and the secret; nothing at all: {
+                tool_ref("ise_recent_auth_failures")
+            } with nad="{name}", then
+     'show aaa servers' (requests rising, no responses = the secret, the source address or the route)."""
+            if radius
+            else ""
+        )
+        session_step = (
+            f'{tool_ref("ise_find_session")} with mac="{mac}"'
+            if mac
+            else f"{tool_ref('ise_find_session')} with mac=<an endpoint on an 802.1X/MAB port>"
+            + (f' or username="{test_user}"' if test_user else "")
+        )
+        expected = (
+            f'{tool_ref("catc_list_devices")} with site="{site}" (hostname, managementIpAddress); pass the\n'
+            f"   rows to {tool_ref('ise_audit_nads')} as expected=, with "
+            + (f'stale_within="{loc_group}"' if loc_group else "check_stale=false")
+            + " (a site is part of the inventory)"
+            if site
+            else f'{tool_ref("ise_audit_nads")} with expected=[{{"name": "{name}", "ip": "{ip_text}", '
+            f'"ndg": [{groups_arg}]'
+            + (', "aaa_server": "' + ise_text + '"' if radius else "")
+            + "}], check_stale=false (no site given: just this switch)"
+        )
+        vrf_note = (
+            f"VRF {vrf}: the server groups carry 'ip vrf forwarding {vrf}', the CoA client the vrf keyword."
+            if vrf
+            else "No VRF given: the source interface is in the global table (step 1 checks it)."
+        )
+
+        psn_text = "" if ise else f"{tool_ref('ise_list_nodes')}: the PSN address the switch will use."
+        ping_vrf = f" with vrf {vrf}" if vrf else ""
+
+        return f"""Onboard switch {name} into ISE for {what}, configured through {where}.
+Rules for every write below: call the tool WITHOUT confirm, show the preview, wait for the user's
+approval; never pass confirm yourself. Secrets ({secrets}) come from the user, are the same in ISE and
+on the switch, and are never repeated back or written in the report; never invent one. The cml_* and
+catc_* tools need those servers: without one, do the ISE steps and give the switch lines for the user
+to paste.
+
+Where AAA comes from: the NAD address is the IP of the interface that sources AAA. Cisco's campus
+design sources it from the in-band management SVI or Loopback0, so the address stays the same
+whichever uplink is up. Sourcing it from the out-of-band management port (GigabitEthernet0/0 in
+Mgmt-vrf, the switch's counterpart of SD-WAN's VPN 512) is a common lab and data-centre pattern and is
+fine when ISE is reachable on the management network: then set vrf="Mgmt-vrf". {vrf_note}
+
+1. Before any change (read only).
+   - ISE: {tool_ref("ise_get_nad")} with device="{ip or name}" (and with the name, if an IP was given):
+     an existing NAD at that IP or name means step 4 updates it with {tool_ref("ise_update_nad")}
+     instead of adding a second one. {psn_text}
+   - Switch, {cli}: "show running-config | section aaa|radius|tacacs|dot1x",
+     "show running-config | include ^username", "show ip interface brief", "show vrf",
+     "show aaa servers". Record what is already there (the undo restores it, and 'aaa new-model'
+     stays if it was on).{"" if ip else " The NAD IP is the address of the source interface."}
+     A ping from the switch to {ise_text}{ping_vrf} and source {src_text} must answer.{catc_check}
+   - Lockout guard: the switch must have a local privilege-15 username that logs in on the console.
+     No such account: stop and say so; the config below falls back to local accounts only.
+
+2. Device groups. {tool_ref("ise_list_ndgs")} with name="{location or "Location"}" and
+   name="{device_type}": which of {groups_arg} exist.
+
+3. Create the missing groups (previews).
+{loc_step}
+   - {tool_ref("ise_create_ndg")} with path="{type_group}" if it is missing.
+
+4. The NAD (preview). {tool_ref("ise_create_nad")} with name="{name}", ips=["{ip_text}/32"],
+   {nad_secrets}, groups=[{groups_arg}], coa_port=1700,
+   description="Access switch, AAA from {src_text}". Then {tool_ref("ise_get_nad")} with
+   device="{name}": groups, secret set, CoA port.
+
+5. The switch's AAA config (preview). The lines (IOS XE; Cisco's campus NAC defaults):
+{lines_text}
+   Leave out the two 'default local' lines if step 1 found default login/exec lists already, and
+   keep the existing ones. The secrets go only into the tool arguments. Console logins keep the
+   local default list; {
+            f"the vty lines use {ADMIN_LIST} (TACACS+, then local when ISE is unreachable)."
+            if tacacs
+            else "admin logins stay local (protocols=radius)."
+        }
+   802.1X/MAB on the access ports is a separate change: none of these lines touch an interface.
+{apply_text}
+
+6. Test the login.
+{chr(10).join(x for x in (radius_test, tacacs_test) if x)}
+   - {tool_ref("ise_policy_explain")} with nad="{name}", flow="wired-dot1x": which policy set and rule
+     endpoints on this switch will hit.
+
+7. Verify the session. {session_step}: NAD IP {ip_text}, the port, the authorization rule and profile.
+   No endpoint yet: say so (a 'test aaa' login sends no accounting, so it has no session).
+
+8. Coverage check. {expected}.
+   The new NAD must match by IP with its groups (no missing_nad, wrong_ndg, ip_mismatch{
+            ", aaa_elsewhere" if radius else ""
+        });
+   list any stale NADs it reports at the site for the user, without deleting them.
+
+9. Report and record the undo. One table: NAD (created/updated, groups) | switch config (lines
+   applied, saved) | test login | session | coverage findings. Then the exact undo, in this order:
+   - Switch ({switch_undo}):
+{undo_text}
+     Leave out any line step 1 found configured before this run; 'no aaa new-model' only if step 1
+     found it off.
+{_onboard_undo_text(enabled, name)}"""
