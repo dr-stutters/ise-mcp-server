@@ -15,6 +15,7 @@ from ise_mcp.specs import spec_sources
 from ise_mcp.tools import (
     activity,
     ad,
+    admin_audit,
     backup,
     certs,
     config_export,
@@ -132,6 +133,7 @@ def create_server(
             system.register,
             backup.register,
             health.register,
+            admin_audit.register,
             writes.register,
             endpoint_bulk.register,
             policy_edit.register,
