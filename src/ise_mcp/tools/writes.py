@@ -357,6 +357,146 @@ DELETE_KINDS = {
 
 ACCESS = {"accept": "ACCESS_ACCEPT", "reject": "ACCESS_REJECT"}
 
+# --- authorization profile web redirection and common tasks (I85) -----------------------------
+
+RedirectType = Literal["CentralizedWebAuth", "HotSpot", "NativeSupplicanProvisioning", "ClientProvisioning"]
+MacsecPolicy = Literal["MUST_SECURE", "SHOULD_SECURE", "MUST_NOT_SECURE"]
+# ERS portal collections, by the kind of portal they hold.
+PORTAL_RESOURCES = {
+    "sponsored-guest": "sponsoredguestportal",
+    "self-registration": "selfregportal",
+    "hotspot": "hotspotportal",
+    "BYOD": "byodportal",
+    "sponsor": "sponsorportal",
+    "My Devices": "mydeviceportal",
+}
+# Which portal kinds each redirect type takes (ISE refuses a portal of another kind). ERS has no
+# client provisioning portal collection, so that type's portal is checked by ISE on apply.
+REDIRECT_PORTALS: dict[str, tuple[str, ...]] = {
+    "CentralizedWebAuth": ("sponsored-guest", "self-registration"),
+    "HotSpot": ("hotspot",),
+    "NativeSupplicanProvisioning": ("BYOD",),
+    "ClientProvisioning": (),
+}
+
+
+class Redirect(BaseModel):
+    """Web redirection (ERS webRedirection) on an authorization profile."""
+
+    type: RedirectType = Field(
+        description="CentralizedWebAuth (guest CWA: sponsored-guest or self-registration portal), HotSpot "
+        "(hotspot portal), NativeSupplicanProvisioning (BYOD portal) or ClientProvisioning (posture)"
+    )
+    acl: str = Field(
+        min_length=1,
+        description="Redirect ACL name as configured on the switch/WLC (permit = redirect), e.g. "
+        "'ACL-REDIRECT'; ISE sends only the name",
+    )
+    portal: str = Field(min_length=1, description="Portal name, e.g. 'Sponsored Guest Portal (default)'")
+    static_host: str | None = Field(
+        default=None,
+        description="Static IP, host name or FQDN for the redirect URL instead of the PSN's own name",
+    )
+
+
+InterfaceTemplateArg = Annotated[
+    str | None,
+    Field(description="Interface template (IBNS 2.0 'template <name>' on the switch) to apply to the port"),
+]
+AutoSmartPortArg = Annotated[
+    str | None,
+    Field(description="Auto Smart Port event name the switch maps to a macro, e.g. 'CISCO_PHONE_EVENT'"),
+]
+MacsecArg = Annotated[
+    MacsecPolicy | None, Field(description="MACsec policy (linksec-policy) for the session")
+]
+NeatArg = Annotated[
+    bool | None, Field(description="NEAT: authorise a supplicant switch (device-traffic-class=switch)")
+]
+WebAuthArg = Annotated[bool | None, Field(description="Local web authentication on the switch")]
+AirespaceAclArg = Annotated[
+    str | None, Field(description="Airespace ACL name on the WLC (Airespace-ACL-Name)")
+]
+Ipv6DaclArg = Annotated[str | None, Field(description="IPv6 downloadable ACL name (see ise_list_dacls)")]
+TrackMovementArg = Annotated[
+    bool | None,
+    Field(description="Track the endpoint's location via the MSE location service (a move re-authorizes)"),
+]
+
+
+async def _portal_names(app: IseApp) -> dict[str, list[str]]:
+    """Portal names by kind, from the ERS portal collections that answer."""
+    out: dict[str, list[str]] = {}
+    for kind, resource in PORTAL_RESOURCES.items():
+        try:
+            page = await app.ers_pager.fetch_page(app.ers, f"/ers/config/{resource}", limit=1000)
+        except NotFound:
+            continue
+        out[kind] = [str(i.get("name")) for i in page.items if isinstance(i, dict) and i.get("name")]
+    return out
+
+
+async def redirect_body(app: IseApp, r: Redirect) -> tuple[dict[str, Any], list[str], list[str]]:
+    """(webRedirection, blockers, side effects). The portal is matched to ISE's spelling and checked
+    against the redirect type: ISE rejects a portal of the wrong kind."""
+    portals = await _portal_names(app)
+    wanted = REDIRECT_PORTALS[r.type]
+    key = r.portal.strip().lower()
+    found = {k: n for k, names in portals.items() for n in names if n.lower() == key}
+    blockers: list[str] = []
+    warnings = [
+        f"The redirect ACL {r.acl!r} must exist on the switch/WLC: ISE sends only its name "
+        "(cisco-av-pair url-redirect-acl)"
+    ]
+    name = r.portal.strip()
+    hit = [k for k in wanted if k in found]
+    if hit:
+        name = found[hit[0]]
+    elif found:
+        kind, actual = next(iter(found.items()))
+        need = " or ".join(wanted) or "client provisioning"
+        blockers.append(
+            f"Portal {actual!r} is a {kind} portal: {r.type} redirection needs a {need} portal "
+            "(ISE rejects the mismatch)"
+        )
+    elif wanted:
+        have = [n for k in wanted for n in portals.get(k, [])]
+        blockers.append(
+            f"No {' or '.join(wanted)} portal named {r.portal!r}"
+            + (f" (have: {', '.join(repr(n) for n in have)})" if have else "")
+            + "; see ise_list_guest_portals"
+        )
+    else:
+        warnings.append(
+            f"Client provisioning portal {r.portal!r} is checked by ISE on apply (ERS cannot list those)"
+        )
+    body: dict[str, Any] = {"WebRedirectionType": r.type, "ACL": r.acl.strip(), "portalName": name}
+    if r.static_host:
+        body["staticIPHostNameFQDN"] = r.static_host.strip()
+    if r.type == "CentralizedWebAuth":
+        body["displayCertificatesRenewalMessages"] = True  # mandatory for CWA (GUI default)
+    return body, blockers, warnings
+
+
+def common_task_warnings(body: dict[str, Any], before: dict[str, Any] | None = None) -> list[str]:
+    """What the NAD must have, and combinations ISE treats specially (side effects, not blockers).
+    With `before` (an update), only for what changes."""
+    changed = {k for k, v in body.items() if before is None or before.get(k) != v}
+    out = []
+    if body.get("webRedirection") and body.get("webAuth") and changed & {"webRedirection", "webAuth"}:
+        out.append(
+            "Both web redirection (central) and web_auth (local web auth) are set: the GUI offers one "
+            "or the other; ISE may reject the pair"
+        )
+    if body.get("neat") and "neat" in changed:
+        out.append("NEAT: the switch must run 'cisp enable' and the authenticator port 'dot1x supplicant'")
+    if body.get("interfaceTemplate") and "interfaceTemplate" in changed:
+        out.append(
+            f"Interface template {body['interfaceTemplate']!r} must exist on the switch (IBNS 2.0 "
+            "'template' config); ISE sends only its name"
+        )
+    return out
+
 
 # --- internal users (I73) ----------------------------------------------------------------------
 
@@ -1384,6 +1524,14 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         reauth_seconds: int | None,
         voice_domain: bool | None,
         description: str | None,
+        ipv6_dacl: str | None = None,
+        airespace_acl: str | None = None,
+        interface_template: str | None = None,
+        auto_smart_port: str | None = None,
+        macsec_policy: str | None = None,
+        neat: bool | None = None,
+        web_auth: bool | None = None,
+        track_movement: bool | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {}
         if access is not None:
@@ -1400,6 +1548,21 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             body["voiceDomainPermission"] = voice_domain
         if description is not None:
             body["description"] = description
+        if ipv6_dacl:
+            if not await exists(app, "downloadableacl", ipv6_dacl):
+                raise NotFound(f"No dACL named {ipv6_dacl!r} (ipv6_dacl); see ise_list_dacls.", 404)
+            body["ipv6DaclName"] = ipv6_dacl
+        for key, value in (
+            ("airespaceACL", airespace_acl),
+            ("interfaceTemplate", interface_template),
+            ("autoSmartPort", auto_smart_port),
+            ("macSecPolicy", macsec_policy),
+        ):
+            if value:
+                body[key] = value.strip()
+        for key, flag in (("neat", neat), ("webAuth", web_auth), ("trackMovement", track_movement)):
+            if flag is not None:
+                body[key] = flag
         return body
 
     @reg.write(title="Create authorization profile")
@@ -1435,12 +1598,32 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "dictionary must exist in ISE; the preview names the GUI step if not)"
             ),
         ] = None,
+        redirect: Annotated[
+            Redirect | None,
+            Field(
+                description="Web redirection: {type, acl, portal, static_host}; e.g. guest CWA = {type: "
+                "'CentralizedWebAuth', acl: 'ACL-REDIRECT', portal: 'Sponsored Guest Portal (default)'}"
+            ),
+        ] = None,
+        interface_template: InterfaceTemplateArg = None,
+        auto_smart_port: AutoSmartPortArg = None,
+        macsec_policy: MacsecArg = None,
+        neat: NeatArg = None,
+        web_auth: WebAuthArg = None,
+        airespace_acl: AirespaceAclArg = None,
+        ipv6_dacl: Ipv6DaclArg = None,
+        track_movement: TrackMovementArg = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Create an authorization profile (what an authorization rule grants): access type, VLAN, dACL,
-        reauth timer, voice domain and advanced attributes (av_pairs, e.g. cisco-av-pair=Role=<role> for
-        a Catalyst Center admin login; sdwan_group for Viptela-Group-Name, the SD-WAN Manager admin
-        group). Preview-first; blocked if the name exists or an attribute is not in ISE's dictionaries.
+        reauth timer, voice domain, advanced attributes, web redirection (guest CWA, hotspot, BYOD/NSP or
+        client provisioning) and the switch/WLC common tasks (interface template, Auto Smart Port,
+        MACsec policy, NEAT, local web auth, Airespace ACL, IPv6 dACL, track movement).
+
+        Advanced attributes: av_pairs, e.g. cisco-av-pair=Role=<role> for a Catalyst Center admin
+        login; sdwan_group for Viptela-Group-Name, the SD-WAN Manager admin group. Redirect: the redirect
+        ACL (configured on the NAD) and a portal of the matching kind. Preview-first; blocked if the name
+        exists, an attribute is not in ISE's dictionaries or the portal does not fit the redirect type.
         Use it in a rule with ise_create_authz_rule."""
         app: IseApp = get_client(ctx)
         advanced = [_av_pair(a) for a in av_pairs or []]
@@ -1465,13 +1648,29 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 reauth_seconds=reauth_seconds,
                 voice_domain=voice_domain,
                 description=description,
+                ipv6_dacl=ipv6_dacl,
+                airespace_acl=airespace_acl,
+                interface_template=interface_template,
+                auto_smart_port=auto_smart_port,
+                macsec_policy=macsec_policy,
+                neat=neat,
+                web_auth=web_auth,
+                track_movement=track_movement,
             ),
         }
         if advanced:
             body["advancedAttributes"] = advanced
+        redirect_blockers: list[str] = []
+        side_effects = list(av_warnings)
+        if redirect is not None:
+            body["webRedirection"], redirect_blockers, redirect_warnings = await redirect_body(app, redirect)
+            side_effects += redirect_warnings
+        side_effects += common_task_warnings(body)
         blockers = (
-            [f"Profile {name!r} already exists"] if await exists(app, "authorizationprofile", name) else []
-        ) + av_blockers
+            ([f"Profile {name!r} already exists"] if await exists(app, "authorizationprofile", name) else [])
+            + av_blockers
+            + redirect_blockers
+        )
         return await preview_or_apply(
             ctx,
             tool="ise_create_authz_profile",
@@ -1485,13 +1684,22 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "description": description,
                 "av_pairs": av_pairs,
                 "sdwan_group": sdwan_group,
+                "redirect": redirect.model_dump() if redirect else None,
+                "interface_template": interface_template,
+                "auto_smart_port": auto_smart_port,
+                "macsec_policy": macsec_policy,
+                "neat": neat,
+                "web_auth": web_auth,
+                "airespace_acl": airespace_acl,
+                "ipv6_dacl": ipv6_dacl,
+                "track_movement": track_movement,
             },
             confirm=confirm,
             plan=Plan(
                 f"Create authorization profile {name}",
                 details=body,
                 blockers=blockers,
-                side_effects=av_warnings,
+                side_effects=side_effects,
             ),
             apply=lambda: ers_post(app, "authorizationprofile", "AuthorizationProfile", body),
         )
@@ -1520,12 +1728,34 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "other advanced attributes ('' removes it)"
             ),
         ] = None,
+        redirect: Annotated[
+            Redirect | Literal[""] | None,
+            Field(
+                description="Replace the web redirection with {type, acl, portal, static_host} ('' removes "
+                "it); the portal must fit the type"
+            ),
+        ] = None,
+        interface_template: Annotated[
+            str | None, Field(description="Interface template name ('' to remove)")
+        ] = None,
+        auto_smart_port: Annotated[
+            str | None, Field(description="Auto Smart Port event name ('' to remove)")
+        ] = None,
+        macsec_policy: Annotated[
+            MacsecPolicy | Literal[""] | None, Field(description="MACsec policy ('' to remove)")
+        ] = None,
+        neat: NeatArg = None,
+        web_auth: WebAuthArg = None,
+        airespace_acl: Annotated[str | None, Field(description="Airespace ACL name ('' to remove)")] = None,
+        ipv6_dacl: Annotated[str | None, Field(description="IPv6 dACL name ('' to remove)")] = None,
+        track_movement: TrackMovementArg = None,
         confirm: Confirm = None,
     ) -> dict[str, Any]:
         """Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain,
-        description or advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group).
-        The preview lists the rules that use the profile (they're all affected at the next
-        authentication)."""
+        description, advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group), web
+        redirection (redirect) or common tasks (interface template, Auto Smart Port, MACsec, NEAT, local
+        web auth, Airespace ACL, IPv6 dACL, track movement). The preview lists the rules that use the
+        profile (they're all affected at the next authentication)."""
         app: IseApp = get_client(ctx)
         current = await ers_resolve(
             app,
@@ -1542,12 +1772,35 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             reauth_seconds=reauth_seconds,
             voice_domain=voice_domain,
             description=description,
+            ipv6_dacl=ipv6_dacl or None,
+            airespace_acl=airespace_acl,
+            interface_template=interface_template,
+            auto_smart_port=auto_smart_port,
+            macsec_policy=macsec_policy,
+            neat=neat,
+            web_auth=web_auth,
+            track_movement=track_movement,
         )
         desired = deep_merge(current, patch)
-        if vlan == "":
-            desired.pop("vlan", None)
-        if dacl == "":
-            desired.pop("daclName", None)
+        for value, key in (
+            (vlan, "vlan"),
+            (dacl, "daclName"),
+            (ipv6_dacl, "ipv6DaclName"),
+            (airespace_acl, "airespaceACL"),
+            (interface_template, "interfaceTemplate"),
+            (auto_smart_port, "autoSmartPort"),
+            (macsec_policy, "macSecPolicy"),
+            (redirect, "webRedirection"),
+        ):
+            if value == "":
+                desired.pop(key, None)
+        redirect_blockers: list[str] = []
+        redirect_warnings: list[str] = []
+        if isinstance(redirect, Redirect):
+            # Replaced whole: a stale portal or static host from another type would be refused.
+            desired["webRedirection"], redirect_blockers, redirect_warnings = await redirect_body(
+                app, redirect
+            )
         av_blockers: list[str] = []
         av_warnings: list[str] = []
         if av_pairs is not None or sdwan_group is not None:
@@ -1578,9 +1831,11 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             f"Update authorization profile {current.get('name')}",
             details={"changes": field_changes(current, desired, replace=True), "used_by_rules": users},
             fingerprint=fingerprint(current),
-            blockers=av_blockers,
+            blockers=av_blockers + redirect_blockers,
             side_effects=([f"Affects {len(users)} rule(s) at the next authentication"] if users else [])
-            + av_warnings,
+            + av_warnings
+            + redirect_warnings
+            + common_task_warnings(desired, current),
         )
         return await preview_or_apply(
             ctx,
@@ -1595,6 +1850,15 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 "description": description,
                 "av_pairs": av_pairs,
                 "sdwan_group": sdwan_group,
+                "redirect": redirect.model_dump() if isinstance(redirect, Redirect) else redirect,
+                "interface_template": interface_template,
+                "auto_smart_port": auto_smart_port,
+                "macsec_policy": macsec_policy,
+                "neat": neat,
+                "web_auth": web_auth,
+                "airespace_acl": airespace_acl,
+                "ipv6_dacl": ipv6_dacl,
+                "track_movement": track_movement,
             },
             confirm=confirm,
             plan=plan,
