@@ -6,8 +6,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
 import respx
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 from ise_mcp.tools.coa_bulk import ndg_matches, port_matches, sgt_matches, ssid_of
 from tests.unit.conftest import MISSING_SESSION, ers_page, make_server, xml
@@ -240,7 +242,7 @@ async def test_scope_sgt_policy_set_ssid(mock: respx.MockRouter) -> None:
         **{
             mac(1): {"sgt": "Employees", "policy_set": "Wired", "called": "AA-BB-CC-DD-EE-01:corp"},
             mac(2): {
-                "sgt": "Contractors (5/0005)",
+                "sgt": "Contractors",  # MnT records the name only
                 "policy_set": "Wireless",
                 "called": "AA-BB-CC-DD-EE-02:guest",
             },
@@ -249,8 +251,16 @@ async def test_scope_sgt_policy_set_ssid(mock: respx.MockRouter) -> None:
     )
     sgt, _ = await run({"scope": "sgt", "value": "Employees"}, apply=False)
     assert {s["mac"] for s in sgt["preview"]["sessions"]} == {mac(1), mac(3)}
+    mock.get("/ers/config/sgt").respond(
+        json=ers_page([{"id": "g4", "name": "Employees"}, {"id": "g5", "name": "Contractors"}])
+    )
+    mock.get("/ers/config/sgt/g4").respond(json={"Sgt": {"id": "g4", "name": "Employees", "value": 4}})
+    mock.get("/ers/config/sgt/g5").respond(json={"Sgt": {"id": "g5", "name": "Contractors", "value": 5}})
     tag, _ = await run({"scope": "sgt", "value": "5"}, apply=False)
     assert [s["mac"] for s in tag["preview"]["sessions"]] == [mac(2)]
+    assert tag["preview"]["sgt"] == "Contractors (5)"
+    with pytest.raises(ToolError, match="No SGT with tag 99"):
+        await run({"scope": "sgt", "value": "99"}, apply=False)
     ps, _ = await run({"scope": "policy_set", "value": "wireless"}, apply=False)
     assert {s["mac"] for s in ps["preview"]["sessions"]} == {mac(2), mac(3)}
     ssid, _ = await run({"scope": "ssid", "value": "corp"}, apply=False)
@@ -353,6 +363,8 @@ def test_matchers() -> None:
     assert not port_matches("Gi1/0/5", "GigabitEthernet1/0/50")
     assert sgt_matches("employees", "Employees (4/0004)") and sgt_matches("4", "Employees (4/0004)")
     assert not sgt_matches("40", "Employees (4/0004)")
+    assert sgt_matches("16", "Guests (16/0010)") and not sgt_matches("10", "Guests (16/0010)")
+    assert not sgt_matches("4", "Employees")  # numeric tags are resolved to names before matching
     assert ndg_matches("Location#All Locations", "Location#All Locations#Sydney")
     assert ndg_matches("sydney", "Location#All Locations#Sydney")
     assert not ndg_matches("syd", "Location#All Locations#Sydney")

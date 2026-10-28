@@ -19,6 +19,7 @@ from pydantic import Field
 from ise_mcp._core import (
     Confirm,
     InvalidRequest,
+    NotFound,
     Plan,
     ToolRegistrar,
     UpstreamError,
@@ -84,19 +85,36 @@ def port_matches(want: str, port: Any) -> bool:
 
 
 def sgt_matches(want: str, sgt: Any) -> bool:
-    """'Employees', '4' or '0004' against MnT's cts_security_group ('Employees' or 'Employees (4/0004)')."""
+    """'Employees', or a tag ('4', '0x4'), against MnT's cts_security_group ('Employees', or
+    'Employees (4/0004)' with the decimal tag first). MnT normally gives the name only, so callers
+    turn a numeric `want` into the SGT's name first (sgt_match_value)."""
     text = str(sgt or "").strip()
     if not text:
         return False
     w = want.strip().casefold()
     if w in (text.casefold(), text.split("(")[0].strip().casefold()):
         return True
-    if w.isdigit() or re.fullmatch(r"0x[0-9a-f]+", w):
-        tag = int(w, 16) if w.startswith("0x") else int(w)
-        nums = re.findall(r"\b(\d+)\b", text.split("(", 1)[1] if "(" in text else text)
-        hexes = re.findall(r"\b([0-9A-Fa-f]{4})\b", text)
-        return tag in {int(n) for n in nums} or tag in {int(h, 16) for h in hexes}
+    m = re.search(r"\((\d+)(?:/[0-9A-Fa-f]+)?\)\s*$", text)
+    if m and (w.isdigit() or re.fullmatch(r"0x[0-9a-f]+", w)):
+        return (int(w, 16) if w.startswith("0x") else int(w)) == int(m.group(1))
     return False
+
+
+async def sgt_match_value(app: IseApp, value: str) -> str:
+    """A numeric SGT tag resolved to the SGT's name (MnT records the name, not the tag); a name is
+    returned as given. An unknown tag is refused; with ERS unreachable the tag is matched as is."""
+    v = value.strip()
+    if not v.isdigit():
+        return value
+    from ise_mcp.tools.sxp import resolve_sgt
+
+    try:
+        hit = await resolve_sgt(app, v)
+    except NotFound as e:
+        raise InvalidRequest(f"No SGT with tag {v}; see ise_list_sgts") from e
+    except UpstreamError:
+        return value
+    return str(hit.get("name") or value)
 
 
 def ndg_matches(want: str, group: str) -> bool:
@@ -235,6 +253,11 @@ async def scoped_sessions(app: IseApp, scope: str, value: str, limit: int) -> di
     (undetermined), ended/failed lookups, and too_many when more than `limit` match."""
     rows = await active_rows(app)
     rows, info = await scope_rows(app, rows, scope, value)
+    match_value = value
+    if scope == "sgt":
+        match_value = await sgt_match_value(app, value)
+        if match_value != value:
+            info["sgt"] = f"{match_value} ({value.strip()})"
     out: dict[str, Any] = {"scope_info": info, "active_list_total": len(rows)}
     need_detail = scope in DETAIL_SCOPES
     if not need_detail and len(rows) > limit:
@@ -260,7 +283,7 @@ async def scoped_sessions(app: IseApp, scope: str, value: str, limit: int) -> di
             skipped.append({**_row(f), "reason": "session ended (accounting Stop)"})
             continue
         if need_detail:
-            hit = fact_matches(scope, value, f)
+            hit = fact_matches(scope, match_value, f)
             if hit is None:
                 undetermined.append(_row(f))
                 continue

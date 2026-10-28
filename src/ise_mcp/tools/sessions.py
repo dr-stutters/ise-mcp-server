@@ -341,9 +341,11 @@ async def _detail_filter(
 ) -> tuple[list[dict[str, Any]], int]:
     """ActiveList rows kept by the detail filters (authz_profile, sgt, policy_set, port), and how many
     sessions MnT couldn't place. A port the list already carries is checked without a lookup."""
-    from ise_mcp.tools.coa_bulk import DETAIL_CAP, fact_matches, port_matches, session_facts
+    from ise_mcp.tools.coa_bulk import DETAIL_CAP, fact_matches, port_matches, session_facts, sgt_match_value
 
     wanted = {k: v for k, v in filters.items() if v}
+    if wanted.get("sgt"):
+        wanted["sgt"] = await sgt_match_value(app, str(wanted["sgt"]))
     port = wanted.get("port")
     if port and any(r.get("nas_port_id") for r in rows):
         rows = [r for r in rows if port_matches(port, r.get("nas_port_id"))]
