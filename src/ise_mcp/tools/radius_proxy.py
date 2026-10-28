@@ -53,6 +53,9 @@ EXTRA_SECRET_KEYS.update({"authenticatorKey"})
 # server's own ISE credentials (or any other secret in its environment) and send them to a RADIUS server.
 SECRET_ENV = re.compile(r"ISE_RADIUS_SECRET_[A-Z0-9_]+")
 _NAME = re.compile(r"^[A-Za-z0-9_.\- ]{1,64}$")
+# #158: ISE 3.5 refuses anything but letters, digits and '_' in an external RADIUS server name, at confirm
+# time ("The valid name can contain alphanumeric and underscore(_)"), so check it before the preview.
+_SERVER_NAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 BLASTRADIUS = (
     "ISE stops requiring Message-Authenticator on this server's responses: forged Access-Accepts "
     "(BlastRADIUS, CVE-2024-3596) are no longer rejected. Only for an old server that can't send it"
@@ -223,9 +226,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         fields change, others are kept. The shared secret comes from a server environment variable
         (secret_env) or shared_secret and is never shown. Preview-first with a diff."""
         app: IseApp = get_client(ctx)
-        if not _NAME.match(name):
+        if not _SERVER_NAME.match(name):
             raise InvalidRequest(
-                f"External RADIUS server names are 1-64 letters, digits, ' ', '_', '-', '.': {name!r}"
+                f"External RADIUS server names are 1-64 letters, digits and '_' (ISE refuses '-', '.' "
+                f"and spaces): {name!r}"
             )
         if host is not None and not parse_ip(host):
             raise InvalidRequest(f"host must be an IPv4 address: {host!r}")
@@ -279,6 +283,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                     "msgAuthIsRequiredOnResponse": True,
                     "enableKeyWrap": False,
                     "keyInputFormat": "ASCII",
+                    # #158: ISE 3.5 answers 502 to a create without both key fields, even with key
+                    # wrap off; a GET of a created server shows them as "".
+                    "encryptionKey": "",
+                    "authenticatorKey": "",
                 }
             ),
             **patch,
