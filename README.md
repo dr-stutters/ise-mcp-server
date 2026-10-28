@@ -226,7 +226,9 @@ On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_T
   sessions on the target switch port; if more than one shares it (an uplink or trunk) the action is
   blocked unless `ISE_COA_ALLOW_SHARED_PORT=true`.
 - **Blast radius** (bound with `MCP_MAX_BLAST_RADIUS` / `MCP_BLAST_RADIUS_OVERRIDES`): reported by
-  `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_apply_anc` / `ise_clear_anc`
+  `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_coa_bulk` (sessions in the
+  scope; it also takes its own `max`, refuses if any session is protected, and never bounces or shuts a
+  port in bulk), `ise_apply_anc` / `ise_clear_anc`
   (1), `ise_bulk_endpoints` (endpoints changed), `ise_bulk_internal_users` (users changed) and `ise_update_node_services` (1). Node-service and
   certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
@@ -292,7 +294,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-157 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+159 tools and 8 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 87 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -446,7 +448,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
 
-### Dangerous (18)
+### Dangerous (19)
 
 | Tool | What it does |
 |---|---|
@@ -454,6 +456,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_apply_anc` | Put an Adaptive Network Control policy on an endpoint (quarantine, port bounce, shutdown or reauthenticate, depending on the policy's actions). |
 | `ise_bind_certificate` | Install a CA-signed certificate on the node that generated its CSR and put it into service for the given roles (EAP, Admin, RADIUS DTLS, portal, pxGrid, SAML, messaging, TACACS). |
 | `ise_clear_anc` | Remove the ANC policy from an endpoint (release it from quarantine). |
+| `ise_coa_bulk` | Send a CoA to every live session in a scope (all sessions on a NAD or device group, with an authorization profile, SGT or policy set, of a user, or on an SSID), so a policy change (dACL, profile, SGT, rule) applies now instead of at each endpoint's next reauthentication. |
 | `ise_coa_disconnect` | Send a RADIUS CoA disconnect for an endpoint's live session: terminate it, bounce the switch port, or shut the port down (stays down until an admin re-enables it). |
 | `ise_coa_reauth` | Send a RADIUS Change of Authorization (reauthenticate) for an endpoint's live session, so new policy (group, profile, ANC) applies now instead of at the next reauth. |
 | `ise_create_backup` | Take an on-demand ISE configuration backup to a repository, before Catalyst Center's group-based policy migration or an upgrade. |
