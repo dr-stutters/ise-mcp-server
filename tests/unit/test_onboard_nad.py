@@ -8,7 +8,7 @@ from fastmcp import Client
 
 from ise_mcp._core.testing import compare_snapshots, render_prompts
 from tests.unit.conftest import make_server
-from tests.unit.test_contract import PROMPT_SAMPLES
+from tests.unit.test_contract import PROMPT_SAMPLES, SNAPSHOT_PROMPTS
 
 SNAPSHOTS = Path(__file__).parent.parent / "snapshots" / "prompts"
 SAMPLE = PROMPT_SAMPLES["ise_onboard_nad"]
@@ -118,5 +118,5 @@ async def test_prompt_snapshot() -> None:
         make_server(mcp_enable_writes=True, mcp_enable_dangerous=True), samples=PROMPT_SAMPLES
     )
     update = os.environ.get("UPDATE_PROMPT_SNAPSHOTS", "").lower() in {"1", "true", "yes"}
-    problems = compare_snapshots({"ise_onboard_nad": rendered["ise_onboard_nad"]}, SNAPSHOTS, update=update)
+    problems = compare_snapshots({n: rendered[n] for n in SNAPSHOT_PROMPTS}, SNAPSHOTS, update=update)
     assert not problems, "\n".join(problems)

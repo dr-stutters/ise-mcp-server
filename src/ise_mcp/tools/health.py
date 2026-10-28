@@ -13,6 +13,7 @@ from pydantic import Field
 
 from ise_mcp._core import NotFound, ToolRegistrar, UpstreamError, get_client, object_result
 from ise_mcp.client import IseApp
+from ise_mcp.tools import admin_audit
 from ise_mcp.tools._common import gather_limited, openapi_all
 from ise_mcp.tools.system import _cert_row, _parse_date, _response
 
@@ -352,7 +353,8 @@ def register(reg: ToolRegistrar) -> None:
         than 7 days) and repositories; system certificates per node (expired, expiring within
         cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags
         evaluation licences and days left); AD join points; and the server's own ISE admin account
-        and RBAC groups, flagged when more privileged than the enabled tiers need (I16). Use it weekly
+        and RBAC groups, flagged when more privileged than the enabled tiers need (I16); and an admins
+        review (Super Admin count, disabled, never-disabled, external; I74). Use it weekly
         or before a change.
         Details: ise_list_nodes, ise_list_patches, ise_get_backup_status, ise_list_certificates,
         ise_get_license_status."""
@@ -371,8 +373,11 @@ def register(reg: ToolRegistrar) -> None:
         )
         node_rows = check_nodes(nodes, pan_ha, f)
         hosts = [str(n["hostname"]) for n in node_rows if n.get("hostname")]
-        certs, ad, privilege = await asyncio.gather(
-            system_certs(app, hosts, f), check_ad(app, f), check_admin_privilege(app, f)
+        certs, ad, privilege, admins = await asyncio.gather(
+            system_certs(app, hosts, f),
+            check_ad(app, f),
+            check_admin_privilege(app, f),
+            admin_audit.health_section(app, f),
         )
         if not hosts:
             f.add("medium", "certificates", "System certificates were not checked: no node list.")
@@ -384,6 +389,7 @@ def register(reg: ToolRegistrar) -> None:
             "licence": check_license(tiers, evaluation, smart, f),
             "active_directory": ad,
             "server_privilege": privilege,
+            "admins": admins,
         }
         sections["certificates_checked"] = len(certs)
         summary = f.summary()

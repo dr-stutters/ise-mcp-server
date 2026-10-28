@@ -68,6 +68,7 @@ def mock_deployment(mock: respx.MockRouter) -> None:
         }
     )
     mock.get("/api/v1/repository").respond(json={"response": [{"name": "sftp-repo"}]})
+    mock.get("/api/v1/rbac/admin-user").respond(json={"adminUserList": []})  # I74 admins section
     mock.get("/api/v1/license/system/tier-state").respond(
         json=[
             {"name": "ESSENTIAL", "status": "ENABLED", "compliance": "COMPLIANT"},
@@ -124,6 +125,7 @@ async def test_health_multi_node(mock: respx.MockRouter) -> None:
     assert expired_unused and expired_unused[0]["severity"] == "low"
     assert out["summary"]["critical"] == 1
     assert out["patches"]["hotpatches"] == ["CSCwx12345"]
+    assert out["admins"]["admins"] == 0  # I74 section present
 
 
 async def test_health_standalone_evaluation_no_backup(mock: respx.MockRouter) -> None:
@@ -160,6 +162,7 @@ async def test_health_standalone_evaluation_no_backup(mock: respx.MockRouter) ->
     )
     mock.get("/ers/config/activedirectory").respond(json=ers_page([]))
     mock_adminuser(mock, "Super Admin")
+    mock.get("/api/v1/rbac/admin-user").respond(json={"adminUserList": []})
     out = await call_tool(make_server(), "ise_deployment_health")
     out = out if isinstance(out, dict) else json.loads(str(out))
     text = json.dumps(out["findings"])
@@ -187,6 +190,7 @@ async def test_health_survives_area_errors(mock: respx.MockRouter) -> None:
     mock.get("/ers/config/activedirectory").respond(json=ers_page([{"id": "ad1", "name": "corp"}]))
     mock.get("/ers/config/activedirectory/ad1").respond(500, json={})
     mock.get("/ers/config/adminuser").respond(500, json={})
+    mock.get("/api/v1/rbac/admin-user").respond(500, json={})
     out = await call_tool(make_server(), "ise_deployment_health")
     out = out if isinstance(out, dict) else json.loads(str(out))
     assert out["summary"]["high"] >= 1
@@ -195,6 +199,7 @@ async def test_health_survives_area_errors(mock: respx.MockRouter) -> None:
     assert "no node list" in text and "1 AD join point(s): corp" in text
     assert not out.get("server_privilege")  # ERS adminuser unreadable: reported silently
     assert not [f for f in out["findings"] if f["area"] == "privilege"]
+    assert not out.get("admins") and "Admin accounts were not reviewed" in text  # I74
 
 
 async def test_health_flags_over_privileged_account(mock: respx.MockRouter) -> None:
