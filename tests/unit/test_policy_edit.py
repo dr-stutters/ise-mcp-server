@@ -279,6 +279,95 @@ async def test_update_policy_set_state(mock: respx.MockRouter) -> None:
     assert applied["result"]["state"] == "monitor"
 
 
+# --- C71 (#151): a re-send of the current state is no_change, not an error --------------------------
+
+DEFAULT_DENY = {
+    "rule": {"id": "r2", "name": "Default", "rank": 1, "state": "enabled", "default": True},
+    "profile": ["DenyAccess"],
+}
+AUTHN_MAB = {
+    "rule": {
+        "id": "a1",
+        "name": "mcp-test-mab",
+        "rank": 0,
+        "state": "enabled",
+        "condition": {"conditionType": "ConditionReference", "name": "Wired_MAB", "id": "c1"},
+    },
+    "identitySourceName": "Internal Endpoints",
+    "ifUserNotFound": "CONTINUE",
+    "ifAuthFail": "REJECT",
+    "ifProcessFail": "DROP",
+}
+
+
+def noop_rule_mocks(mock: respx.MockRouter) -> tuple[respx.Route, respx.Route]:
+    policy_mocks(mock)
+    mock.get(f"{NA}/authorization-profiles").respond(json=[{"name": "PermitAccess"}, {"name": "DenyAccess"}])
+    mock.get(f"{NA}/policy-set/s1/authorization").respond(json={"response": [DEFAULT_DENY]})
+    mock.get(f"{NA}/policy-set/s1/authorization/r2").respond(json={"response": DEFAULT_DENY})
+    mock.get(f"{NA}/policy-set/s1/authentication").respond(json={"response": [AUTHN_MAB]})
+    mock.get(f"{NA}/policy-set/s1/authentication/a1").respond(json={"response": AUTHN_MAB})
+    authz_put = mock.put(f"{NA}/policy-set/s1/authorization/r2").respond(json={"response": DEFAULT_DENY})
+    authn_put = mock.put(f"{NA}/policy-set/s1/authentication/a1").respond(json={"response": AUTHN_MAB})
+    return authz_put, authn_put
+
+
+async def test_update_policy_rule_default_already_deny_is_no_change(mock: respx.MockRouter) -> None:
+    authz_put, _ = noop_rule_mocks(mock)
+    out, applied = await two_step(
+        "ise_update_policy_rule", {"policy_set": "Wired", "rule": "Default", "profiles": ["DenyAccess"]}
+    )
+    assert out["status"] == "no_change", out
+    assert "confirm" not in out and applied is None and not authz_put.called
+    assert "authorization rule Default in Wired already as requested" in out["summary"]
+    # A real difference still previews with a token.
+    preview, applied = await two_step(
+        "ise_update_policy_rule", {"policy_set": "Wired", "rule": "Default", "profiles": ["PermitAccess"]}
+    )
+    assert preview["status"] == "preview" and preview["confirm"]
+    assert preview["preview"]["changes"] == {"profile": {"from": ["DenyAccess"], "to": ["PermitAccess"]}}
+    assert applied["status"] == "applied" and authz_put.called
+
+
+async def test_update_authn_rule_if_user_not_found_unchanged_is_no_change(mock: respx.MockRouter) -> None:
+    _, authn_put = noop_rule_mocks(mock)
+    args = {
+        "policy_set": "Wired",
+        "rule": "mcp-test-mab",
+        "section": "authentication",
+        "if_user_not_found": "CONTINUE",
+    }
+    out, applied = await two_step("ise_update_policy_rule", args)
+    assert out["status"] == "no_change", out
+    assert "confirm" not in out and applied is None and not authn_put.called
+    preview, _ = await two_step("ise_update_policy_rule", {**args, "if_user_not_found": "REJECT"})
+    assert preview["status"] == "preview" and preview["confirm"]
+    assert preview["preview"]["changes"] == {"ifUserNotFound": {"from": "CONTINUE", "to": "REJECT"}}
+
+
+async def test_update_policy_set_unchanged_state_is_no_change(mock: respx.MockRouter) -> None:
+    policy_mocks(mock)
+    ps = {"id": "s1", "name": "Wired", "rank": 0, "state": "enabled", "serviceName": "Default Network Access"}
+    mock.get(f"{NA}/policy-set/s1").respond(json={"response": ps})
+    put = mock.put(f"{NA}/policy-set/s1").respond(json={"response": ps})
+    out, applied = await two_step("ise_update_policy_set", {"policy_set": "Wired", "state": "enabled"})
+    assert out["status"] == "no_change", out
+    assert "confirm" not in out and applied is None and not put.called
+    assert "already as requested" in out["summary"]
+
+
+async def test_update_policy_tools_without_fields_are_still_an_error(mock: respx.MockRouter) -> None:
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        rule = await c.call_tool(
+            "ise_update_policy_rule", {"policy_set": "Wired", "rule": "Default"}, raise_on_error=False
+        )
+        pset = await c.call_tool("ise_update_policy_set", {"policy_set": "Wired"}, raise_on_error=False)
+    for r in (rule, pset):
+        assert r.is_error and "Nothing to change" in str(r.content[0].text)  # type: ignore[union-attr]
+    # Refused before any policy request reaches ISE.
+    assert not [c for c in mock.calls if "/policy/" in c.request.url.path]
+
+
 async def test_set_command_set_create_and_replace(mock: respx.MockRouter) -> None:
     lookup = mock.get("/ers/config/tacacscommandsets", params={"filter": "name.EQ.ShowOnly"}).respond(
         json=ers_page([])

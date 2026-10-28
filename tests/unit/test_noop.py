@@ -9,6 +9,7 @@ from typing import Any
 import respx
 
 from tests.unit.conftest import ers_page, fixture_json
+from tests.unit.test_policy_edit import NA, noop_rule_mocks
 from tests.unit.test_writes import two_step
 
 NAD = {
@@ -95,6 +96,14 @@ def mock_custom_attributes(mock: respx.MockRouter) -> respx.Route:
         json=[{"attributeName": "assetTier", "attributeType": "String"}]
     )
     return mock.post("/api/v1/endpoint-custom-attribute").respond(201, text='"Created"')
+
+
+def mock_policy(mock: respx.MockRouter) -> respx.Route:
+    """Policy set Wired (s1) with a Default rule already DenyAccess and an authn rule on CONTINUE (#151)."""
+    noop_rule_mocks(mock)
+    ps = {"id": "s1", "name": "Wired", "rank": 0, "state": "enabled", "serviceName": "Default Network Access"}
+    mock.get(f"{NA}/policy-set/s1").respond(json={"response": ps})
+    return mock.put(f"{NA}/policy-set/s1").respond(json={"response": ps})
 
 
 def assert_noop(out: dict[str, Any], words: str) -> None:
@@ -251,6 +260,8 @@ NOOP_CALLS: dict[str, dict[str, Any]] = {
     "ise_set_sponsor_group": {"name": "mcp-guest-sponsors", "manage": "own"},
     "ise_set_guest_type": {"name": "Daily (default)", "default_duration": 1},
     "ise_set_custom_attribute": {"name": "assetTier", "attribute_type": "String"},
+    "ise_update_policy_rule": {"policy_set": "Wired", "rule": "Default", "profiles": ["DenyAccess"]},
+    "ise_update_policy_set": {"policy_set": "Wired", "state": "enabled"},
 }
 
 
@@ -263,5 +274,6 @@ def mock_all(mock: respx.MockRouter) -> None:
         mock_sponsor_group,
         mock_guest_type,
         mock_custom_attributes,
+        mock_policy,
     ):
         setup(mock)
