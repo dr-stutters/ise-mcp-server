@@ -70,6 +70,62 @@ DENIED = (
 )
 WAIT_FLOOR = 3600.0
 
+# ISE's rules for a backup encryption key (#132: the 400 ISE 3.5 returns for a key that breaks them).
+KEY_MIN, KEY_MAX = 8, 15
+KEY_CHARS = re.compile(r"[A-Za-z0-9_#]*")
+KEY_RULES = (
+    f"ISE accepts {KEY_MIN}-{KEY_MAX} characters from [A-Za-z0-9_#] with at least one upper-case letter, one "
+    "lower-case letter and one digit, not containing 'cisco' (any case)"
+)
+
+
+def backup_key_problems(key: str) -> list[str]:
+    """The ISE backup-key rules `key` breaks, in words that never quote the key or any of its characters."""
+    problems: list[str] = []
+    if len(key) < KEY_MIN:
+        problems.append(f"shorter than {KEY_MIN} characters")
+    if len(key) > KEY_MAX:
+        problems.append(f"longer than {KEY_MAX} characters")
+    if not KEY_CHARS.fullmatch(key):
+        problems.append("has a character outside [A-Za-z0-9_#]")
+    if not re.search(r"[A-Z]", key):
+        problems.append("has no upper-case letter")
+    if not re.search(r"[a-z]", key):
+        problems.append("has no lower-case letter")
+    if not re.search(r"[0-9]", key):
+        problems.append("has no digit")
+    if "cisco" in key.lower():
+        problems.append("contains 'cisco'")
+    return problems
+
+
+def backup_key_blocker(key: str) -> str | None:
+    """A preview blocker naming the broken rules and the key's length (never the key), or None."""
+    problems = backup_key_problems(key)
+    if not problems:
+        return None
+    return (
+        f"The configured backup key (ISE_BACKUP_ENCRYPTION_KEY) is {len(key)} characters and "
+        + "; ".join(problems)
+        + f": ISE refuses it with a 400. {KEY_RULES}. Set a key that meets them and restart the server."
+    )
+
+
+def backup_key_status(key: str | None) -> dict[str, Any]:
+    """ise_status's view of the backup key: set or not, its length and the rules it breaks (never the key)."""
+    if not key:
+        return {
+            "configured": False,
+            "detail": "ise_create_backup needs ISE_BACKUP_ENCRYPTION_KEY (or _FILE / _REF)",
+        }
+    problems = backup_key_problems(key)
+    out: dict[str, Any] = {"configured": True, "length": len(key), "ok": not problems}
+    if problems:
+        out["problems"] = problems
+        out["rules"] = KEY_RULES
+    return out
+
+
 # --- repositories (I62) ------------------------------------------------------------------------
 REPO_PROTOCOL = Literal["SFTP", "FTP", "NFS", "HTTPS", "DISK"]
 NEEDS_SERVER = ("SFTP", "FTP", "NFS", "HTTPS")
@@ -221,8 +277,9 @@ def register(reg: ToolRegistrar) -> None:
         """Take an on-demand ISE configuration backup to a repository, before Catalyst Center's group-based
         policy migration or an upgrade. The key comes from the server's ISE_BACKUP_ENCRYPTION_KEY
         (never an argument, never shown). Refused in the preview when no repository is configured, the
-        repository doesn't exist or is read-only (CDROM, HTTP, HTTPS), the key is not set, or a backup is
-        already running. Preview-first: the repository, the file name ISE will write and the last backup.
+        repository doesn't exist or is read-only (CDROM, HTTP, HTTPS), the key is not set or breaks ISE's
+        rules (8-15 of [A-Za-z0-9_#], an upper, a lower and a digit, no 'cisco'), or a backup is already
+        running. Preview-first: the repository, the file name ISE will write and the last backup.
         Configuration only (no operational/MnT data). Restore is not automated (the preview says how)."""
         app: IseApp = get_client(ctx)
         repos = await repositories(app)
@@ -245,6 +302,8 @@ def register(reg: ToolRegistrar) -> None:
         key = app.settings.backup_encryption_key
         if key is None or not key.get_secret_value():
             blockers.append(NO_KEY)
+        elif bad_key := backup_key_blocker(key.get_secret_value()):
+            blockers.append(bad_key)
         running = str(last.get("status", "")).upper() == "IN_PROGRESS"
         if running:
             blockers.append(
