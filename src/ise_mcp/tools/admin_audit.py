@@ -32,6 +32,7 @@ from ise_mcp._core import (
     list_result,
     object_result,
 )
+from ise_mcp._core.formatting import NOT_SECRET_KEYS
 from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp
 from ise_mcp.tools._common import gather_limited
@@ -55,6 +56,9 @@ NO_DATA = "none (no data access set)"
 USER_COLUMNS = ["name", "enabled", "groups", "super_admin", "external", "never_disabled", "description"]
 GROUP_COLUMNS = ["name", "members", "external", "external_groups", "policies", "description"]
 POLICY_COLUMNS = ["name", "enabled", "admin_groups", "menu_access", "data_access"]
+# Keys that match the core secret pattern ("password") but hold admin names or flags: compact() would
+# mask them (ise_deployment_health showed the admin names as ********, #124).
+NOT_SECRET_KEYS.update({"change_password_pending", "change_password_next_login"})
 
 
 def _denied(e: AuthError) -> AuthError:
