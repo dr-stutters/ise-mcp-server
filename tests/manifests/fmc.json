@@ -353,6 +353,7 @@
         "fmc_policy_audit",
         "fmc_get_security_intelligence",
         "fmc_get_intrusion_policy",
+        "fmc_set_intrusion_recommendations",
         "fmc_find_intrusion_rules",
         "fmc_list_policies",
         "fmc_update_access_rule",
@@ -569,6 +570,10 @@
       "tier": "write",
       "title": "Create access rule"
     },
+    "fmc_create_address_pool": {
+      "tier": "write",
+      "title": "Create RA VPN address pool"
+    },
     "fmc_create_app_route": {
       "tier": "write",
       "title": "Create application route"
@@ -625,6 +630,10 @@
       "tier": "write",
       "title": "Create object group"
     },
+    "fmc_create_group_policy": {
+      "tier": "write",
+      "title": "Create RA VPN group policy"
+    },
     "fmc_create_ha_pair": {
       "tier": "dangerous",
       "title": "Form HA pair"
@@ -636,6 +645,10 @@
     "fmc_create_identity_rule": {
       "tier": "write",
       "title": "Create identity rule"
+    },
+    "fmc_create_inline_set": {
+      "tier": "write",
+      "title": "Create inline set"
     },
     "fmc_create_interface": {
       "tier": "write",
@@ -685,6 +698,10 @@
       "tier": "write",
       "title": "Create prefix list"
     },
+    "fmc_create_ravpn": {
+      "tier": "write",
+      "title": "Create RA VPN policy"
+    },
     "fmc_create_realm": {
       "tier": "write",
       "title": "Create AD/LDAP realm"
@@ -708,6 +725,10 @@
     "fmc_create_si_feed": {
       "tier": "write",
       "title": "Create Security Intelligence feed"
+    },
+    "fmc_create_sla_monitor": {
+      "tier": "write",
+      "title": "Create SLA monitor"
     },
     "fmc_create_static_route": {
       "tier": "write",
@@ -773,6 +794,10 @@
       "tier": "write",
       "title": "Delete identity rule"
     },
+    "fmc_delete_inline_set": {
+      "tier": "write",
+      "title": "Delete inline set"
+    },
     "fmc_delete_interface": {
       "tier": "write",
       "title": "Delete interface"
@@ -812,6 +837,10 @@
     "fmc_delete_si_object": {
       "tier": "write",
       "title": "Delete Security Intelligence feed or list"
+    },
+    "fmc_delete_sla_monitor": {
+      "tier": "write",
+      "title": "Delete SLA monitor"
     },
     "fmc_delete_static_route": {
       "tier": "write",
@@ -1217,6 +1246,10 @@
       "tier": "write",
       "title": "Set an access policy's base policy (inheritance)"
     },
+    "fmc_set_connection_profile": {
+      "tier": "write",
+      "title": "Set RA VPN connection profile"
+    },
     "fmc_set_decryption_policy": {
       "tier": "write",
       "title": "Link decryption policy to access policy"
@@ -1228,6 +1261,10 @@
     "fmc_set_dns_policy": {
       "tier": "write",
       "title": "Link DNS policy to access policy"
+    },
+    "fmc_set_intrusion_recommendations": {
+      "tier": "write",
+      "title": "Set intrusion rule recommendations"
     },
     "fmc_set_intrusion_rule_state": {
       "tier": "write",
@@ -1308,6 +1345,10 @@
     "fmc_update_health_policy": {
       "tier": "write",
       "title": "Update health policy module"
+    },
+    "fmc_update_inline_set": {
+      "tier": "write",
+      "title": "Update inline set"
     },
     "fmc_update_interface": {
       "tier": "write",

@@ -89,16 +89,11 @@ async def test_contract_read_only() -> None:
 
 async def test_suite_pack() -> None:
     # Core's suite_* prompts (C48) are registered and this server's leg tools (ise_snapshot,
-    # ise_compare_snapshot) exist. Pending: peer snapshot tools not in their committed manifests yet
-    # (catc D118). cat-sdwan's manifest (0.4.0, I81) has catsdwan_snapshot and fmc's (0.17.2, F89)
-    # fmc_snapshot, so their legs are checked.
+    # ise_compare_snapshot) exist. The committed catc, cat-sdwan and fmc manifests all carry their
+    # snapshot tools now, so every leg is checked; tools a suite prompt itself marks pending (core
+    # 0.19, stutters-mcp-core#171) are waived by core.
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
-    await assert_suite_pack(
-        server,
-        "ise",
-        "tests/manifests",
-        pending=["catc_snapshot", "catc_compare_snapshot"],
-    )
+    await assert_suite_pack(server, "ise", "tests/manifests")
 
 
 @pytest.mark.parametrize(
