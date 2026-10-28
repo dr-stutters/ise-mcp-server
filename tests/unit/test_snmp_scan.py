@@ -14,7 +14,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from ise_mcp._core.testing import call_tool
-from ise_mcp.tools.snmp_scan import build_schedule, parse_targets, scope_size
+from ise_mcp.tools.snmp_scan import build_schedule, parse_targets, scan_enabled, scan_running, scope_size
 from tests.unit.conftest import make_server
 
 SCANS = "/api/v1/profiler/snmp/scan"
@@ -425,3 +425,96 @@ async def test_v3_scan_enable_toggle_needs_no_credentials(mock: respx.MockRouter
     preview, _ = await two_step("ise_set_snmp_scan", {"name": "mcp-iot-printers", "enabled": False})
     assert preview["status"] == "preview", preview
     assert json.loads(status.calls.last.request.content) == {"status": "disable", "ids": [SID]}
+
+
+# --- #161: enabled state from the top-level status; delete kind -----------------------------------
+
+
+def raw_disabled() -> dict[str, Any]:
+    """The lab ISE 3.5's GET /scan entity after POST /scan/status disable (2026-10-28, #161): top-level
+    status DISABLED while scanDetails.isEnabled and scanStatus stay true; jobStatus null when idle."""
+    s = scan()
+    s.update(status="DISABLED", jobStatus=None, scanStatus=True, psnGroup=PSN)
+    s["scanDetails"]["id"] = None
+    return s
+
+
+def test_scan_enabled_prefers_top_level_status() -> None:
+    assert scan_enabled(raw_disabled()) is False
+    assert scan_enabled({**raw_disabled(), "status": "ENABLED"}) is True
+    assert scan_enabled(scan()) is True  # no top-level status: isEnabled
+    assert scan_enabled({"scanStatus": False}) is False
+    assert scan_enabled({}) is None
+
+
+async def test_disabled_scan_lists_and_answers_no_change(mock: respx.MockRouter) -> None:
+    base(mock, [raw_disabled()])
+    status = mock.post(f"{SCANS}/status").respond(json={"result": []})
+    out = await call_tool(make_server(), "ise_snmp_scan_history", {"response_format": "json"})
+    assert out["results"][0]["enabled"] is False
+    noop, _ = await two_step("ise_set_snmp_scan", {"name": "mcp-iot-printers", "enabled": False})
+    assert noop["status"] == "no_change", noop
+    noop, _ = await two_step("ise_run_snmp_scan", {"names": ["mcp-iot-printers"], "action": "disable"})
+    assert noop["status"] == "no_change", noop
+    blocked, _ = await two_step("ise_run_snmp_scan", {"names": ["mcp-iot-printers"], "action": "start"})
+    assert blocked["status"] == "blocked" and any("is disabled" in b for b in blocked["blockers"])
+    assert not status.called
+
+
+def test_scan_running() -> None:
+    assert not scan_running(raw_disabled())  # start 1793170800000 < end
+    assert scan_running({**scan(), "jobStatus": "IN_PROGRESS"})
+    assert scan_running({**scan(), "jobStatus": "Running"})
+    assert scan_running({**scan(), "scanEndTime": None})
+    assert not scan_running({"jobStatus": "COMPLETED"})
+
+
+async def test_delete_scan_preview_and_body(mock: respx.MockRouter) -> None:
+    base(mock, [raw_disabled()])
+    per_id = mock.delete(f"{SCANS}/{SID}").respond(405)
+    route = mock.delete(SCANS).respond(
+        json={"result": [{"id": None, "status": "success", "failureReason": None}]}
+    )
+    preview, done = await two_step("ise_delete_object", {"kind": "snmp_scan", "target": "mcp-iot-printers"})
+    assert preview["status"] == "preview", preview
+    assert preview["action"] == "Delete SNMP scan mcp-iot-printers"
+    assert preview["preview"]["path"] == SCANS and preview["preview"]["body"] == {"ids": [SID]}
+    assert preview["preview"]["enabled"] is False
+    assert "******" not in json.dumps(preview)
+    assert done is not None
+    assert json.loads(route.calls.last.request.content) == {"ids": [SID]}
+    assert not per_id.called
+    assert done["result"] == {
+        "deleted": "mcp-iot-printers",
+        "id": SID,
+        "result": [{"name": "mcp-iot-printers", "status": "success"}],
+    }
+
+
+async def test_delete_scan_blocked_while_running(mock: respx.MockRouter) -> None:
+    base(mock, [{**scan(), "status": "ENABLED", "jobStatus": "IN_PROGRESS"}])
+    route = mock.delete(SCANS).respond(json={"result": []})
+    out, _ = await two_step("ise_delete_object", {"kind": "snmp_scan", "target": "mcp-iot-printers"})
+    assert out["status"] == "blocked", out
+    assert any("is running" in b and "action='stop'" in b for b in out["blockers"])
+    assert not route.called
+
+
+async def test_delete_scan_failure_and_unknown(mock: respx.MockRouter) -> None:
+    base(mock, [raw_disabled()])
+    mock.delete(SCANS).respond(
+        json={"result": [{"id": SID, "status": "failure", "failureReason": "Scan is in use"}]}
+    )
+    server = make_server(mcp_enable_writes=True)
+    async with Client(server) as c:
+        preview = (
+            await c.call_tool("ise_delete_object", {"kind": "snmp_scan", "target": "mcp-iot-printers"})
+        ).structured_content
+        assert preview is not None
+        with pytest.raises(ToolError, match="Scan is in use"):
+            await c.call_tool(
+                "ise_delete_object",
+                {"kind": "snmp_scan", "target": "mcp-iot-printers", "confirm": preview["confirm"]},
+            )
+        with pytest.raises(ToolError, match="No SNMP scan"):
+            await c.call_tool("ise_delete_object", {"kind": "snmp_scan", "target": "nope"})
