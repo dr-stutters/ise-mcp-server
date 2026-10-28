@@ -419,3 +419,26 @@ async def test_delete_unknown_repository(mock: respx.MockRouter) -> None:
     mock.get("/api/v1/repository").respond(json={"response": None})
     with pytest.raises(ToolError, match="No repository 'nope'"):
         await repo_two_step("ise_delete_repository", {"name": "nope"})
+
+
+async def test_sftp_pki_still_needs_user(mock: respx.MockRouter) -> None:
+    """The SFTP schema requires userName with enablePki too; the PKI preview says how to set the key up."""
+    mock.get("/api/v1/repository").respond(json={"response": None})
+    post = mock.post("/api/v1/repository").respond(200, json={})
+    mock.get("/api/v1/repository/pki/files").respond(json={"response": []})
+    args = {"name": "pki", "protocol": "SFTP", "server": "192.0.2.50", "path": "/ise", "enable_pki": True}
+    preview, _ = await repo_two_step("ise_set_repository", args)
+    assert preview["status"] == "blocked" and preview["blockers"] == ["A SFTP repository needs a user."]
+    preview, _ = await repo_two_step("ise_set_repository", {**args, "user": "backup"}, apply=False)
+    assert preview["status"] == "preview" and not post.called
+    assert any("crypto key generate rsa" in s for s in preview["side_effects"])
+    assert "password" not in preview["preview"]["body"]
+    _, done = await repo_two_step("ise_set_repository", {**args, "user": "backup"})
+    assert done is not None and json.loads(post.calls.last.request.content) == {
+        "name": "pki",
+        "protocol": "SFTP",
+        "path": "/ise",
+        "serverName": "192.0.2.50",
+        "userName": "backup",
+        "enablePki": True,
+    }

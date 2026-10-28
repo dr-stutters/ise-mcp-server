@@ -394,11 +394,10 @@ def register(reg: ToolRegistrar) -> None:
         blockers: list[str] = []
         if protocol in NEEDS_SERVER and not server:
             blockers.append(f"A {protocol} repository needs a server.")
+        # The 3.5 OpenAPI SFTP schema requires userName with PKI too (ISE logs in as that user with its key).
         needs_login = protocol == "FTP" or (protocol == "SFTP" and not enable_pki)
-        if needs_login and not user:
-            blockers.append(
-                f"A {protocol} repository needs a user" + (" (or enable_pki)." if protocol == "SFTP" else ".")
-            )
+        if protocol in ("FTP", "SFTP") and not user:
+            blockers.append(f"A {protocol} repository needs a user.")
         wants_password = needs_login or (protocol == "HTTPS" and bool(user))
         if wants_password and not password_env:
             blockers.append(
@@ -445,6 +444,13 @@ def register(reg: ToolRegistrar) -> None:
                 )
         if protocol == "SFTP":
             side_effects.append(HOST_KEY)
+            if enable_pki:
+                side_effects.append(
+                    "PKI login: ISE signs in with its own key pair, so generate it on the ISE CLI "
+                    "('crypto key generate rsa passphrase ...'), export the public key (Administration > "
+                    "System > Maintenance > Repository > Export public key) and add it to the user's "
+                    "authorized_keys."
+                )
         if protocol == "HTTPS":
             side_effects.append(NOT_FOR_BACKUPS.format(protocol=protocol))
         side_effects.append(
