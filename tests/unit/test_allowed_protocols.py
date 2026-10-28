@@ -233,10 +233,16 @@ async def test_device_admin_service_blocks_a_radius_preset(mock: respx.MockRoute
     assert applied is None
 
 
-async def test_no_change_is_refused(mock: respx.MockRouter) -> None:
+async def test_no_change_is_a_noop(mock: respx.MockRouter) -> None:
+    # C71: a re-run with the settings the service already has answers no_change, with no token.
     by_name(mock, "Default Network Access", DEFAULT["AllowedProtocols"])
     policy_sets(mock, [])
-    assert "already has exactly" in await error({"name": "Default Network Access", "allow": ["eap-tls"]})
+    put = mock.put(url__regex=rf"{AP}/.*").respond(json={})
+    preview, applied = await call(
+        "ise_set_allowed_protocols", {"name": "Default Network Access", "allow": ["eap-tls"]}
+    )
+    assert preview["status"] == "no_change" and "confirm" not in preview and applied is None
+    assert "already has exactly" in preview["summary"] and not put.called
 
 
 async def test_peap_override_fills_the_inner_methods_conditional_fields(mock: respx.MockRouter) -> None:

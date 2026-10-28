@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "response": [
+    {
+      "conditionType": "LibraryConditionAttributes",
+      "isNegate": false,
+      "dictionaryName": "Normalised Radius",
+      "attributeName": "RadiusFlowType",
+      "operator": "equals",
+      "dictionaryValue": null,
+      "attributeValue": "Wired802_1x",
+      "name": "Wired_802.1X",
+      "id": "58f909ca-7df3-4abd-bf52-f53769a2471c",
+      "description": "A condition to match 802.1X based authentication requests from switches, according to the corresponding 802.1x attributes defined in the device profile.",
+      "link": {
+        "rel": "self",
+        "href": "https://192.0.2.10/api/v1/policy/network-access/condition/58f909ca-7df3-4abd-bf52-f53769a2471c",
+        "type": "application/json"
+      }
+    },
+    {
+      "conditionType": "LibraryConditionAndBlock",
+      "isNegate": false,
+      "children": [
+        {
+          "conditionType": "ConditionAttributes",
+          "isNegate": false,
+          "dictionaryName": "Radius",
+          "attributeName": "Service-Type",
+          "operator": "equals",
+          "dictionaryValue": null,
+          "attributeValue": "Outbound"
+        },
+        {
+          "conditionType": "ConditionAttributes",
+          "isNegate": false,
+          "dictionaryName": "Radius",
+          "attributeName": "NAS-Port-Type",
+          "operator": "equals",
+          "dictionaryValue": null,
+          "attributeValue": "Ethernet"
+        }
+      ],
+      "name": "Switch_Local_Web_Authentication",
+      "id": "7f6e3570-f85b-42b7-811c-384547747fec",
+      "description": "A condition to match authentication requests for Local Web Authentication from Cisco Catalyst Switches",
+      "link": {
+        "rel": "self",
+        "href": "https://192.0.2.10/api/v1/policy/network-access/condition/7f6e3570-f85b-42b7-811c-384547747fec",
+        "type": "application/json"
+      }
+    },
+    {
+      "conditionType": "LibraryConditionAndBlock",
+      "isNegate": false,
+      "children": [
+        {
+          "conditionType": "ConditionAttributes",
+          "isNegate": false,
+          "dictionaryName": "Radius",
+          "attributeName": "NAS-Port-Type",
+          "operator": "equals",
+          "dictionaryValue": null,
+          "attributeValue": "Ethernet"
+        },
+        {
+          "conditionType": "ConditionAttributes",
+          "isNegate": false,
+          "dictionaryName": "DEVICE",
+          "attributeName": "Location",
+          "operator": "equals",
+          "dictionaryValue": null,
+          "attributeValue": "All Locations"
+        }
+      ],
+      "name": "mcp-test-lab-switches",
+      "id": "00000000-0000-4000-8000-000000000081",
+      "description": "Wired requests from lab switches",
+      "link": {
+        "rel": "self",
+        "href": "https://192.0.2.10/api/v1/policy/network-access/condition/00000000-0000-4000-8000-000000000081",
+        "type": "application/json"
+      }
+    }
+  ]
+}

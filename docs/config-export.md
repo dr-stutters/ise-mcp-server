@@ -17,6 +17,7 @@ ise_diff_config(before="a.yaml", after="b.yaml") # compare two exports
 | Section | ISE source | Contents |
 |---|---|---|
 | `policy_sets` | OpenAPI `/api/v1/policy/{network-access,device-admin}` | Policy sets with their `authentication`, `authorization` and `local_exceptions` rules, plus `global_exceptions`, per kind |
+| `conditions` | OpenAPI `/api/v1/policy/{network-access,device-admin}/{condition,time-condition,network-condition}` | Reusable library, time-and-date and network conditions, each as `ise_set_condition` arguments (`kind`, `type`, `name`, `description`, `conditions` + `match` / `time` / `network`); imported after NADs and device groups, before the policy sets that use them |
 | `allowed_protocols` | ERS `allowedprotocols` | Allowed-protocols services (the service a policy set selects); exported and diffed, not imported |
 | `authz_profiles` | ERS `authorizationprofile` | Authorization profiles |
 | `dacls` | ERS `downloadableacl` | Downloadable ACLs |
@@ -31,7 +32,7 @@ ise_diff_config(before="a.yaml", after="b.yaml") # compare two exports
 | `command_sets` | ERS `tacacscommandsets` | TACACS+ command sets |
 | `shell_profiles` | ERS `tacacsprofile` | TACACS+ shell profiles |
 
-`scope` takes section names or these groups: `policy` (policy_sets, allowed_protocols, authz_profiles, dacls), `network` (nads,
+`scope` takes section names or these groups: `policy` (policy_sets, conditions, allowed_protocols, authz_profiles, dacls), `network` (nads,
 ndgs), `groups` (identity_groups, endpoint_groups), `trustsec` (sgts, sgacls, egress_matrix) and
 `device_admin` (command_sets, shell_profiles). The default is every section. Internal users, endpoints and
 certificates are not exported.

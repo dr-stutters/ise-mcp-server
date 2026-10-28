@@ -54,7 +54,7 @@ from ise_mcp.tools._common import (
     is_uuid,
     list_result,
 )
-from ise_mcp.tools.writes import deep_merge, fingerprint, masked_changes, put_body
+from ise_mcp.tools.writes import deep_merge, fingerprint, masked_changes, put_body, unchanged
 
 DATE_FMT = "%m/%d/%Y %H:%M"
 # Without ISE_GUEST_TIMEZONE, "now" is taken in the earliest zone on earth (UTC-12) so a new account
@@ -1022,11 +1022,15 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             if not patch:
                 raise InvalidRequest("Nothing to change: give at least one field")
             desired = deep_merge(put_body(current), patch)
+            changes = masked_changes(put_body(current), desired)
+            noop = unchanged(changes)
             plan = Plan(
                 f"Update sponsor group {current.get('name')}",
-                details={"changes": masked_changes(put_body(current), desired)},
+                details={"changes": changes},
                 blockers=blockers,
                 fingerprint=fingerprint(current),
+                noop=noop,
+                noop_reason=f"Sponsor group {current.get('name')} already as requested" if noop else None,
             )
 
             async def apply() -> Any:
@@ -1168,11 +1172,15 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 return await app.ers_create("guesttype", {"GuestType": desired})
 
         else:
+            changes = masked_changes(put_body(current), desired)
+            noop = unchanged(changes)
             plan = Plan(
                 f"Update guest type {current.get('name')}",
-                details={"changes": masked_changes(put_body(current), desired)},
+                details={"changes": changes},
                 blockers=blockers,
                 fingerprint=fingerprint(current),
+                noop=noop,
+                noop_reason=f"Guest type {current.get('name')} already as requested" if noop else None,
             )
 
             async def apply() -> Any:

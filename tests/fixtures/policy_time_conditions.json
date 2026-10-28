@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "response": [
+    {
+      "conditionType": "TimeAndDateCondition",
+      "isNegate": false,
+      "name": "mcp-business-hours",
+      "id": "00000000-0000-4000-8000-000000000082",
+      "description": "Weekday business hours",
+      "weekDays": [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday"
+      ],
+      "hoursRange": {
+        "startTime": "08:00",
+        "endTime": "18:00"
+      },
+      "datesRangeException": {
+        "startDate": "2026-12-25",
+        "endDate": "2026-12-26"
+      },
+      "link": {
+        "rel": "self",
+        "href": "https://192.0.2.10/api/v1/policy/network-access/time-condition/00000000-0000-4000-8000-000000000082",
+        "type": "application/json"
+      }
+    }
+  ]
+}

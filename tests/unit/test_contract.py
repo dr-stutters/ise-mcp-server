@@ -1,4 +1,5 @@
 import pytest
+import respx
 from fastmcp import Client
 
 from ise_mcp._core.testing import (
@@ -8,6 +9,7 @@ from ise_mcp._core.testing import (
     load_tool_manifests,
 )
 from tests.unit.conftest import make_server
+from tests.unit.test_noop import NOOP_CALLS, mock_all
 
 PROMPT_SAMPLES = {
     "ise_troubleshoot_endpoint_access": {
@@ -72,9 +74,11 @@ KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win"}
 EXTERNAL = load_tool_manifests("tests/manifests")
 
 
-async def test_contract_all_tiers() -> None:
+async def test_contract_all_tiers(mock: respx.MockRouter) -> None:
+    # C71: each NOOP_CALLS call finds its mocked object already as requested -> no_change, no token.
+    mock_all(mock)
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
-    await assert_tool_contract(server, "ise")
+    await assert_tool_contract(server, "ise", noop_calls=NOOP_CALLS)
     await assert_prompt_contract(
         server, "ise", samples=PROMPT_SAMPLES, known_prefixes=KNOWN, external_tools=EXTERNAL
     )
