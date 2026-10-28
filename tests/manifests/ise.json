@@ -768,6 +768,10 @@
       "tier": "read",
       "title": "Get a network device"
     },
+    "ise_get_patch_readiness": {
+      "tier": "read",
+      "title": "Patch / upgrade / rollback pre-check report"
+    },
     "ise_get_policy_set": {
       "tier": "read",
       "title": "Get a policy set with its rules"
@@ -791,6 +795,10 @@
     "ise_import_config": {
       "tier": "dangerous",
       "title": "Import ISE configuration from an export"
+    },
+    "ise_import_system_certificate": {
+      "tier": "dangerous",
+      "title": "Import a system certificate with its private key"
     },
     "ise_import_trusted_cert": {
       "tier": "write",
@@ -992,6 +1000,10 @@
       "tier": "read",
       "title": "Per-NAD RADIUS latency and timeouts"
     },
+    "ise_patch_readiness": {
+      "tier": "write",
+      "title": "Patch / upgrade / rollback readiness"
+    },
     "ise_policy_audit": {
       "tier": "read",
       "title": "Audit ISE policy hygiene"
@@ -1131,6 +1143,10 @@
     "ise_set_tacacs_server_sequence": {
       "tier": "write",
       "title": "Create or update a TACACS+ server sequence"
+    },
+    "ise_set_trusted_cert": {
+      "tier": "write",
+      "title": "Change a trusted certificate's trust and revocation settings"
     },
     "ise_set_trustsec_settings": {
       "tier": "write",

@@ -76,6 +76,10 @@ change Administration > System > Maintenance > Repository, which needs System Ad
 functional groups such as Policy Admin); the repository password comes from an `ISE_REPOSITORY_*` server
 variable, never a tool argument.
 
+**Patch readiness.** `ise_patch_readiness` (write tier) starts ISE's patch, upgrade or rollback pre-checks
+(Administration > System > Maintenance > Patch Management / Upgrade), which needs System Admin or Super Admin;
+`ise_get_patch_readiness` reads the report (an OpenAPI GET). Neither installs, rolls back nor upgrades.
+
 ## 3. Dedicated users
 
 | User | Groups | Auth | Notes |
