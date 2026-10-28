@@ -340,15 +340,33 @@ class IseApp:
             raise UpstreamError(f"ISE MnT returned unparseable XML for {path}: {e}") from e
         return data
 
-    async def _mnt_raw(self, path: str) -> httpx.Response:
-        """Authenticated GET that returns the response even for 4xx/5xx (MnT error bodies are XML)."""
+    async def mnt_delete(self, path: str) -> Any:
+        """DELETE an MnT resource (Session/Delete/...) and parse any XML reply. Not retried: a delete
+        that timed out may still have happened, so the caller re-reads instead."""
+        resp = await self._mnt_raw(path, method="DELETE")
+        text = resp.text
+        if resp.status_code >= 400:
+            if resp.status_code == 404:
+                raise NotFound(f"MnT has no resource at {path}", 404)
+            raise self.mnt.error_from_response(resp)
+        if not text.strip():
+            return None
+        try:
+            _, data = parse_xml(text)
+        except ValueError:
+            return text.strip()[:500]
+        return data
+
+    async def _mnt_raw(self, path: str, *, method: str = "GET") -> httpx.Response:
+        """Authenticated request that returns the response even for 4xx/5xx (MnT error bodies are XML)."""
         if not SAFE_MNT_PATH.match(path) or ".." in path:
             raise InvalidRequest(f"Invalid MnT path {path!r}")
         return await self.mnt.request(  # type: ignore[no-any-return]
-            "GET",
+            method,
             "/admin/API/mnt/" + path.lstrip("/"),
             expect="response",
             ok_status=range(400, 600),
+            retry=False if method != "GET" else None,
         )
 
     async def failure_reasons(self) -> dict[str, dict[str, Any]]:
