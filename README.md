@@ -521,6 +521,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `suite_change_check` | Did anything else break? |
 | `suite_decommission_site` | Remove one site everywhere it exists, without leaving orphans: SD-WAN edges and their configuration group association, ISE NADs and the site's location group, the Catalyst Center site with its devices, fabric site and pool reservations, FMC network objects for the site's subnets, and the Windows DHCP scope and DNS records. |
 | `suite_maintenance_window` | Run one maintenance window at a site across products: inventory what runs where, write one plan (order, blast radius, rollback, go/no-go), take the pre snapshots, then upgrade product by product with each product's preview-first upgrade tool: SD-WAN edges (install, activate), Catalyst Center switches (SWIM distribute, then activate one device at a time) and the ISE patch check with a backup first (ISE patches install from its GUI). |
+| `suite_segmentation_audit` | Is segmentation enforced end to end at one site? Pairs each segment (SD-WAN VPN, Catalyst Center VN, ISE SGT, FMC zone) against the intended flows, reads every product's control for the pair (ISE TrustSec egress matrix, SD-WAN policy, FMC rules, fabric enforcement), tests the pair from CML hosts where a lab exists, and reports leaks, over-blocking and policy conflicts as an evidence pack. |
 
 ### Config export, diff and import
 

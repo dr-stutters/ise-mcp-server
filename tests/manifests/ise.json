@@ -1,5 +1,5 @@
 {
-  "core_version": "0.19.0",
+  "core_version": "0.20.0",
   "manifest": 1,
   "prefix": "ise",
   "prompts": {
@@ -495,6 +495,49 @@
         "catsdwan",
         "catc",
         "ise"
+      ]
+    },
+    "suite_segmentation_audit": {
+      "arguments": [
+        "site",
+        "segments",
+        "intent",
+        "lab",
+        "framework",
+        "servers"
+      ],
+      "references": [
+        "catsdwan_list_devices",
+        "catsdwan_list_config_groups",
+        "catsdwan_get_config_group",
+        "catsdwan_list_policies",
+        "catsdwan_get_policy",
+        "catsdwan_list_policy_groups",
+        "catsdwan_get_firewall_policy",
+        "catsdwan_omp_routes",
+        "ise_list_sgts",
+        "ise_list_ip_sgt_mappings",
+        "ise_list_sgt_vn_vlan",
+        "ise_get_egress_matrix",
+        "fmc_list_access_rules",
+        "fmc_find_address",
+        "fmc_rule_lookup",
+        "fmc_prove_policy",
+        "catc_get_sda_fabric",
+        "catc_list_ip_pools",
+        "catc_get_group_policy_enforcement",
+        "cml_get_layer3_addresses",
+        "cml_check_reachability"
+      ],
+      "rendered": true,
+      "suite": true,
+      "tier": "read",
+      "uses": [
+        "catsdwan",
+        "ise",
+        "fmc",
+        "catc",
+        "cml"
       ]
     }
   },
