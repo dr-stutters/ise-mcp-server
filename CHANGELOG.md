@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.19.0 (2026-10-28)
+
+TrustSec virtual networks and SGT-VN-VLAN mappings, random and changing MAC (RCM) and endpoint ownership settings, deleting a
+TrustSec egress matrix cell, and fixes for the catch-all SGACL in egress writes, web redirection on ISE 3.5 and backup keys ISE
+refuses. Core stays 0.19.0. 171 tools (92 read, 56 write, 23 dangerous) and twelve prompts.
+
+### Added
+- `ise_list_virtual_networks` and `ise_list_sgt_vn_vlan` (I90, #99, #141): the TrustSec virtual networks Catalyst Center pushes
+  to ISE in SD-Access, the SGTs in each VN (and SGTs in none), and the SGT-VN-VLAN mappings with names resolved.
+- `ise_get_mac_randomization` / `ise_set_mac_randomization` (I89, #97, #140): read and set ISE's random and changing MAC (RCM)
+  and endpoint ownership (LSD) settings; the write is preview-first and refuses RCM without endpoint ownership.
+- `ise_delete_object(kind='egress_cell')` (I86 follow-up, #90, #139): target `'SOURCE->DESTINATION'` or the cell id; ANY-ANY
+  is blocked (use `ise_set_default_egress_rule`).
+
+### Fixed
+- `ise_set_default_egress_rule` / `ise_set_egress_policy` no longer send the built-in catch-all SGACL ISE lists with the rule
+  (ISE 400 "multiple sgacls"), show no false sgacls diff, and block catch-all conflicts and multi-SGACL cells when ISE allows
+  one SGACL per cell (#131, #138).
+- `ise_create_authz_profile` / `ise_update_authz_profile` web redirection send `webRedirection.acl` (ISE 3.5 refused `ACL` with
+  a 400), and re-sending an unchanged redirect no longer shows as a change (#130, #135).
+- `ise_create_backup` refuses a backup encryption key ISE would reject (8-15 of [A-Za-z0-9_#], upper, lower, digit, no
+  'cisco') in its preview, and `ise_status` reports the key check under `backup_key` (#132, #137).
+
 ## 0.18.0 (2026-10-28)
 
 Endpoint summary by device type, profile, identity group or NDG; allowed-protocols writes that work on ISE 3.5; SGTs bound in
