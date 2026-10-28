@@ -54,6 +54,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
   certificates (expired/expiring/self-signed), evaluation licences and AD join points.
 - **Endpoint bulk work**: `ise_bulk_endpoints` (create/update/delete up to 500 per call as one ISE task) and
   endpoint custom attributes that policy can match (`EndPoints:<name>`).
+- **Internal user lifecycle**: expiry date, change password at first login, password never expires, an
+  AD/LDAP-backed password and a TACACS+ enable password on the user tools; `ise_bulk_internal_users`
+  creates, updates or deletes up to 500 users with one preview and a result per user.
 - **Policy editing with validation**: create/update policy sets and authentication/authorization rules for
   network access and device admin (TACACS+). Conditions are written as `Dictionary:Attribute operator value`
   and checked against ISE's dictionaries in the preview ("did you mean ...?").
@@ -202,6 +205,13 @@ create the accounts and the read-tier verification test.
 `ise_deployment_health` reports the server's own account and flags it when it holds more than the
 enabled tiers need.
 
+**Admin access review** (reads only; the account needs an admin group that can read Admin Access, e.g.
+Super Admin or Read Only Admin): `ise_list_admin_users` (groups, disabled, never-disabled, external, with a
+summary), `ise_list_admin_groups` (members and the AD groups mapped to each admin group),
+`ise_list_rbac_policies`, and `ise_get_admin_access(group=|user=)` for the menus and data a group or
+admin gets. `ise_deployment_health` adds an `admins` section and flags enabled Super Admins beyond three
+and Super Admins exempt from inactivity disabling. Admin accounts are never changed by this server.
+
 ## Safety rails
 
 On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_TOOLS`,
@@ -216,7 +226,7 @@ On top of core's operator rails (`MCP_DRY_RUN`, `MCP_CHANGE_WINDOW`, `MCP_DENY_T
   `ise_coa_reauth` (1), `ise_coa_disconnect` (sessions on the port), `ise_coa_bulk` (sessions in the
   scope; it also takes its own `max`, refuses if any session is protected, and never bounces or shuts a
   port in bulk), `ise_apply_anc` / `ise_clear_anc`
-  (1), `ise_bulk_endpoints` (endpoints changed) and `ise_update_node_services` (1). Node-service and
+  (1), `ise_bulk_endpoints` (endpoints changed), `ise_bulk_internal_users` (users changed) and `ise_update_node_services` (1). Node-service and
   certificate-bind changes are the ones operators typically place behind `MCP_CHANGE_WINDOW`.
 
 ## Multi-node deployments
@@ -281,18 +291,18 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-152 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 81 read tools plus `ise_api_call` (GET-only) are registered. Everything
+157 tools and 7 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 85 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (81)
+### Read (85)
 
 | Tool | What it does |
 |---|---|
 | `ise_admin_policy_explain` | Predict what a TACACS+ device-admin login gets, client-side (ISE has no evaluate API and no TACACS+ live-log REST API): which device-admin policy set the NAD and user select, the authentication rule (identity source), the authorization rule (with its hit count), the shell profile (priv-lvl etc.; Deny All Shell Profile means the login fails) and, for each `command`, the command-set verdict and the line that decided it. |
 | `ise_audit_nads` | Audit every network device for common misconfigurations: no RADIUS or TACACS+ secret, short shared secrets, the same secret reused on many devices, only the default device groups (so policy can't tell them apart), overlapping IP ranges, well-known SNMP communities, and KeyWrap without keys. |
 | `ise_compare_snapshot` | Compare a ise_snapshot blob from before a change with one from after it (or, when `after` is empty, a fresh snapshot of the same scope taken now) and name what changed, most severe first: major = got unhealthy (session down, metric past its limit, healthy item gone), minor = changed but not clearly bad, info = recovered or improved. |
-| `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16). |
+| `ise_deployment_health` | One-call ISE health check with severity-ranked findings (critical > high > medium > low > info): node sync status, personas/services and redundancy (PAN HA, secondary PAN/MnT, a PSN present); patch and hot-patch level; last configuration backup (flagged when failed or older than 7 days) and repositories; system certificates per node (expired, expiring within cert_warn_days, self-signed EAP/Admin/Portal certs); licence tiers and compliance (flags evaluation licences and days left); AD join points; and the server's own ISE admin account and RBAC groups, flagged when more privileged than the enabled tiers need (I16); and an admins review (Super Admin count, disabled, never-disabled, external; I74). |
 | `ise_diff_config` | Compare two ise_export_config exports, or one export against live ISE ('live'), section by section: objects added, removed and changed with field-level changes (from/to; list fields as added/removed items). |
 | `ise_endpoint_360` | Everything ISE knows about one endpoint, in one call: the endpoint record (identity group, static assignment, profile, IP, custom/MDM attributes), its live session (NAD, port, user, PSN), the last authentication attempts with decoded failures, any ANC policy applied, and whether ISE has it on the rejected-endpoints list. |
 | `ise_explain_profile` | Why an endpoint has its profile: the profiling policy it matched and its parent chain (e.g. |
@@ -300,6 +310,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_export_csr` | The PEM text of a CSR, ready for any CA (Windows AD CS win_sign_csr, OpenSSL, step-ca, a public CA). |
 | `ise_find_session` | Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give one). |
 | `ise_get_ad_join_point` | One Active Directory join point: domain, the AD groups and attributes added for policy, key advanced settings, and whether ISE is joined (with the domains it can see). |
+| `ise_get_admin_access` | What an ISE admin group, or an admin user through their groups, may do: group -> enabled RBAC policies -> menu access (top-level tabs shown and hidden, menu pages shown) and data access (each category's permission: Admin Groups, User/Endpoint Identity Groups, Network Device Groups), plus the external AD groups mapped to the group and its members. |
 | `ise_get_auth_history` | Recent authentication attempts for an endpoint MAC from MnT (newest first): pass/fail, username, NAD, method/protocol, identity store, authorization profiles, SGT and the failure reason decoded with cause and resolution. |
 | `ise_get_auth_list` | Sessions that authenticated successfully in a time window, across all endpoints, from MnT (queried when called): user, MAC, IP, NAS IP and PSN, with counts by NAS IP and user. |
 | `ise_get_authz_profile` | Full authorization profile: access type, VLAN, dACL names, ACLs, web redirection, reauth, advanced RADIUS attributes (also as av_pairs such as 'Viptela:Viptela-Group-Name=netadmin'), device profile. |
@@ -319,6 +330,8 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_trustsec_settings` | ISE's TrustSec general settings: whether the TrustSec HTTPS (REST) policy server is on (what 'cts policy-server' on IOS-XE downloads environment data and policy from, port 9063 on the PSNs, and what feeds ise_trustsec_device_report), its audit log, whether a matrix cell may carry several SGACLs, automatic SGT numbering, and the HTTPS server list ISE hands to devices in environment data (host name, addresses, port). |
 | `ise_list_active_sessions` | List active RADIUS sessions from MnT (user, MAC, endpoint IP, NAS IP and NAD name, PSN, audit session id), plus total, posture and profiler session counts. |
 | `ise_list_ad_groups` | Search the joined domain for groups (name as ISE writes it, e.g. |
+| `ise_list_admin_groups` | ISE admin groups (built-in such as Super Admin, Policy Admin, Read Only Admin, ERS Admin, and custom ones): description, member admins (and which are disabled), whether the group is external and the external identity source and AD groups mapped to it ('which AD groups grant admin?'), and the RBAC policies that give it access. |
+| `ise_list_admin_users` | ISE's own administrators (Administration > System > Admin Access > Administrators), for an access review: name, enabled, admin groups, Super Admin or not, external, read-only, 'inactive account never disabled' and 'change password on next login', plus a summary (Super Admin count and names, disabled, never-disabled, external). |
 | `ise_list_allowed_protocols` | List allowed-protocols services (selected by each policy set) and which authentication protocols each permits: PAP, CHAP, MS-CHAPv2, EAP-MD5, EAP-TLS, PEAP, EAP-FAST, TEAP, LEAP. |
 | `ise_list_anc_endpoints` | List endpoints that currently have an ANC policy applied (e.g. |
 | `ise_list_anc_policies` | List Adaptive Network Control (ANC) policies and their actions (QUARANTINE, PORTBOUNCE, SHUTDOWN, REAUTHENTICATE). |
@@ -350,6 +363,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_list_profiler_profiles` | List the classic profiling policies (ISE ships ~700, e.g. |
 | `ise_list_profiling_rules` | List the profiler's custom / direct / ML profiling rules (ISE 3.3+ Profiler Policy Management): name, type, enabled, priority, condition, the endpoint labels it sets (endpoint type, manufacturer, model, OS) and how many endpoints it matched. |
 | `ise_list_pxgrid_clients` | The pxGrid 2.0 clients registered with ISE (FMC, Catalyst Center, SIEMs, scripts): name, state (pending / enabled / disabled / created), the product that registered it when the name shows it (FMC uses iseagent-* and firesightisetest-*), description and groups. |
+| `ise_list_rbac_policies` | ISE admin RBAC policies (Administration > System > Admin Access > Authorization > Policy): name, enabled, the admin groups they apply to, and the menu-access and data-access permission sets they grant. |
 | `ise_list_repositories` | Repositories ISE copies configuration backups to (Administration > System > Maintenance > Repository): name, protocol (SFTP, FTP, NFS, DISK, ...), server, path and user; passwords are never shown. |
 | `ise_list_sgacls` | List security group ACLs (SGACLs) with their ACE lines and IP version. |
 | `ise_list_sgts` | List TrustSec security group tags (SGTs): name, numeric value (and hex), description and id. |
@@ -371,13 +385,14 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (52)
+### Write (53)
 
 | Tool | What it does |
 |---|---|
 | `ise_add_ad_groups` | Make AD groups usable in policy: after this, '<join point>:ExternalGroups EQUALS <group name>' conditions accept them (ise_create_authz_rule). |
 | `ise_approve_pxgrid_client` | Approve a pending pxGrid client so it can look up and subscribe to ISE's pxGrid services (sessions, TrustSec, ANC). |
 | `ise_bulk_endpoints` | Create, update or delete many endpoints in one ISE bulk task (e.g. |
+| `ise_bulk_internal_users` | Create, update or delete many internal users with one preview, such as a batch of contractor accounts with an expiry date or a cleanup. |
 | `ise_create_ad_join_point` | Create an Active Directory join point (the definition only; no node joins yet). |
 | `ise_create_anc_policy` | Create an Adaptive Network Control policy that ise_apply_anc can put on endpoints. |
 | `ise_create_authn_rule` | Add an authentication rule to a policy set: conditions -> identity source, with what to do when authentication fails, the user isn't found, or the store is unreachable. |
@@ -385,7 +400,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_create_authz_rule` | Add an authorization rule (or local exception) to a policy set: conditions -> result. |
 | `ise_create_group` | Create a user identity group or an endpoint identity group, for policy to match on and for users/endpoints to be placed in. |
 | `ise_create_guest_user` | Create a guest account as the sponsor (ISE_SPONSOR_USERNAME), like the sponsor portal does. |
-| `ise_create_internal_user` | Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given identity groups. |
+| `ise_create_internal_user` | Create a user in the ISE internal identity store (for 802.1X/PAP/TACACS+ logins), in the given identity groups, with optional lifecycle settings: an account expiry date, change password at first login, password never expires, an AD/LDAP-backed password, and a TACACS+ enable password. |
 | `ise_create_nad` | Add a network access device (switch, WLC, VPN) so ISE accepts its RADIUS and/or TACACS+ requests. |
 | `ise_create_ndg` | Create a network device group (location, device type or a custom hierarchy) under an existing parent, so devices can be grouped and policy can match on it. |
 | `ise_create_policy_set` | Create a network-access (RADIUS) or device-admin (TACACS+) policy set: the conditions that select it (e.g. |
@@ -423,7 +438,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_suspend_guest_user` | Suspend a guest account as the sponsor: logins fail until ise_reinstate_guest_user. |
 | `ise_update_authz_profile` | Change an authorization profile's access type, VLAN, dACL, reauth timer, voice domain, description or advanced attributes (av_pairs; sdwan_group for the SD-WAN Manager admin group). |
 | `ise_update_guest_user` | Change a guest's contact or visit details as the sponsor. |
-| `ise_update_internal_user` | Enable/disable an internal user, reset their password, or change groups/email/description. |
+| `ise_update_internal_user` | Enable/disable an internal user, reset their password or enable password, set or remove the account expiry date, force a password change at next login, or change groups, names, email, description, password store and custom attributes. |
 | `ise_update_nad` | Change a network device: IPs, shared secrets, device groups, description, CoA port, name, switch RADIUS or TACACS+ off (remove_radius / remove_tacacs, keeping the other protocol's stored key), or TrustSec settings: device id/password (what the switch presents in 'cts credentials' to get a PAC and download environment data and policy; defaults for the refresh timers and CoA-based updates are set the first time), the HTTP REST API username/password for the HTTPS policy download ('cts policy-server' on IOS-XE) and push id support (the device reports its downloads, which is what ise_trustsec_device_report shows). |
 | `ise_update_policy_rule` | Change one rule in a policy set: enable/disable/monitor it, move it, rename it, replace its conditions, or change its result (authorization profiles, SGT, command sets, shell profile, identity source). |
 | `ise_update_policy_set` | Change a policy set: enable/disable/monitor it, replace its conditions, switch its allowed protocols, move it or rename it. |
