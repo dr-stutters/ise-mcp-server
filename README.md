@@ -182,6 +182,7 @@ so install from a release wheel rather than `git+https://...`.
 | `ISE_BACKUP_ENCRYPTION_KEY` | unset | Key `ise_create_backup` encrypts configuration backups with (also via `_FILE` / `_REF`; never shown or passed per call). Keep it: a restore needs it. ISE's rules: 8-15 characters from `[A-Za-z0-9_#]`, at least one upper-case letter, one lower-case letter and one digit, no `cisco` in any case (the preview and `ise_status` check it). See [Backups](#backups) |
 | `ISE_REPOSITORY_<NAME>` | unset | Repository passwords `ise_set_repository(password_env='ISE_REPOSITORY_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_REPOSITORY_` names are read). See [Backups](#backups) |
 | `ISE_RADIUS_SECRET_<NAME>` | unset | External RADIUS server shared secrets (and key-wrap keys) `ise_set_external_radius_server(secret_env='ISE_RADIUS_SECRET_<NAME>')` sends to ISE (also via `<var>_FILE`; never shown; only `ISE_RADIUS_SECRET_` names are read) |
+| `ISE_SNMP_<NAME>` | unset | SNMP scan credentials `ise_set_snmp_scan(community_env=..., v3_auth_password_env=..., v3_privacy_password_env=...)` sends to ISE (also via `<var>_FILE`; never shown or passed per call; only `ISE_SNMP_` names are read). See [Profiler](#profiler) |
 | `ISE_CERT_<NAME>` | unset | Key / PKCS#12 passwords `ise_import_system_certificate(password_env='ISE_CERT_<NAME>')` uses (also via `<var>_FILE`; never shown or passed per call; only `ISE_CERT_` names are read) |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (Streamable HTTP) |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | HTTP listener |
@@ -298,11 +299,11 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-179 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
-With the defaults (read-only), the 93 read tools plus `ise_api_call` (GET-only) are registered. Everything
+182 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+With the defaults (read-only), the 94 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
-### Read (93)
+### Read (94)
 
 | Tool | What it does |
 |---|---|
@@ -392,6 +393,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_recent_auth_failures` | Failed authentications in the last N minutes, grouped by failure reason (decoded with likely cause and next step) and by NAD, queried from MnT when called. |
 | `ise_search_spec` | Search the Cisco ISE OpenAPI spec for operations (method + path) and schemas. |
 | `ise_snapshot` | Take a compact, versioned snapshot of Cisco ISE health for a pre/post change check: failure % and timeouts per NAD over the 15 minutes before the snapshot (MnT), node persona and sync state, pxGrid client states, endpoint device types. |
+| `ise_snmp_scan_history` | The profiler's endpoint SNMP scans (Work Centers > Profiler > Endpoint Scans). |
 | `ise_status` | Check the connection to Cisco ISE: product version and API user, which API surfaces answer, and this MCP server's configuration (writes enabled?, TLS verification). |
 | `ise_test_ad_user` | Look a user up in AD through the join point (no password, no login) and return their groups, marking the ones added to the join point, i.e. |
 | `ise_test_command_set` | Test command lines against TACACS+ command sets without a device: would each be permitted, and which line decides? |
@@ -400,7 +402,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_where_used` | Everything that references one ISE object, before changing or deleting it: policy sets (condition, allowed protocols) and their authentication / authorization rules and local and global exceptions, network access and device admin, each with the policy set, rule and field (conditions are followed through library conditions: 'via'); library conditions; authorization profiles (dACLs); identity sequences (identity stores, certificate profile); TrustSec egress matrix cells (SGTs, SGACLs); static IP-SGT mappings and mapping groups (SGTs); network devices (device groups); and group members (internal users, endpoints). |
 | `ise_why_auth_failed` | Diagnose an endpoint's authentication in one call. |
 
-### Write (62)
+### Write (64)
 
 | Tool | What it does |
 |---|---|
@@ -434,6 +436,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_patch_readiness` | Run ISE's own patch / upgrade / rollback pre-checks on the whole deployment and report each check per node as pass / warn / fail with the fix ISE names, and `ready` ('is this deployment ready for patch N?'). |
 | `ise_reinstate_guest_user` | Reinstate a suspended guest account as the sponsor (logins work again until valid_to). |
 | `ise_release_rejected_endpoint` | Release endpoints from ISE's rejected list (Context Visibility > Rejected Endpoints), e.g. |
+| `ise_run_snmp_scan` | Run a profiler SNMP scan now (start), stop one that is running, or enable / disable scans. |
 | `ise_set_allowed_protocols` | Create an allowed-protocols service (the one a policy set selects) from a hardening preset, or harden or adjust an existing one. |
 | `ise_set_cert_auth_profile` | A certificate authentication profile tells ISE how to read an EAP-TLS client certificate: which field is the username, and optionally which identity store to look it up in. |
 | `ise_set_command_set` | Create a TACACS+ command set, or replace an existing one's command list. |
@@ -453,6 +456,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_repository` | Create a repository ISE copies configuration backups to (Administration > System > Maintenance > Repository), or update the one with this name, so ise_create_backup has somewhere to write. |
 | `ise_set_sgt` | Create a security group tag, or change an existing one's value/description. |
 | `ise_set_shell_profile` | Create a TACACS+ shell profile, or update an existing one: the attributes ISE returns when an admin logs in, e.g. |
+| `ise_set_snmp_scan` | Create a profiler endpoint SNMP scan, or update the one with this name: ISE's PSN sends SNMP queries to every address in the scope so printers, cameras and building controllers that say little over DHCP/RADIUS get profiled (and so an SGT). |
 | `ise_set_sponsor_group` | Create a sponsor group, or change one: map AD groups (ise_add_ad_groups first, so the join point offers them) or ISE identity groups as sponsors, pick the guest types and locations they may use, what they manage, and REST access. |
 | `ise_set_sxp_connection` | Create an SXP connection between an ISE node and a network device, or change the existing one for the same peer and domain. |
 | `ise_set_tacacs_server` | Create a TACACS+ external server (a TACACS+ server ISE proxies device-admin requests to, used through a TACACS+ server sequence), or update an existing one: given fields change, others are kept. |
@@ -665,6 +669,10 @@ such as `DHCP:dhcpClassIdentifier contains HP`, setting endpoint type / manufact
 `EndPoints:MFCInfoEndpointType` in an authorization rule; `ise_reprofile_endpoint` (dangerous tier) applies a
 new profile now with a CoA reauth. Classic profiling policies, certainty factors and the feed service are
 GUI-only: [docs/profiler.md](docs/profiler.md) has what ISE 3.5 exposes.
+IoT and OT segments where DHCP and RADIUS say little: `ise_set_snmp_scan` defines an endpoint SNMP scan (subnets
+or ranges, PSN, schedule; the community or SNMPv3 passwords from `ISE_SNMP_...` environment variables, never
+arguments), `ise_run_snmp_scan` starts, stops, enables or disables it, and `ise_snmp_scan_history` shows each
+run (scanned, discovered, unreachable, SNMP auth failures) with `ise_explain_profile` as the next step.
 
 ## Testing
 
