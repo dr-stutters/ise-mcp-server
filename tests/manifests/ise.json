@@ -768,6 +768,10 @@
       "tier": "read",
       "title": "Get a network device"
     },
+    "ise_get_patch_readiness": {
+      "tier": "read",
+      "title": "Patch / upgrade / rollback pre-check report"
+    },
     "ise_get_policy_set": {
       "tier": "read",
       "title": "Get a policy set with its rules"
@@ -995,6 +999,10 @@
     "ise_nad_radius_stats": {
       "tier": "read",
       "title": "Per-NAD RADIUS latency and timeouts"
+    },
+    "ise_patch_readiness": {
+      "tier": "write",
+      "title": "Patch / upgrade / rollback readiness"
     },
     "ise_policy_audit": {
       "tier": "read",
