@@ -313,10 +313,10 @@ async def test_update_same_redirect_as_get_is_no_change(mock: respx.MockRouter) 
         "portal": "Self-Registered Guest Portal (default)",
     }
     async with Client(make_server(mcp_enable_writes=True)) as c:
-        res = await c.call_tool(
-            "ise_update_authz_profile", {"profile": "Cisco_WebAuth", "redirect": same}, raise_on_error=False
-        )
-    assert res.is_error and "Nothing to change" in str(res.content)
+        res = (
+            await c.call_tool("ise_update_authz_profile", {"profile": "Cisco_WebAuth", "redirect": same})
+        ).structured_content
+    assert res["status"] == "no_change" and "confirm" not in res  # C71
     # Only the ACL changes: the diff names webRedirection.acl, nothing else.
     preview, _ = await two_step(
         "ise_update_authz_profile",

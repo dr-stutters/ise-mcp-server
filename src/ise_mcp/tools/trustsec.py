@@ -518,11 +518,14 @@ def register(reg: ToolRegistrar) -> None:
                 "Devices that download policy with 'cts policy-server' lose their policy source until "
                 "they fall back to RADIUS"
             )
+        noop = not details["changes"]
         plan = Plan(
             "Update TrustSec general settings",
             details=details,
             fingerprint=current,
             side_effects=side_effects,
+            noop=noop,
+            noop_reason="TrustSec general settings already as requested" if noop else None,
         )
 
         async def apply() -> Any:
