@@ -45,6 +45,7 @@ from ise_mcp.tools import (
     policy_explain,
     profiler_posture,
     pxgrid,
+    pxgrid_direct,
     radius,
     radius_proxy,
     sdwan_onboard,
@@ -111,7 +112,10 @@ equals <domain/OU/group>'; ise_get_ad_join_point (join status) and ise_test_ad_u
 AD login failures. pxGrid (appliance to appliance; this server never subscribes): ise_pxgrid_status
 (persona, certificate chain + hostname as consumers see them, pending clients) -> ise_list_pxgrid_clients ->
 ise_approve_pxgrid_client; ise_set_pxgrid_settings (auto-approve); ise_issue_pxgrid_client_cert (key + CSR,
-then the signed bundle) for a consumer such as FMC. Guest access: ise_list_guest_types /
+then the signed bundle) for a consumer such as FMC. pxGrid Direct (ISE pulls a REST CMDB such as NetBox into
+endpoint attributes; token by ISE_PXGRID_DIRECT_* env reference): ise_set_pxgrid_direct_connector ->
+ise_test_pxgrid_direct -> ise_pxgrid_direct_status, then authz rules on '<connector>:<attribute>'.
+Guest access: ise_list_guest_types /
 ise_list_sponsor_groups / ise_list_guest_portals (admin); guest accounts (ise_create_guest_user,
 ise_extend_guest_user, ise_suspend_guest_user, ...) run as the sponsor set in ISE_SPONSOR_USERNAME
 (ise_status shows guest_sponsor). Backups (before Catalyst Center's group-based policy migration or an
@@ -172,6 +176,7 @@ def create_server(
             policy_explain.register,
             profiler_posture.register,
             snmp_scan.register,
+            pxgrid_direct.register,
             device_admin.register,
             radius_proxy.register,
             allowed_protocols.register,

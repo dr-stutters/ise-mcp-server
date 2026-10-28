@@ -1020,6 +1020,10 @@
       "tier": "dangerous",
       "title": "Push TrustSec policy to devices (CoA)"
     },
+    "ise_pxgrid_direct_status": {
+      "tier": "read",
+      "title": "pxGrid Direct connectors and their sync status"
+    },
     "ise_pxgrid_status": {
       "tier": "read",
       "title": "pxGrid service status"
@@ -1112,6 +1116,10 @@
       "tier": "write",
       "title": "Create or update a custom profiling rule"
     },
+    "ise_set_pxgrid_direct_connector": {
+      "tier": "write",
+      "title": "Create or update a pxGrid Direct connector"
+    },
     "ise_set_pxgrid_settings": {
       "tier": "write",
       "title": "Set the pxGrid approval settings"
@@ -1183,6 +1191,10 @@
     "ise_test_command_set": {
       "tier": "read",
       "title": "Test a command against TACACS+ command sets"
+    },
+    "ise_test_pxgrid_direct": {
+      "tier": "read",
+      "title": "Test a pxGrid Direct connector"
     },
     "ise_trustsec_device_report": {
       "tier": "read",
