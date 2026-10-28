@@ -1,6 +1,6 @@
 """I85: web redirection and common tasks on ise_create_authz_profile / ise_update_authz_profile, and their
 round trip through ise_export_config / ise_import_config. Bodies follow the ERS 3.5
-ers.authorizationprofile model (webRedirection: WebRedirectionType, ACL, portalName,
+ers.authorizationprofile model (webRedirection: WebRedirectionType, acl, portalName,
 staticIPHostNameFQDN, displayCertificatesRenewalMessages)."""
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ PORTALS = {
 }
 CWA = {
     "WebRedirectionType": "CentralizedWebAuth",
-    "ACL": "ACL-REDIRECT",
+    "acl": "ACL-REDIRECT",
     "portalName": "Sponsored Guest Portal (default)",
     "displayCertificatesRenewalMessages": True,
 }
@@ -113,7 +113,7 @@ async def test_create_hotspot_with_static_host_and_common_tasks(mock: respx.Mock
     body = sent(post)
     assert body["webRedirection"] == {
         "WebRedirectionType": "HotSpot",
-        "ACL": "ACL-REDIRECT",
+        "acl": "ACL-REDIRECT",
         "portalName": "Hotspot Guest Portal (default)",
         "staticIPHostNameFQDN": "guest.example.com",
     }  # displayCertificatesRenewalMessages only for CWA
@@ -235,11 +235,97 @@ async def test_update_redirect_replaced_whole_and_removed(mock: respx.MockRouter
     # No stale static host or CWA-only flag carried over to the hotspot redirect.
     assert sent(put)["webRedirection"] == {
         "WebRedirectionType": "HotSpot",
-        "ACL": "ACL-HS",
+        "acl": "ACL-HS",
         "portalName": "Hotspot Guest Portal (default)",
     }
     preview, _ = await two_step("ise_update_authz_profile", {"profile": "mcp-cwa", "redirect": ""})
     assert preview["preview"]["changes"]["webRedirection"]["removed"] is True
+
+
+# The built-in Cisco_WebAuth profile as a raw ERS GET on ISE 3.5 returns it (#130).
+CISCO_WEBAUTH = {
+    "id": "cwa-builtin",
+    "name": "Cisco_WebAuth",
+    "description": "Default Profile used to redirect users to the CWA portal.",
+    "accessType": "ACCESS_ACCEPT",
+    "authzProfileType": "SWITCH",
+    "webRedirection": {
+        "WebRedirectionType": "CentralizedWebAuth",
+        "acl": "ACL_WEBAUTH_REDIRECT",
+        "portalName": "Self-Registered Guest Portal (default)",
+        "displayCertificatesRenewalMessages": False,
+    },
+    "trackMovement": False,
+    "serviceTemplate": False,
+    "easywiredSessionCandidate": False,
+    "voiceDomainPermission": False,
+    "neat": False,
+    "webAuth": False,
+    "profileName": "Cisco",
+}
+
+
+async def test_redirect_bodies_use_ise_acl_key(mock: respx.MockRouter) -> None:
+    """#130: ISE 3.5 ERS refuses webRedirection.ACL (400 'JSON invalidity'); POST and PUT send 'acl'."""
+    mock_portals(mock)
+    post = new_profile(mock, "mcp-cwa-static")
+    redirect = {
+        "type": "CentralizedWebAuth",
+        "acl": "ACL_WEBAUTH_REDIRECT",
+        "portal": "Self-Registered Guest Portal (default)",
+        "static_host": "guest.example.com",
+    }
+    _, done = await two_step("ise_create_authz_profile", {"name": "mcp-cwa-static", "redirect": redirect})
+    assert done["status"] == "applied"
+    wr = sent(post)["webRedirection"]
+    assert "ACL" not in wr
+    assert wr == {
+        "WebRedirectionType": "CentralizedWebAuth",
+        "acl": "ACL_WEBAUTH_REDIRECT",
+        "portalName": "Self-Registered Guest Portal (default)",
+        "staticIPHostNameFQDN": "guest.example.com",
+        "displayCertificatesRenewalMessages": True,
+    }
+    # Same key set as ISE's own GET (plus the static host).
+    assert set(wr) - {"staticIPHostNameFQDN"} == set(CISCO_WEBAUTH["webRedirection"])
+
+    put = existing_profile(mock, copy.deepcopy(CISCO_WEBAUTH))
+    _, done = await two_step(
+        "ise_update_authz_profile", {"profile": "Cisco_WebAuth", "redirect": {**redirect, "acl": "ACL-NEW"}}
+    )
+    assert done["status"] == "applied"
+    assert sent(put)["webRedirection"] == {
+        "WebRedirectionType": "CentralizedWebAuth",
+        "acl": "ACL-NEW",
+        "portalName": "Self-Registered Guest Portal (default)",
+        "staticIPHostNameFQDN": "guest.example.com",
+        "displayCertificatesRenewalMessages": False,  # kept from the profile
+    }
+
+
+async def test_update_same_redirect_as_get_is_no_change(mock: respx.MockRouter) -> None:
+    """Re-sending the redirect a GET returns (acl, displayCertificatesRenewalMessages=false) is no change."""
+    mock_portals(mock)
+    put = existing_profile(mock, copy.deepcopy(CISCO_WEBAUTH))
+    same = {
+        "type": "CentralizedWebAuth",
+        "acl": "ACL_WEBAUTH_REDIRECT",
+        "portal": "Self-Registered Guest Portal (default)",
+    }
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        res = await c.call_tool(
+            "ise_update_authz_profile", {"profile": "Cisco_WebAuth", "redirect": same}, raise_on_error=False
+        )
+    assert res.is_error and "Nothing to change" in str(res.content)
+    # Only the ACL changes: the diff names webRedirection.acl, nothing else.
+    preview, _ = await two_step(
+        "ise_update_authz_profile",
+        {"profile": "Cisco_WebAuth", "redirect": {**same, "acl": "ACL-OTHER"}},
+    )
+    changes = preview["preview"]["changes"]
+    assert set(changes) == {"webRedirection.acl"}
+    assert "displayCertificatesRenewalMessages" not in json.dumps(changes)
+    assert put.call_count == 1
 
 
 async def test_update_portal_mismatch_is_blocked(mock: respx.MockRouter) -> None:

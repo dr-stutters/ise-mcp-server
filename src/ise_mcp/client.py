@@ -510,10 +510,18 @@ class IseApp:
             out["deployment"] = self.deployment_summary(nodes)
         out["surfaces"] = surfaces
         out["guest_sponsor"] = await self.sponsor_status()
+        out["backup_key"] = self.backup_key_status()
         down = [s for s, r in surfaces.items() if not r["ok"]]
         if down:
             out["warning"] = f"Surface(s) not answering: {', '.join(down)}; tools using them will fail."
         return out
+
+    def backup_key_status(self) -> dict[str, Any]:
+        """Whether ise_create_backup's key is set and meets ISE's rules (length and broken rules only)."""
+        from ise_mcp.tools.backup import backup_key_status  # here: the tools import this module
+
+        key = self.settings.backup_encryption_key
+        return backup_key_status(key.get_secret_value() if key is not None else None)
 
     async def sponsor_status(self) -> dict[str, Any]:
         """Whether the guest-account tools can run: the sponsor account (password never shown) and
