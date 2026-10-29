@@ -1,0 +1,158 @@
+{
+  "manifest": 1,
+  "server": "Windows_Server",
+  "prefix": "win",
+  "version": null,
+  "core_version": null,
+  "note": "Hand-written (core C37): the Windows_Server MCP is not a suite server and has no `tools --json`. Names from its tool list (2026-10-29); it has no tiers of its own, so these are read for get/list/info, dangerous for reboot/promote/install/raw shell/password, write otherwise.",
+  "tools": {
+    "win_ad_domain_info": {
+      "tier": "read",
+      "title": "ad domain info"
+    },
+    "win_adcs_ca_info": {
+      "tier": "read",
+      "title": "adcs ca info"
+    },
+    "win_add_dhcp_reservation": {
+      "tier": "write",
+      "title": "add dhcp reservation"
+    },
+    "win_add_dns_a_record": {
+      "tier": "write",
+      "title": "add dns a record"
+    },
+    "win_add_dns_cname": {
+      "tier": "write",
+      "title": "add dns cname"
+    },
+    "win_add_group_member": {
+      "tier": "write",
+      "title": "add group member"
+    },
+    "win_create_ad_group": {
+      "tier": "write",
+      "title": "create ad group"
+    },
+    "win_create_ad_ou": {
+      "tier": "write",
+      "title": "create ad ou"
+    },
+    "win_create_ad_user": {
+      "tier": "write",
+      "title": "create ad user"
+    },
+    "win_create_dhcp_scope": {
+      "tier": "write",
+      "title": "create dhcp scope"
+    },
+    "win_delete_ad_user": {
+      "tier": "dangerous",
+      "title": "delete ad user"
+    },
+    "win_get_ad_user": {
+      "tier": "read",
+      "title": "get ad user"
+    },
+    "win_get_ca_certificate": {
+      "tier": "read",
+      "title": "get ca certificate"
+    },
+    "win_get_dns_records": {
+      "tier": "read",
+      "title": "get dns records"
+    },
+    "win_get_service": {
+      "tier": "read",
+      "title": "get service"
+    },
+    "win_install_adcs_ca": {
+      "tier": "dangerous",
+      "title": "install adcs ca"
+    },
+    "win_install_feature": {
+      "tier": "dangerous",
+      "title": "install feature"
+    },
+    "win_list_ad_computers": {
+      "tier": "read",
+      "title": "list ad computers"
+    },
+    "win_list_ad_groups": {
+      "tier": "read",
+      "title": "list ad groups"
+    },
+    "win_list_ad_ous": {
+      "tier": "read",
+      "title": "list ad ous"
+    },
+    "win_list_ad_users": {
+      "tier": "read",
+      "title": "list ad users"
+    },
+    "win_list_ca_templates": {
+      "tier": "read",
+      "title": "list ca templates"
+    },
+    "win_list_dhcp_leases": {
+      "tier": "read",
+      "title": "list dhcp leases"
+    },
+    "win_list_dhcp_scopes": {
+      "tier": "read",
+      "title": "list dhcp scopes"
+    },
+    "win_list_dns_zones": {
+      "tier": "read",
+      "title": "list dns zones"
+    },
+    "win_list_features": {
+      "tier": "read",
+      "title": "list features"
+    },
+    "win_promote_to_dc": {
+      "tier": "dangerous",
+      "title": "promote to dc"
+    },
+    "win_reboot": {
+      "tier": "dangerous",
+      "title": "reboot"
+    },
+    "win_remove_dns_record": {
+      "tier": "write",
+      "title": "remove dns record"
+    },
+    "win_rename_computer": {
+      "tier": "dangerous",
+      "title": "rename computer"
+    },
+    "win_restart_service": {
+      "tier": "write",
+      "title": "restart service"
+    },
+    "win_run_command": {
+      "tier": "dangerous",
+      "title": "run command"
+    },
+    "win_run_powershell": {
+      "tier": "dangerous",
+      "title": "run powershell"
+    },
+    "win_run_powershell_json": {
+      "tier": "dangerous",
+      "title": "run powershell json"
+    },
+    "win_set_ad_user_password": {
+      "tier": "dangerous",
+      "title": "set ad user password"
+    },
+    "win_sign_csr": {
+      "tier": "write",
+      "title": "sign csr"
+    },
+    "win_system_info": {
+      "tier": "read",
+      "title": "system info"
+    }
+  }
+}

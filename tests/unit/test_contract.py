@@ -63,13 +63,21 @@ PROMPT_SAMPLES = {
     },
     "ise_deployment_health_review": {"cert_warn_days": "60", "site": "Global/SYD/Bldg-1", "role": "ACCESS"},
     "ise_phased_8021x_rollout": {"ndg": "SYD#Bldg-1", "phase": "closed", "switch": "lab/sw1", "days": "3"},
+    "ise_cert_renewal": {
+        "role": "eap",
+        "node": "ise-psn1",
+        "days": "60",
+        "template": "WebServer",
+        "test_mac": "aa:bb:cc:dd:ee:ff",
+        "change_ref": "CHG0012345",
+    },
 }
 # Prompts under the core snapshot kit (tests/snapshots/prompts/<name>.md). The kit reports any other
 # snapshot file as stale, so each snapshot test compares this whole set.
-SNAPSHOT_PROMPTS = ("ise_onboard_nad", "ise_deployment_health_review")
-# win = the Windows_Server MCP (no manifest: its references are checked for `uses` only).
+SNAPSHOT_PROMPTS = ("ise_onboard_nad", "ise_deployment_health_review", "ise_cert_renewal")
+# win = the Windows_Server MCP (hand-written manifest tests/manifests/win.json, I52).
 KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win"}
-# Every fmc_*/catc_*/catsdwan_* tool a prompt references must exist in that server's manifest
+# Every fmc_*/catc_*/catsdwan_*/win_* tool a prompt references must exist in that server's manifest
 # (tests/manifests/).
 EXTERNAL = load_tool_manifests("tests/manifests")
 
