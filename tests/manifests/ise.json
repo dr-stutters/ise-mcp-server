@@ -545,11 +545,17 @@
   "tools": {
     "ise_add_ad_groups": {
       "tier": "write",
-      "title": "Add AD groups to a join point"
+      "title": "Add AD groups to a join point",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_admin_policy_explain": {
       "tier": "read",
-      "title": "Explain a device-admin (TACACS+) login and command"
+      "title": "Explain a device-admin (TACACS+) login and command",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_api_call": {
       "tier": "dangerous",
@@ -557,47 +563,80 @@
     },
     "ise_apply_anc": {
       "tier": "dangerous",
-      "title": "Apply ANC policy to an endpoint"
+      "title": "Apply ANC policy to an endpoint",
+      "toolsets": [
+        "anc"
+      ]
     },
     "ise_approve_guest": {
       "tier": "write",
-      "title": "Approve or deny a self-registered guest"
+      "title": "Approve or deny a self-registered guest",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_approve_pxgrid_client": {
       "tier": "write",
-      "title": "Approve a pxGrid client"
+      "title": "Approve a pxGrid client",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_audit_nads": {
       "tier": "read",
-      "title": "Audit network devices"
+      "title": "Audit network devices",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_bind_certificate": {
       "tier": "dangerous",
-      "title": "Bind a CA-signed certificate to its CSR"
+      "title": "Bind a CA-signed certificate to its CSR",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_bulk_endpoints": {
       "tier": "write",
-      "title": "Bulk create, update or delete endpoints"
+      "title": "Bulk create, update or delete endpoints",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_bulk_internal_users": {
       "tier": "write",
-      "title": "Bulk create, update or delete internal users"
+      "title": "Bulk create, update or delete internal users",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_clear_anc": {
       "tier": "dangerous",
-      "title": "Clear ANC policy from an endpoint"
+      "title": "Clear ANC policy from an endpoint",
+      "toolsets": [
+        "anc"
+      ]
     },
     "ise_coa_bulk": {
       "tier": "dangerous",
-      "title": "Bulk CoA by scope"
+      "title": "Bulk CoA by scope",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_coa_disconnect": {
       "tier": "dangerous",
-      "title": "CoA: disconnect a session"
+      "title": "CoA: disconnect a session",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_coa_reauth": {
       "tier": "dangerous",
-      "title": "CoA: reauthenticate a session"
+      "title": "CoA: reauthenticate a session",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_compare_snapshot": {
       "tier": "read",
@@ -605,75 +644,130 @@
     },
     "ise_create_ad_join_point": {
       "tier": "write",
-      "title": "Create an AD join point"
+      "title": "Create an AD join point",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_create_anc_policy": {
       "tier": "write",
-      "title": "Create ANC policy"
+      "title": "Create ANC policy",
+      "toolsets": [
+        "anc"
+      ]
     },
     "ise_create_authn_rule": {
       "tier": "write",
-      "title": "Create authentication rule"
+      "title": "Create authentication rule",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_create_authz_profile": {
       "tier": "write",
-      "title": "Create authorization profile"
+      "title": "Create authorization profile",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_create_authz_rule": {
       "tier": "write",
-      "title": "Create authorization rule"
+      "title": "Create authorization rule",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_create_backup": {
       "tier": "dangerous",
-      "title": "Create a configuration backup"
+      "title": "Create a configuration backup",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_create_group": {
       "tier": "write",
-      "title": "Create identity or endpoint group"
+      "title": "Create identity or endpoint group",
+      "toolsets": [
+        "endpoints",
+        "identity"
+      ]
     },
     "ise_create_guest_user": {
       "tier": "write",
-      "title": "Create a guest account"
+      "title": "Create a guest account",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_create_internal_user": {
       "tier": "write",
-      "title": "Create internal user"
+      "title": "Create internal user",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_create_nad": {
       "tier": "write",
-      "title": "Create network device"
+      "title": "Create network device",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_create_ndg": {
       "tier": "write",
-      "title": "Create network device group"
+      "title": "Create network device group",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_create_policy_set": {
       "tier": "write",
-      "title": "Create policy set"
+      "title": "Create policy set",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_decline_pxgrid_client": {
       "tier": "write",
-      "title": "Decline a pending pxGrid client"
+      "title": "Decline a pending pxGrid client",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_delete_certificate": {
       "tier": "dangerous",
-      "title": "Delete a certificate"
+      "title": "Delete a certificate",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_delete_condition": {
       "tier": "write",
-      "title": "Delete a policy condition"
+      "title": "Delete a policy condition",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_delete_csr": {
       "tier": "write",
-      "title": "Delete a CSR"
+      "title": "Delete a CSR",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_delete_guest_user": {
       "tier": "write",
-      "title": "Delete a guest account"
+      "title": "Delete a guest account",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_delete_nad": {
       "tier": "dangerous",
-      "title": "Delete network device"
+      "title": "Delete network device",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_delete_object": {
       "tier": "write",
@@ -681,107 +775,186 @@
     },
     "ise_delete_policy_rule": {
       "tier": "dangerous",
-      "title": "Delete a policy rule"
+      "title": "Delete a policy rule",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_delete_policy_set": {
       "tier": "dangerous",
-      "title": "Delete a policy set"
+      "title": "Delete a policy set",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_delete_profiling_rule": {
       "tier": "write",
-      "title": "Delete a custom profiling rule"
+      "title": "Delete a custom profiling rule",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_delete_pxgrid_client": {
       "tier": "write",
-      "title": "Delete a pxGrid client"
+      "title": "Delete a pxGrid client",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_delete_repository": {
       "tier": "dangerous",
-      "title": "Delete a backup repository"
+      "title": "Delete a backup repository",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_delete_session": {
       "tier": "dangerous",
-      "title": "Delete a stale MnT session"
+      "title": "Delete a stale MnT session",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_delete_trustsec_object": {
       "tier": "write",
-      "title": "Delete an IP-SGT mapping or SXP connection"
+      "title": "Delete an IP-SGT mapping or SXP connection",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_deploy_ip_sgt": {
       "tier": "dangerous",
-      "title": "Deploy IP-SGT mappings to devices (SSH)"
+      "title": "Deploy IP-SGT mappings to devices (SSH)",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_deployment_health": {
       "tier": "read",
-      "title": "Deployment health check"
+      "title": "Deployment health check",
+      "toolsets": [
+        "admin",
+        "troubleshoot"
+      ]
     },
     "ise_diff_config": {
       "tier": "read",
-      "title": "Diff ISE configuration exports"
+      "title": "Diff ISE configuration exports",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_endpoint_360": {
       "tier": "read",
-      "title": "Endpoint 360"
+      "title": "Endpoint 360",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_endpoint_summary": {
       "tier": "read",
-      "title": "Endpoint summary"
+      "title": "Endpoint summary",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_explain_profile": {
       "tier": "read",
-      "title": "Explain an endpoint's profile"
+      "title": "Explain an endpoint's profile",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_export_config": {
       "tier": "read",
-      "title": "Export ISE configuration as YAML"
+      "title": "Export ISE configuration as YAML",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_export_csr": {
       "tier": "read",
-      "title": "Export a CSR (PEM)"
+      "title": "Export a CSR (PEM)",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_extend_guest_user": {
       "tier": "write",
-      "title": "Extend a guest account"
+      "title": "Extend a guest account",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_find_session": {
       "tier": "read",
-      "title": "Find a session"
+      "title": "Find a session",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_generate_csr": {
       "tier": "write",
-      "title": "Generate a CSR"
+      "title": "Generate a CSR",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_get_accounting": {
       "tier": "read",
-      "title": "RADIUS accounting totals for a MAC"
+      "title": "RADIUS accounting totals for a MAC",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_get_ad_join_point": {
       "tier": "read",
-      "title": "Get an AD join point (config + join status)"
+      "title": "Get an AD join point (config + join status)",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_get_admin_access": {
       "tier": "read",
-      "title": "Explain an ISE admin's access"
+      "title": "Explain an ISE admin's access",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_get_auth_history": {
       "tier": "read",
-      "title": "Authentication history for a MAC"
+      "title": "Authentication history for a MAC",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_get_auth_list": {
       "tier": "read",
-      "title": "Sessions authenticated in a time window"
+      "title": "Sessions authenticated in a time window",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_get_authz_profile": {
       "tier": "read",
-      "title": "Get an authorization profile"
+      "title": "Get an authorization profile",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_get_backup_status": {
       "tier": "read",
-      "title": "Last configuration backup"
+      "title": "Last configuration backup",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_get_dacl": {
       "tier": "read",
-      "title": "Get a downloadable ACL"
+      "title": "Get a downloadable ACL",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_get_definition": {
       "tier": "read",
@@ -789,47 +962,80 @@
     },
     "ise_get_egress_matrix": {
       "tier": "read",
-      "title": "TrustSec egress matrix"
+      "title": "TrustSec egress matrix",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_get_guest_locations": {
       "tier": "read",
-      "title": "Guest locations and SSIDs"
+      "title": "Guest locations and SSIDs",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_get_guest_user": {
       "tier": "read",
-      "title": "Get a guest account"
+      "title": "Get a guest account",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_get_internal_user": {
       "tier": "read",
-      "title": "Get an internal user"
+      "title": "Get an internal user",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_get_license_status": {
       "tier": "read",
-      "title": "ISE license status"
+      "title": "ISE license status",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_get_mac_randomization": {
       "tier": "read",
-      "title": "Random MAC (RCM) and endpoint ownership settings"
+      "title": "Random MAC (RCM) and endpoint ownership settings",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_get_nad": {
       "tier": "read",
-      "title": "Get a network device"
+      "title": "Get a network device",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_get_patch_readiness": {
       "tier": "read",
-      "title": "Patch / upgrade / rollback pre-check report"
+      "title": "Patch / upgrade / rollback pre-check report",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_get_policy_set": {
       "tier": "read",
-      "title": "Get a policy set with its rules"
+      "title": "Get a policy set with its rules",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_get_pxgrid_client": {
       "tier": "read",
-      "title": "Get a pxGrid client"
+      "title": "Get a pxGrid client",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_get_tacacs_servers": {
       "tier": "read",
-      "title": "List TACACS+ external servers and sequences"
+      "title": "List TACACS+ external servers and sequences",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_get_task": {
       "tier": "read",
@@ -837,275 +1043,480 @@
     },
     "ise_get_trustsec_settings": {
       "tier": "read",
-      "title": "TrustSec general settings"
+      "title": "TrustSec general settings",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_import_config": {
       "tier": "dangerous",
-      "title": "Import ISE configuration from an export"
+      "title": "Import ISE configuration from an export",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_import_system_certificate": {
       "tier": "dangerous",
-      "title": "Import a system certificate with its private key"
+      "title": "Import a system certificate with its private key",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_import_trusted_cert": {
       "tier": "write",
-      "title": "Import a trusted (CA) certificate"
+      "title": "Import a trusted (CA) certificate",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_issue_pxgrid_client_cert": {
       "tier": "write",
-      "title": "Issue a pxGrid client certificate"
+      "title": "Issue a pxGrid client certificate",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_join_ad": {
       "tier": "dangerous",
-      "title": "Join ISE nodes to Active Directory"
+      "title": "Join ISE nodes to Active Directory",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_leave_ad": {
       "tier": "dangerous",
-      "title": "Leave Active Directory"
+      "title": "Leave Active Directory",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_list_active_sessions": {
       "tier": "read",
-      "title": "List active sessions"
+      "title": "List active sessions",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_list_ad_groups": {
       "tier": "read",
-      "title": "Search an AD domain's groups"
+      "title": "Search an AD domain's groups",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_list_admin_groups": {
       "tier": "read",
-      "title": "List ISE admin groups"
+      "title": "List ISE admin groups",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_list_admin_users": {
       "tier": "read",
-      "title": "List ISE admin users"
+      "title": "List ISE admin users",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_list_allowed_protocols": {
       "tier": "read",
-      "title": "List allowed protocols services"
+      "title": "List allowed protocols services",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_list_anc_endpoints": {
       "tier": "read",
-      "title": "List endpoints under ANC"
+      "title": "List endpoints under ANC",
+      "toolsets": [
+        "anc"
+      ]
     },
     "ise_list_anc_policies": {
       "tier": "read",
-      "title": "List ANC policies"
+      "title": "List ANC policies",
+      "toolsets": [
+        "anc"
+      ]
     },
     "ise_list_authz_profiles": {
       "tier": "read",
-      "title": "List authorization profiles"
+      "title": "List authorization profiles",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_list_certificates": {
       "tier": "read",
-      "title": "List certificates"
+      "title": "List certificates",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_list_command_sets": {
       "tier": "read",
-      "title": "List TACACS+ command sets"
+      "title": "List TACACS+ command sets",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_list_conditions": {
       "tier": "read",
-      "title": "List library conditions"
+      "title": "List library conditions",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_list_csrs": {
       "tier": "read",
-      "title": "List certificate signing requests"
+      "title": "List certificate signing requests",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_list_custom_attributes": {
       "tier": "read",
-      "title": "List endpoint custom attributes"
+      "title": "List endpoint custom attributes",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_list_dacls": {
       "tier": "read",
-      "title": "List downloadable ACLs"
+      "title": "List downloadable ACLs",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_list_dictionary_attributes": {
       "tier": "read",
-      "title": "List policy dictionary attributes"
+      "title": "List policy dictionary attributes",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_list_endpoint_groups": {
       "tier": "read",
-      "title": "List endpoint identity groups"
+      "title": "List endpoint identity groups",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_list_endpoints": {
       "tier": "read",
-      "title": "List endpoints"
+      "title": "List endpoints",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_list_failure_reasons": {
       "tier": "read",
-      "title": "Search failure reasons"
+      "title": "Search failure reasons",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_list_guest_portals": {
       "tier": "read",
-      "title": "List guest and sponsor portals"
+      "title": "List guest and sponsor portals",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_list_guest_types": {
       "tier": "read",
-      "title": "List guest types"
+      "title": "List guest types",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_list_guest_users": {
       "tier": "read",
-      "title": "List guest accounts"
+      "title": "List guest accounts",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_list_identity_groups": {
       "tier": "read",
-      "title": "List user identity groups"
+      "title": "List user identity groups",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_list_identity_sources": {
       "tier": "read",
-      "title": "List identity sources"
+      "title": "List identity sources",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_list_internal_users": {
       "tier": "read",
-      "title": "List internal users"
+      "title": "List internal users",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_list_ip_sgt_mappings": {
       "tier": "read",
-      "title": "List IP-SGT mappings"
+      "title": "List IP-SGT mappings",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_list_nads": {
       "tier": "read",
-      "title": "List network devices (NADs)"
+      "title": "List network devices (NADs)",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_list_ndgs": {
       "tier": "read",
-      "title": "List network device groups"
+      "title": "List network device groups",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_list_nodes": {
       "tier": "read",
-      "title": "List ISE deployment nodes"
+      "title": "List ISE deployment nodes",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_list_patches": {
       "tier": "read",
-      "title": "List installed patches"
+      "title": "List installed patches",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_list_policy_sets": {
       "tier": "read",
-      "title": "List policy sets"
+      "title": "List policy sets",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_list_posture_policies": {
       "tier": "read",
-      "title": "List posture policies"
+      "title": "List posture policies",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_list_posture_requirements": {
       "tier": "read",
-      "title": "List posture requirements"
+      "title": "List posture requirements",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_list_profiler_profiles": {
       "tier": "read",
-      "title": "List profiler profiles"
+      "title": "List profiler profiles",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_list_profiling_rules": {
       "tier": "read",
-      "title": "List custom profiling rules"
+      "title": "List custom profiling rules",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_list_pxgrid_clients": {
       "tier": "read",
-      "title": "List pxGrid clients"
+      "title": "List pxGrid clients",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_list_rbac_policies": {
       "tier": "read",
-      "title": "List ISE RBAC policies"
+      "title": "List ISE RBAC policies",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_list_repositories": {
       "tier": "read",
-      "title": "List backup repositories"
+      "title": "List backup repositories",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_list_sgacls": {
       "tier": "read",
-      "title": "List SGACLs"
+      "title": "List SGACLs",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_list_sgt_vn_vlan": {
       "tier": "read",
-      "title": "List SGT-VN-VLAN mappings"
+      "title": "List SGT-VN-VLAN mappings",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_list_sgts": {
       "tier": "read",
-      "title": "List security group tags"
+      "title": "List security group tags",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_list_shell_profiles": {
       "tier": "read",
-      "title": "List TACACS+ shell profiles"
+      "title": "List TACACS+ shell profiles",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_list_sponsor_groups": {
       "tier": "read",
-      "title": "List sponsor groups"
+      "title": "List sponsor groups",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_list_sxp_bindings": {
       "tier": "read",
-      "title": "List SXP bindings"
+      "title": "List SXP bindings",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_list_sxp_connections": {
       "tier": "read",
-      "title": "List SXP connections"
+      "title": "List SXP connections",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_list_virtual_networks": {
       "tier": "read",
-      "title": "List TrustSec virtual networks"
+      "title": "List TrustSec virtual networks",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_nad_radius_stats": {
       "tier": "read",
-      "title": "Per-NAD RADIUS latency and timeouts"
+      "title": "Per-NAD RADIUS latency and timeouts",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_notify_guest": {
       "tier": "write",
-      "title": "Send a guest their account details"
+      "title": "Send a guest their account details",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_patch_readiness": {
       "tier": "write",
-      "title": "Patch / upgrade / rollback readiness"
+      "title": "Patch / upgrade / rollback readiness",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_policy_audit": {
       "tier": "read",
-      "title": "Audit ISE policy hygiene"
+      "title": "Audit ISE policy hygiene",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_policy_explain": {
       "tier": "read",
-      "title": "Explain which policy rule a request would hit"
+      "title": "Explain which policy rule a request would hit",
+      "toolsets": [
+        "policy",
+        "troubleshoot"
+      ]
     },
     "ise_profiler_status": {
       "tier": "read",
-      "title": "Profiler status per PSN"
+      "title": "Profiler status per PSN",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_push_trustsec_matrix": {
       "tier": "dangerous",
-      "title": "Push TrustSec policy to devices (CoA)"
+      "title": "Push TrustSec policy to devices (CoA)",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_pxgrid_direct_status": {
       "tier": "read",
-      "title": "pxGrid Direct connectors and their sync status"
+      "title": "pxGrid Direct connectors and their sync status",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_pxgrid_status": {
       "tier": "read",
-      "title": "pxGrid service status"
+      "title": "pxGrid service status",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_recent_auth_failures": {
       "tier": "read",
-      "title": "Recent authentication failures"
+      "title": "Recent authentication failures",
+      "toolsets": [
+        "troubleshoot"
+      ]
     },
     "ise_reinstate_guest_user": {
       "tier": "write",
-      "title": "Reinstate a suspended guest account"
+      "title": "Reinstate a suspended guest account",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_release_rejected_endpoint": {
       "tier": "write",
-      "title": "Release rejected endpoints"
+      "title": "Release rejected endpoints",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_reprofile_endpoint": {
       "tier": "dangerous",
-      "title": "Reprofile an endpoint (CoA)"
+      "title": "Reprofile an endpoint (CoA)",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_reset_guest_password": {
       "tier": "write",
-      "title": "Reset a guest's password"
+      "title": "Reset a guest's password",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_reset_hitcounts": {
       "tier": "dangerous",
-      "title": "Reset policy hit counters"
+      "title": "Reset policy hit counters",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_run_snmp_scan": {
       "tier": "write",
-      "title": "Start, stop, enable or disable SNMP scans"
+      "title": "Start, stop, enable or disable SNMP scans",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_search_spec": {
       "tier": "read",
@@ -1113,115 +1524,199 @@
     },
     "ise_set_allowed_protocols": {
       "tier": "write",
-      "title": "Create or harden an allowed-protocols service"
+      "title": "Create or harden an allowed-protocols service",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_set_cert_auth_profile": {
       "tier": "write",
-      "title": "Create or update a certificate authentication profile"
+      "title": "Create or update a certificate authentication profile",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_set_command_set": {
       "tier": "write",
-      "title": "Create or replace a TACACS+ command set"
+      "title": "Create or replace a TACACS+ command set",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_set_condition": {
       "tier": "write",
-      "title": "Create or update a policy condition"
+      "title": "Create or update a policy condition",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_set_custom_attribute": {
       "tier": "write",
-      "title": "Create or delete an endpoint custom attribute"
+      "title": "Create or delete an endpoint custom attribute",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_set_dacl": {
       "tier": "write",
-      "title": "Create or update a downloadable ACL"
+      "title": "Create or update a downloadable ACL",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_set_default_egress_rule": {
       "tier": "dangerous",
-      "title": "Set the ANY-ANY default egress rule"
+      "title": "Set the ANY-ANY default egress rule",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_set_egress_policy": {
       "tier": "write",
-      "title": "Set an egress matrix cell"
+      "title": "Set an egress matrix cell",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_set_endpoint": {
       "tier": "write",
-      "title": "Create or update an endpoint"
+      "title": "Create or update an endpoint",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_set_external_radius_server": {
       "tier": "write",
-      "title": "Create or update an external RADIUS server"
+      "title": "Create or update an external RADIUS server",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_set_guest_type": {
       "tier": "write",
-      "title": "Create or update a guest type"
+      "title": "Create or update a guest type",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_set_identity_sequence": {
       "tier": "write",
-      "title": "Create or update an identity source sequence"
+      "title": "Create or update an identity source sequence",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_set_ip_sgt": {
       "tier": "write",
-      "title": "Create or update a static IP-SGT mapping"
+      "title": "Create or update a static IP-SGT mapping",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_set_mac_randomization": {
       "tier": "write",
-      "title": "Set random MAC (RCM) and endpoint ownership"
+      "title": "Set random MAC (RCM) and endpoint ownership",
+      "toolsets": [
+        "endpoints"
+      ]
     },
     "ise_set_profiling_rule": {
       "tier": "write",
-      "title": "Create or update a custom profiling rule"
+      "title": "Create or update a custom profiling rule",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_set_pxgrid_direct_connector": {
       "tier": "write",
-      "title": "Create or update a pxGrid Direct connector"
+      "title": "Create or update a pxGrid Direct connector",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_set_pxgrid_settings": {
       "tier": "write",
-      "title": "Set the pxGrid approval settings"
+      "title": "Set the pxGrid approval settings",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_set_radius_server_sequence": {
       "tier": "write",
-      "title": "Create or update a RADIUS server sequence"
+      "title": "Create or update a RADIUS server sequence",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_set_repository": {
       "tier": "write",
-      "title": "Create or update a backup repository"
+      "title": "Create or update a backup repository",
+      "toolsets": [
+        "backup"
+      ]
     },
     "ise_set_sgt": {
       "tier": "write",
-      "title": "Create or update an SGT"
+      "title": "Create or update an SGT",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_set_shell_profile": {
       "tier": "write",
-      "title": "Create or update a TACACS+ shell profile"
+      "title": "Create or update a TACACS+ shell profile",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_set_snmp_scan": {
       "tier": "write",
-      "title": "Create or update a profiler SNMP scan"
+      "title": "Create or update a profiler SNMP scan",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_set_sponsor_group": {
       "tier": "write",
-      "title": "Create or update a sponsor group"
+      "title": "Create or update a sponsor group",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_set_sxp_connection": {
       "tier": "write",
-      "title": "Create or update an SXP connection"
+      "title": "Create or update an SXP connection",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_set_tacacs_server": {
       "tier": "write",
-      "title": "Create or update a TACACS+ external server"
+      "title": "Create or update a TACACS+ external server",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_set_tacacs_server_sequence": {
       "tier": "write",
-      "title": "Create or update a TACACS+ server sequence"
+      "title": "Create or update a TACACS+ server sequence",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_set_trusted_cert": {
       "tier": "write",
-      "title": "Change a trusted certificate's trust and revocation settings"
+      "title": "Change a trusted certificate's trust and revocation settings",
+      "toolsets": [
+        "certs"
+      ]
     },
     "ise_set_trustsec_settings": {
       "tier": "write",
-      "title": "Change TrustSec general settings"
+      "title": "Change TrustSec general settings",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_snapshot": {
       "tier": "read",
@@ -1229,7 +1724,10 @@
     },
     "ise_snmp_scan_history": {
       "tier": "read",
-      "title": "SNMP scans and their history"
+      "title": "SNMP scans and their history",
+      "toolsets": [
+        "profiler"
+      ]
     },
     "ise_status": {
       "tier": "read",
@@ -1237,63 +1735,108 @@
     },
     "ise_suspend_guest_user": {
       "tier": "write",
-      "title": "Suspend a guest account"
+      "title": "Suspend a guest account",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_test_ad_user": {
       "tier": "read",
-      "title": "Test an AD user (lookup + groups)"
+      "title": "Test an AD user (lookup + groups)",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_test_command_set": {
       "tier": "read",
-      "title": "Test a command against TACACS+ command sets"
+      "title": "Test a command against TACACS+ command sets",
+      "toolsets": [
+        "device_admin"
+      ]
     },
     "ise_test_pxgrid_direct": {
       "tier": "read",
-      "title": "Test a pxGrid Direct connector"
+      "title": "Test a pxGrid Direct connector",
+      "toolsets": [
+        "pxgrid"
+      ]
     },
     "ise_trustsec_device_report": {
       "tier": "read",
-      "title": "TrustSec policy status per device"
+      "title": "TrustSec policy status per device",
+      "toolsets": [
+        "trustsec"
+      ]
     },
     "ise_unused_objects": {
       "tier": "read",
-      "title": "Find unused ISE objects"
+      "title": "Find unused ISE objects",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_update_authz_profile": {
       "tier": "write",
-      "title": "Update authorization profile"
+      "title": "Update authorization profile",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_update_guest_user": {
       "tier": "write",
-      "title": "Update a guest account's details"
+      "title": "Update a guest account's details",
+      "toolsets": [
+        "guest"
+      ]
     },
     "ise_update_internal_user": {
       "tier": "write",
-      "title": "Update internal user"
+      "title": "Update internal user",
+      "toolsets": [
+        "identity"
+      ]
     },
     "ise_update_nad": {
       "tier": "write",
-      "title": "Update network device"
+      "title": "Update network device",
+      "toolsets": [
+        "network"
+      ]
     },
     "ise_update_node_services": {
       "tier": "dangerous",
-      "title": "Enable or disable node services"
+      "title": "Enable or disable node services",
+      "toolsets": [
+        "admin"
+      ]
     },
     "ise_update_policy_rule": {
       "tier": "write",
-      "title": "Update a policy rule"
+      "title": "Update a policy rule",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_update_policy_set": {
       "tier": "write",
-      "title": "Update policy set"
+      "title": "Update policy set",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_where_used": {
       "tier": "read",
-      "title": "Where is an ISE object used"
+      "title": "Where is an ISE object used",
+      "toolsets": [
+        "policy"
+      ]
     },
     "ise_why_auth_failed": {
       "tier": "read",
-      "title": "Why did authentication fail?"
+      "title": "Why did authentication fail?",
+      "toolsets": [
+        "troubleshoot"
+      ]
     }
   },
   "version": "0.23.0"

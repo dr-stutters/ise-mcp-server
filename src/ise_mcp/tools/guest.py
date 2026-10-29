@@ -100,8 +100,26 @@ SPONSOR_PERMISSIONS = (
     "limitApprovalToSponsorsGuests",
 )
 GUEST_COLUMNS = ["username", "status", "guest_type", "valid_from", "valid_to", "sponsor", "company"]
-SPONSOR_GROUP_COLUMNS = ["name", "enabled", "members", "guest_types", "manage", "rest_access"]
-GUEST_TYPE_COLUMNS = ["name", "default_duration", "max_duration", "from_first_login", "sponsor_groups"]
+# Markdown columns (the rows carry more than 10 keys; json has them all). id and description stay visible.
+SPONSOR_GROUP_COLUMNS = [
+    "name",
+    "enabled",
+    "members",
+    "guest_types",
+    "manage",
+    "rest_access",
+    "description",
+    "id",
+]
+GUEST_TYPE_COLUMNS = [
+    "name",
+    "default_duration",
+    "max_duration",
+    "from_first_login",
+    "sponsor_groups",
+    "description",
+    "id",
+]
 PORTAL_COLUMNS = ["name", "kind", "https_port", "auth_source", "test_url"]
 
 

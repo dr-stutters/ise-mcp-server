@@ -73,6 +73,7 @@ async def test_device_report_all(mock: respx.MockRouter) -> None:
     assert out["results"][1]["current"] is False and "CoA" in out["results"][1]["hint"]
     md = await call_tool(make_server(), "ise_trustsec_device_report", {})
     assert "| device |" in str(md) and "sw1" in str(md)
+    assert "| push_id | pull_id |" in str(md) and "q-1" in str(md)  # I44: pull_id stays in markdown
 
 
 async def test_device_report_nobody_reported(mock: respx.MockRouter) -> None:
