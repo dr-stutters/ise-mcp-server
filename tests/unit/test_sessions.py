@@ -116,6 +116,37 @@ async def test_find_session_policy(mock: respx.MockRouter) -> None:
     assert "other_attr_string" not in out["session"]
 
 
+def session_with_sgts(current: str, previous: str | None) -> str:
+    """The fixture session carrying cts_security_group (current) and MnT's security_group (#169)."""
+    extra = f"<cts_security_group>{current}</cts_security_group>"
+    if previous is not None:
+        extra += f"<security_group>{previous}</security_group>"
+    return fixture_text("mnt_session.xml").replace("</sessionParameters>", extra + "</sessionParameters>")
+
+
+async def test_find_session_labels_stale_security_group(mock: respx.MockRouter) -> None:
+    mock_common(mock)
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC_OK}").respond(
+        text=session_with_sgts("mcp_r96_dst", "mcp_fab_dst")
+    )
+    out = await call_tool(make_server(), "ise_find_session", {"mac": MAC_OK})
+    session = out["session"]
+    assert session["sgt"] == "mcp_r96_dst" and session["cts_security_group"] == "mcp_r96_dst"
+    assert "security_group" not in session
+    assert session["security_group_previous"] == "mcp_fab_dst"
+    assert "not the SGT in force now" in session["sgt_note"]
+
+
+async def test_find_session_same_security_group_dropped(mock: respx.MockRouter) -> None:
+    mock_common(mock)
+    mock.get(f"/admin/API/mnt/Session/MACAddress/{MAC_OK}").respond(
+        text=session_with_sgts("Employees", "Employees")
+    )
+    session = (await call_tool(make_server(), "ise_find_session", {"mac": MAC_OK}))["session"]
+    assert session["sgt"] == "Employees"
+    assert not {"security_group", "security_group_previous", "sgt_note"} & session.keys()
+
+
 async def test_find_session_none(mock: respx.MockRouter) -> None:
     mock_common(mock)
     out = await call_tool(make_server(), "ise_find_session", {"mac": MAC_BAD})

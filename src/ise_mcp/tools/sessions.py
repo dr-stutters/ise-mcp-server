@@ -183,6 +183,23 @@ def newer_session_login(session: Any, than: Any) -> dict[str, Any] | None:
     return {k: v for k, v in row.items() if v not in (None, "")}
 
 
+def label_session_sgt(session: dict[str, Any]) -> None:
+    """The session's current SGT as `sgt` (from cts_security_group). MnT's `security_group` can hold an
+    earlier authorization's SGT (#169): equal to the current one it is dropped, different it becomes
+    security_group_previous with a note so nobody reads it as current."""
+    current = session.get("cts_security_group")
+    if not current:
+        return
+    session["sgt"] = current
+    other = session.pop("security_group", None)
+    if other and str(other) != str(current):
+        session["security_group_previous"] = other
+        session["sgt_note"] = (
+            f"The current SGT is {current} (cts_security_group). security_group_previous ({other}) is "
+            "what MnT kept from an earlier authorization of this endpoint: not the SGT in force now."
+        )
+
+
 async def find_session(
     app: IseApp,
     *,
@@ -222,6 +239,7 @@ async def find_session(
         session["attributes"] = attrs
     for noisy in _SESSION_NOISE:
         session.pop(noisy, None)
+    label_session_sgt(session)
     if "response" in session:
         reply = compact_reply(session.pop("response"))
         if reply:
@@ -477,11 +495,13 @@ def register(reg: ToolRegistrar) -> None:
         ] = None,
     ) -> ToolResult:
         """Look up the live MnT session for an endpoint by MAC, IP, username or audit session id (give
-        one). Returns the session's NAD, port, framed IP, PSN, timestamps, endpoint profile, posture and
-        accounting counters, or found=false when MnT has no session. active=false means MnT only has
-        the last, ended session (accounting Stop): the endpoint is not connected now (see
-        ise_get_auth_history for past attempts). auth_acs_timestamp is the endpoint's newest
-        authentication, which the auth history may leave out (repeated successful logins)."""
+        one). Returns the session's NAD, port, framed IP, PSN, timestamps, endpoint profile, posture,
+        SGT (`sgt`, from cts_security_group; an older `security_group` MnT kept is shown as
+        security_group_previous) and accounting counters, or found=false when MnT has no session.
+        active=false means MnT only has the last, ended session (accounting Stop): the endpoint is not
+        connected now (see ise_get_auth_history for past attempts). auth_acs_timestamp is the
+        endpoint's newest authentication, which the auth history may leave out (repeated successful
+        logins)."""
         app: IseApp = get_client(ctx)
         session = await find_session(app, mac=mac, ip=ip, username=username, session_id=session_id)
         if session is None:

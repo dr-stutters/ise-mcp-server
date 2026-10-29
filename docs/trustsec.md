@@ -113,11 +113,14 @@ re-downloads on demand; `clear cts environment-data` starts over.
    destination_sgt="Production_Servers", sgacls=["Deny IP"], default_rule="NONE")`. Confirm with the
    token once approved. `ise_get_egress_matrix(source="Contractors")` shows the cell.
 2. **Push it**: `ise_push_trustsec_matrix()` (dangerous tier, previewed: a TrustSec CoA to every TrustSec
-   device, which then re-downloads policy). ISE only sends the CoA to NADs whose TrustSec settings have
+   device, which then re-downloads policy; the preview lists those devices as the blast radius, and `matrix=`
+   picks one of several matrices). ISE only sends the CoA to NADs whose TrustSec settings have
    "send configuration changes to device" on (`ise_update_nad(trustsec_push=True)`; on by default when the
    tool first enables TrustSec), and only when a policy change is pending: a push with nothing pending
    returns `NO_REQUEST_AVAILABLE`. Without the push the switch picks the change up on its policy refresh
-   timer (`downloadSGACLListsEveryXSeconds`, a day by default) or on `cts refresh policy`.
+   timer (`downloadSGACLListsEveryXSeconds`, a day by default) or on `cts refresh policy`. The REST push
+   has no per-device scope (`COAPushRequest` takes only `coaType` and `matrixId`): a staged change that
+   starts on one switch uses `cts refresh policy` on that switch instead of the push.
 3. **ISE's view**: `ise_trustsec_device_report()` lists every device that has reported a TrustSec policy
    download to ISE, with the last step (`SGACLs downloaded`, `environment data downloaded`, `CoA sent`),
    its status, when ISE last changed policy, when the device last reported and `current` (true when the

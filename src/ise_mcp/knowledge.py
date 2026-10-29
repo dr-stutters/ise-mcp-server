@@ -108,7 +108,7 @@ FAILURE_HINTS: dict[str, dict[str, str]] = {
         "likely": "The client certificate was issued by a CA that ISE doesn't trust for client "
         "authentication (unknown CA in the chain).",
         "check": "Check the issuer is in ise_list_certificates kind=trusted with client auth; add it with "
-        "ise_import_trusted_cert trust_for=['client_auth'].",
+        "ise_import_trusted_cert trust_for=['client_auth', 'ise_auth'] (ISE refuses client_auth alone).",
     },
     "12520": {
         "likely": "EAP-TLS failed: the client rejected the ISE EAP certificate (untrusted issuer or name).",

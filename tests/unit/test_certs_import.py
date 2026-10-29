@@ -338,7 +338,7 @@ async def test_set_trusted_cert_trust_for_and_ocsp(mock: respx.MockRouter, tmp_p
     put = route_trust(mock)
     args = {
         "cert": "t1",
-        "trust_for": ["client_auth"],
+        "trust_for": ["admin_auth"],
         "ocsp_service": "lab-ocsp",
         "ocsp_reject_unreachable": True,
     }
@@ -349,6 +349,19 @@ async def test_set_trusted_cert_trust_for_and_ocsp(mock: respx.MockRouter, tmp_p
     assert changes["enableOCSPValidation"]["to"] is True
     body = json.loads(put.calls.last.request.content)
     assert body["selectedOCSPService"] == "lab-ocsp" and body["rejectIfUnreachableFromOCSP"] is True
+
+
+async def test_set_trusted_cert_client_auth_without_ise_auth_blocked(
+    mock: respx.MockRouter, tmp_path: Path
+) -> None:
+    """ISE refuses client_auth without ise_auth with 417 (#169): the preview blocks, no PUT is sent."""
+    put = route_trust(mock)
+    preview, applied = await call(
+        "ise_set_trusted_cert", {"cert": "t1", "trust_for": ["client_auth"]}, tmp_path
+    )
+    assert preview["status"] == "blocked"
+    assert any("add 'ise_auth'" in b for b in preview["blockers"])
+    assert applied is None and not put.called
 
 
 async def test_set_trusted_cert_no_change(mock: respx.MockRouter, tmp_path: Path) -> None:
