@@ -157,6 +157,21 @@ async def test_import_refuses_two_different_definitions_of_one_name() -> None:
     assert any("different definitions" in b and "one condition of a name" in b for b in plan.blockers)
 
 
+async def test_conflicting_definitions_outside_only_do_not_block() -> None:
+    """The different-definitions check honours `only`: a conflict on another name blocks nothing."""
+    doc = old_style(await export_doc(shared_target(), ["conditions"]))
+    doc["conditions"][-1]["time"] = {"days": ["Monday"]}
+    with router() as r:
+        serve(r, shared_target(with_time=False))
+        serve_da_policy_off(r)
+        app = IseApp(make_settings())
+        try:
+            plan = await plan_import(app, doc, sections=["conditions"], only=["mcp-business-hours"])
+        finally:
+            await app.aclose()
+    assert not any("different definitions" in b for b in plan.blockers)
+
+
 async def test_import_time_description_only_is_a_note_not_an_update() -> None:
     doc = await export_doc(shared_target(), ["conditions"])
     next(o for o in doc["conditions"] if o["name"] == "mcp-all-week")["description"] = "Changed"

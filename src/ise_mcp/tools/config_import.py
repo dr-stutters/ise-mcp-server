@@ -479,9 +479,12 @@ async def _conditions(
     want = {
         key: o
         for key, o in _keyed(
-            "conditions", _merge_shared(source.get("conditions") or [], plan.blockers)
+            "conditions",
+            _merge_shared(
+                [o for o in source.get("conditions") or [] if matches(str(o.get("name")), only)],
+                plan.blockers,
+            ),
         ).items()
-        if matches(str(o.get("name")), only)
     }
     matched: set[str] = set()
     for key in sorted(want, key=str.casefold):
