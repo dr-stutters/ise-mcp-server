@@ -281,3 +281,65 @@ sequences, allowed-protocols services, AD join points and their groups, portals.
 - Policy changes take effect at the next authentication; no CoA is sent.
 - TrustSec settings on the target still apply. For example, with multiple SGACLs per cell turned off, ISE
   refuses a cell with an SGACL plus a catch-all other than `NONE`.
+
+## Parametrised bundles
+
+A bundle is an export with `${name}` placeholders, so one file stamps the same policy at every site:
+
+```text
+ise_import_config(source="bundle:wired-dot1x-mab", variables={"site": "Site2", "vlan_employee": 20})
+  -> preview: variables (values, every substitution, defaults used), then the plan as usual
+ise_import_config(..., confirm="pv_...")
+ise_policy_explain(nad="site2-sw1", flow="wired-dot1x")   # hits Site2-Wired
+```
+
+`source` is `bundle:<name>` for a bundle shipped with the server (`src/ise_mcp/bundles/`:
+`wired-dot1x-mab`, `guest`, `device-admin`), or a path or YAML text like any export, which may carry
+placeholders too.
+
+### Placeholders
+
+- `${name}` is replaced by the variable's value as text, anywhere in a string (`${site}-Wired`).
+- `${name:int}` must be the whole value and becomes a number (an SGT `value`, say).
+- `$${` is a literal `${`.
+- Only the sections are substituted; the header is left as it is.
+- Values come from `variables`, then from the bundle header's defaults. A default may name other
+  variables (`ndg` defaults to `All Locations#${site}`).
+- Every placeholder must resolve. An unresolved one, a `${name:int}` that isn't a whole number, or a bad
+  variable name blocks the import, and nothing is planned until it is fixed.
+- The preview's `variables` lists the values, each substitution (`at`, `from`, `to`; the first 200),
+  the defaults used and any variable given but not used (often a typo).
+- Variables are not secrets: they show in the preview. NAD secrets still go in `secrets`.
+
+### Bundle header
+
+```yaml
+ise_export:
+  format: 1
+  bundle: wired-dot1x-mab     # its name: the preview's source shows it instead of hostname/digest
+  version: 1
+  description: ...
+  sections: [ndgs, endpoint_groups, dacls, authz_profiles, policy_sets]
+  variables:
+    site: {description: Site name, example: Site2}            # no default: required
+    ndg: {description: Location NDG, default: All Locations#${site}}
+```
+
+A bundle holds one site's objects, so `prune=true` with a bundle needs `only` (e.g. `["Site2-*"]`):
+without it the prune would delete every other site's objects. Stamping a site again plans only what differs
+(a changed value, such as a new VLAN, plans the updates).
+
+### The shipped bundles
+
+Each bundle creates the site's location NDG (`Location#<ndg>`) and matches its policy set on it, so put
+the site's NADs in that group. Names are prefixed with the site. The objects each bundle relies on
+already exist on a default ISE: the library conditions `Wired_802.1X`, `Wired_MAB`, `Wireless_MAB` and
+`Guest_Flow`, the `Employees` and `Guests` SGTs, `DenyAccess`, the `Self-Registered Guest Portal
+(default)`, `DenyAllCommands`, and `Deny All Shell Profile`. New policy sets go in at rank 0, above the
+existing ones; their conditions don't overlap with other sites'.
+
+| Bundle | Objects | Policy |
+|---|---|---|
+| `wired-dot1x-mab` | NDG, endpoint group `<site>-Known-Devices`, dACL `<dacl>`, profiles `<site>-Employee` (VLAN `vlan_employee`) and `<site>-Known-Device` (VLAN `vlan_devices`) | `<site>-Wired` on `DEVICE:Location` and wired 802.1X or MAB. Authentication: Dot1X against `identity_source`, MAB against Internal Endpoints (continue if unknown). Authorization: 802.1X gets `<site>-Employee` and `sgt`; MAB endpoints in the known-devices group get `<site>-Known-Device`; Default denies |
+| `guest` | NDG, dACL `<dacl>` (DHCP, DNS, no RFC 1918, then any), profiles `<site>-Guest-Redirect` (CWA to `guest_portal` with `redirect_acl`) and `<site>-Guest-Internet` | `<site>-Guest` on the location, wireless MAB and `Called-Station-ID` ending `:<guest_ssid>`. Authorization: Guest_Flow and GuestEndpoints get internet access and `sgt`; Default redirects to the portal |
+| `device-admin` | NDG, user identity groups `<site>-NetAdmins` and `<site>-NetOps`, command sets `<site>-PermitAll` and `<site>-ShowOnly`, shell profile `<site>-Priv15` | `<site>-Device-Admin` (TACACS+) on the location. Authentication against `identity_source`. NetAdmins get every command, NetOps show, ping, traceroute and terminal; Default denies. Needs the Device Admin service, and keep a local login on every device |

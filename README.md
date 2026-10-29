@@ -583,6 +583,18 @@ policy sets and rules), with NAD secrets passed separately, `only` name globs, a
 preview is the whole plan; applying stops at the first failure and says what was done. Format and rules:
 [docs/config-export.md](docs/config-export.md).
 
+**Parametrised bundles** stamp one policy per site: `ise_import_config(source="bundle:<name>",
+variables={...})` replaces each `${name}` placeholder from `variables` and the bundle's defaults before
+planning. The preview lists every substitution, and an unresolved placeholder blocks the import. Bundles
+ship with the server (`src/ise_mcp/bundles/`); any export file can carry placeholders too
+([docs/config-export.md](docs/config-export.md#parametrised-bundles)).
+
+| Bundle | Stamps | Required variables (defaults for the rest) |
+|---|---|---|
+| `wired-dot1x-mab` | `<site>-Wired` policy set: 802.1X users get the employee VLAN, dACL and SGT; MAB devices in `<site>-Known-Devices` get the device VLAN; everything else is denied. Plus the site NDG, endpoint group, dACL and two profiles | `site`, `vlan_employee` (`vlan_devices`, `ndg`, `sgt`, `dacl`, `known_devices_group`, `identity_source`) |
+| `guest` | `<site>-Guest` policy set for the guest SSID: CWA redirect to the guest portal, then an internet-only dACL and the Guests SGT for GuestEndpoints | `site`, `guest_ssid` (`ndg`, `guest_portal`, `redirect_acl`, `dacl`, `sgt`) |
+| `device-admin` | `<site>-Device-Admin` TACACS+ policy set: `<site>-NetAdmins` get every command, `<site>-NetOps` show-only, both at privilege 15; the rest are denied | `site` (`ndg`, `identity_source`) |
+
 ### Certificates and EAP-TLS
 The certificate tools exchange PEM text, so any CA can sign: Windows AD CS (`win_sign_csr`), OpenSSL,
 step-ca or a public CA. Flow: `ise_generate_csr` -> `ise_export_csr` -> sign at the CA ->

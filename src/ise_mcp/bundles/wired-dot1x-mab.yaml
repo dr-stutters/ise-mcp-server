@@ -1,0 +1,128 @@
+# Branch wired access: 802.1X for corporate users and MAB for known devices, one policy set per site.
+# Stamp it with ise_import_config(source="bundle:wired-dot1x-mab", variables={"site": "Site2",
+# "vlan_employee": 20}). The site's switches go in the NDG this bundle creates (Location#<ndg>); the
+# policy set matches them by that device group. Library conditions Wired_802.1X / Wired_MAB, the identity
+# source and the SGT must already exist (they do on a default ISE).
+ise_export:
+  format: 1
+  bundle: wired-dot1x-mab
+  version: 1
+  description: Branch wired 802.1X + MAB policy set with an employee VLAN, dACL and SGT
+  sections: [ndgs, endpoint_groups, dacls, authz_profiles, policy_sets]
+  variables:
+    site:
+      description: Site name; prefixes every object this bundle creates
+      example: Site2
+    vlan_employee:
+      description: Access VLAN (id or name) for authenticated employees
+      example: 20
+    vlan_devices:
+      description: Access VLAN for known MAB devices (printers, cameras)
+      default: ${vlan_employee}
+    ndg:
+      description: The site's location device group, without the 'Location#' root
+      default: All Locations#${site}
+    sgt:
+      description: SGT assigned to employees (an existing SGT)
+      default: Employees
+    dacl:
+      description: Name of the employee dACL this bundle creates
+      default: ${site}-EMPLOYEE-DACL
+    known_devices_group:
+      description: Endpoint identity group for devices allowed by MAB (created by this bundle)
+      default: ${site}-Known-Devices
+    identity_source:
+      description: Identity source or sequence for 802.1X users
+      default: All_User_ID_Stores
+ndgs:
+- name: Location#${ndg}
+  description: ${site} network devices
+  othername: Location
+endpoint_groups:
+- name: ${known_devices_group}
+  description: ${site} devices allowed on the wired network by MAB
+dacls:
+- name: ${dacl}
+  description: ${site} employee access
+  dacl:
+  - permit ip any any
+  daclType: IPV4
+authz_profiles:
+- name: ${site}-Employee
+  description: ${site} employees (802.1X)
+  accessType: ACCESS_ACCEPT
+  authzProfileType: SWITCH
+  daclName: ${dacl}
+  profileName: Cisco
+  vlan:
+    nameID: '${vlan_employee}'
+    tagID: 1
+- name: ${site}-Known-Device
+  description: ${site} known devices (MAB)
+  accessType: ACCESS_ACCEPT
+  authzProfileType: SWITCH
+  daclName: ${dacl}
+  profileName: Cisco
+  vlan:
+    nameID: '${vlan_devices}'
+    tagID: 1
+policy_sets:
+  network-access:
+    sets:
+    - name: ${site}-Wired
+      rank: 0
+      state: enabled
+      description: ${site} wired 802.1X + MAB (bundle wired-dot1x-mab)
+      condition:
+        and:
+        - DEVICE:Location equals ${ndg}
+        - or:
+          - Wired_802.1X
+          - Wired_MAB
+      isProxy: false
+      serviceName: Default Network Access
+      authentication:
+      - name: Dot1X
+        rank: 0
+        state: enabled
+        condition: Wired_802.1X
+        identitySourceName: ${identity_source}
+        ifAuthFail: REJECT
+        ifProcessFail: DROP
+        ifUserNotFound: REJECT
+      - name: MAB
+        rank: 1
+        state: enabled
+        condition: Wired_MAB
+        identitySourceName: Internal Endpoints
+        ifAuthFail: REJECT
+        ifProcessFail: DROP
+        ifUserNotFound: CONTINUE
+      - name: Default
+        rank: 2
+        state: enabled
+        default: true
+        identitySourceName: All_User_ID_Stores
+        ifAuthFail: REJECT
+        ifProcessFail: DROP
+        ifUserNotFound: REJECT
+      authorization:
+      - name: ${site}-Employees
+        rank: 0
+        state: enabled
+        condition: Wired_802.1X
+        profile: ['${site}-Employee']
+        securityGroup: ${sgt}
+      - name: ${site}-Known-Devices
+        rank: 1
+        state: enabled
+        condition:
+          and:
+          - Wired_MAB
+          - IdentityGroup:Name equals Endpoint Identity Groups:${known_devices_group}
+        profile: ['${site}-Known-Device']
+      - name: Default
+        rank: 2
+        state: enabled
+        default: true
+        profile: [DenyAccess]

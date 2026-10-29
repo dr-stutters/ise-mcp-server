@@ -1,0 +1,111 @@
+# Branch wireless guest: central web authentication (CWA). An unknown endpoint is redirected to the guest
+# portal; once the guest logs in, ISE moves it to GuestEndpoints and sends a CoA, and the next MAB login
+# gets internet-only access. Stamp it with ise_import_config(source="bundle:guest",
+# variables={"site": "Site2", "guest_ssid": "Site2-Guest"}). The WLC needs a redirect ACL of the same name
+# (redirect_acl), and the portal and SGT must already exist (the defaults do on a default ISE).
+ise_export:
+  format: 1
+  bundle: guest
+  version: 1
+  description: Branch wireless guest policy set (CWA redirect, then internet-only dACL and SGT)
+  sections: [ndgs, dacls, authz_profiles, policy_sets]
+  variables:
+    site:
+      description: Site name; prefixes every object this bundle creates
+      example: Site2
+    guest_ssid:
+      description: Guest SSID name (matched at the end of Called-Station-ID)
+      example: Site2-Guest
+    ndg:
+      description: The site's location device group, without the 'Location#' root
+      default: All Locations#${site}
+    guest_portal:
+      description: Guest portal for the redirect (an existing portal)
+      default: Self-Registered Guest Portal (default)
+    redirect_acl:
+      description: Redirect ACL name on the WLC
+      default: ACL_WEBAUTH_REDIRECT
+    dacl:
+      description: Name of the internet-only guest dACL this bundle creates
+      default: ${site}-GUEST-INTERNET
+    sgt:
+      description: SGT assigned to guests (an existing SGT)
+      default: Guests
+ndgs:
+- name: Location#${ndg}
+  description: ${site} network devices
+  othername: Location
+dacls:
+- name: ${dacl}
+  description: ${site} guests - DHCP, DNS and the internet, no private networks
+  dacl:
+  - permit udp any any eq 67
+  - permit udp any any eq 53
+  - deny ip any 10.0.0.0 0.255.255.255
+  - deny ip any 172.16.0.0 0.15.255.255
+  - deny ip any 192.168.0.0 0.0.255.255
+  - permit ip any any
+  daclType: IPV4
+authz_profiles:
+- name: ${site}-Guest-Redirect
+  description: ${site} guests - redirect to the guest portal (CWA)
+  accessType: ACCESS_ACCEPT
+  authzProfileType: SWITCH
+  profileName: Cisco
+  webRedirection:
+    WebRedirectionType: CentralizedWebAuth
+    acl: ${redirect_acl}
+    displayCertificatesRenewalMessages: false
+    portalName: ${guest_portal}
+- name: ${site}-Guest-Internet
+  description: ${site} guests after portal login - internet only
+  accessType: ACCESS_ACCEPT
+  authzProfileType: SWITCH
+  daclName: ${dacl}
+  profileName: Cisco
+policy_sets:
+  network-access:
+    sets:
+    - name: ${site}-Guest
+      rank: 0
+      state: enabled
+      description: ${site} wireless guest CWA (bundle guest)
+      condition:
+        and:
+        - DEVICE:Location equals ${ndg}
+        - Wireless_MAB
+        - Radius:Called-Station-ID endsWith :${guest_ssid}
+      isProxy: false
+      serviceName: Default Network Access
+      authentication:
+      - name: MAB
+        rank: 0
+        state: enabled
+        condition: Wireless_MAB
+        identitySourceName: Internal Endpoints
+        ifAuthFail: REJECT
+        ifProcessFail: DROP
+        ifUserNotFound: CONTINUE
+      - name: Default
+        rank: 1
+        state: enabled
+        default: true
+        identitySourceName: Internal Endpoints
+        ifAuthFail: REJECT
+        ifProcessFail: DROP
+        ifUserNotFound: CONTINUE
+      authorization:
+      - name: ${site}-Guest-Access
+        rank: 0
+        state: enabled
+        condition:
+          and:
+          - Guest_Flow
+          - IdentityGroup:Name equals Endpoint Identity Groups:GuestEndpoints
+        profile: ['${site}-Guest-Internet']
+        securityGroup: ${sgt}
+      - name: Default
+        rank: 1
+        state: enabled
+        default: true
+        profile: ['${site}-Guest-Redirect']
