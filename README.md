@@ -50,6 +50,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 - **Prompt `ise_deployment_health_review`** (read tier; fmc and catc rows when connected): a weekly or pre-change
   review as one ranked report: deployment health, certificate expiry across ISE, FMC and Catalyst Center with the
   renewal path per row, licence, pxGrid, AD join, SXP, the admin access review and NAD coverage of a site.
+- **Prompt `ise_guest_onboarding`** (write tier): one sponsored guest end to end without the sponsor portal: the
+  sponsor, guest type, location and portal, the CWA rules before and after the portal login, the account (preview
+  first), the credentials by ISE's email or SMS, and the guest's session, authorization and CoA in the auth history.
 - **Prompt `ise_cert_renewal`** (write tier; signing through the Windows_Server MCP when connected): an expiring
   certificate renewed in a change window: CSR with the same subject, `win_sign_csr` or any CA, the chain in the
   trust store, the bind (Admin restarts the application server: dangerous tier, previewed), then EAP-TLS checked.
@@ -551,6 +554,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `ise_deployment_health_review` | A weekly or pre-change review of the whole ISE deployment as one ranked report with next steps: ise_deployment_health (nodes, redundancy, patches, backup, certificates, licence, AD, admins), then certificate expiry (system and trusted), licence compliance, pxGrid (persona, certificate, pending clients), AD join per node, SXP connections and bindings, the admin access review (Super Admins, never-disabled, external), FMC's certificates and Catalyst Center's trust of the ISE certificate sorted by days left with the renewal path per row, and NAD coverage of a Catalyst Center site. |
 | `ise_phased_8021x_rollout` | Roll wired 802.1X out by Cisco's phases for one location NDG: a readiness gate from MnT (who fails, who only gets in by the open policy's Default rule, MAB endpoints with no profile or static group) and each switch's current mode from Catalyst Center, then per phase an ise_snapshot, the ISE side (monitor permits and logs, low-impact adds dACLs, closed makes the Default rule DenyAccess) through the preview-first write tools, the switch CLI printed or staged as a previewed template (never pushed), ise_compare_snapshot and the rollback. |
+| `ise_guest_onboarding` | Onboard one sponsored guest end to end without the sponsor portal: check the sponsor (REST access, the guest type and location it may use), the guest type, location and portal, and that the central web auth (CWA) rules exist (ise_policy_explain before and after the portal login), then create the guest account as the sponsor (preview first), deliver the credentials by ISE's email or SMS (ise_notify_guest) or by the sponsor, and verify the guest's session, its authorization and the redirect, login, CoA sequence in the auth history. |
 | `ise_cert_renewal` | Renew an expiring ISE system certificate the way a change window does it: find what expires (ise_list_certificates) and the EAP-TLS baseline, generate a CSR with the same subject and SANs (ise_generate_csr, ise_export_csr), sign it at the lab CA with win_sign_csr (Windows_Server MCP; without it any CA, marked skipped), import the issuing chain (ise_import_trusted_cert), bind the signed certificate in the change window (ise_bind_certificate: the Admin role restarts the application server, dangerous and previewed), then verify the new certificate is in service and EAP-TLS still works (ise_get_auth_history, ise_recent_auth_failures). |
 | `suite_access_review` | Who can change what, on every connected platform: admin accounts, roles and the external groups that grant them on ISE, Catalyst Center, FMC, SD-WAN Manager and CML, with Active Directory resolving those groups to people. |
 | `suite_asbuilt_drift` | Has the documentation drifted from the wiring? |
@@ -683,7 +687,9 @@ gateway), and `ise_list_guest_users status=PENDING_APPROVAL` -> `ise_approve_gue
 The guest's password is returned once, on confirm of `ise_create_guest_user` (random unless given) or
 `ise_reset_guest_password`, and is masked everywhere else. A sponsor sees only the guests its group may manage (own, group or all). Guest
 dates are in the guest location's local time (`ISE_GUEST_TIMEZONE`; unset, new accounts start at "now" in
-UTC-12 so they are never in the future). Portal creation, pages and themes stay in the GUI.
+UTC-12 so they are never in the future). Portal creation, pages and themes stay in the GUI. The prompt
+`ise_guest_onboarding` runs one guest end to end: readiness and the CWA rules, the account, the credentials
+(never repeated in the conversation) and the guest's session and auth history.
 
 ### TrustSec / SXP
 `ise_set_sxp_connection` takes the device's role (`peer_role`, ISE's "Peer Role"). LISTENER means the

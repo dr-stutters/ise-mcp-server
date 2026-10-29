@@ -125,6 +125,45 @@
         "win"
       ]
     },
+    "ise_guest_onboarding": {
+      "arguments": [
+        "username",
+        "guest_type",
+        "email",
+        "phone",
+        "location",
+        "notify",
+        "access",
+        "nad",
+        "mac"
+      ],
+      "references": [
+        "ise_status",
+        "ise_list_sponsor_groups",
+        "ise_list_guest_types",
+        "ise_get_guest_locations",
+        "ise_list_guest_portals",
+        "ise_list_authz_profiles",
+        "ise_list_policy_sets",
+        "ise_get_policy_set",
+        "ise_policy_explain",
+        "ise_list_guest_users",
+        "ise_get_guest_user",
+        "ise_create_guest_user",
+        "ise_notify_guest",
+        "ise_reset_guest_password",
+        "ise_find_session",
+        "ise_get_auth_history",
+        "ise_why_auth_failed",
+        "ise_suspend_guest_user",
+        "ise_delete_guest_user"
+      ],
+      "rendered": false,
+      "tier": "write",
+      "uses": [
+        "ise"
+      ]
+    },
     "ise_incident_timeline": {
       "arguments": [
         "mac",
