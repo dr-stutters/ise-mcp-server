@@ -44,8 +44,17 @@ SPONSOR_AUTH_HINT = (
 ISE_DB_TRANSIENT = re.compile(
     r"could not prepare statement|two open Sessions|could not (execute|extract|open)|"
     r"JDBCException|CannotCreateTransaction|TransactionException|HibernateException|"
-    r"deadlock|Lock wait timeout|database is (locked|not available)|ORA-\d|Connection is not available",
+    r"deadlock|Lock wait timeout|database is (locked|not available)|ORA-\d|Connection is not available|"
+    r"SQLException|NSFEntityRetrievalException",
     re.I,
+)
+# ISE 3.5's policy and TrustSec API also answers a GET with a bare HTTP 500 "Bad Request. Please see
+# logs for more details." under the same contention (#176): a plain rerun of the read succeeds. Only a
+# 500 carrying exactly this text counts; a 400 with it is a real bad request.
+ISE_GENERIC_500 = re.compile(r"Bad Request\. Please see logs for more details", re.I)
+POST_DB_HINT = (
+    " ISE hit a transient database error before the change ran: nothing was created or changed, "
+    "a rerun is safe."
 )
 # Methods safe to replay on a transient DB 500: reads and ISE's full-object idempotent writes. POST
 # (create) is excluded so a retry can't make a duplicate.
@@ -58,19 +67,34 @@ def _db_backoff(attempt: int) -> float:
     return base + jitter
 
 
+def is_db_transient(e: UpstreamError) -> bool:
+    """ISE's transient database/contention error: Hibernate/JDBC/SQL wording on any status, or the
+    generic 3.5 'Bad Request. Please see logs' text on an HTTP 500."""
+    text = str(e)
+    return bool(ISE_DB_TRANSIENT.search(text)) or (
+        e.status_code == 500 and bool(ISE_GENERIC_500.search(text))
+    )
+
+
 class IseApiClient(ApiClient):
-    """An ApiClient that also retries ISE's transient policy-API 500 (Hibernate/JDBC) on reads and
-    idempotent writes, with backoff. Everything else is the core client's behaviour."""
+    """An ApiClient that also retries ISE's transient policy-API 500 (Hibernate/JDBC/SQL, or 3.5's
+    generic 'Bad Request. Please see logs') on reads and idempotent writes, with backoff. A POST is
+    never replayed; its error says a rerun is safe when ISE's DB wording shows nothing was created.
+    Everything else is the core client's behaviour."""
 
     db_retries: int = 3
 
     async def request(self, method: str, path: str, **kw: Any) -> Any:
-        attempts = self.db_retries if method.upper() in RETRYABLE_DB_METHODS else 1
+        retryable = method.upper() in RETRYABLE_DB_METHODS
+        attempts = self.db_retries if retryable else 1
         for attempt in range(1, attempts + 1):
             try:
                 return await super().request(method, path, **kw)
             except UpstreamError as e:
-                if attempt < attempts and ISE_DB_TRANSIENT.search(str(e)):
+                if not retryable and ISE_DB_TRANSIENT.search(str(e)) and POST_DB_HINT not in str(e):
+                    e.args = (f"{e}{POST_DB_HINT}", *e.args[1:])
+                    raise
+                if attempt < attempts and is_db_transient(e):
                     log.warning(
                         "ISE transient DB error on %s %s; retry %d/%d", method, path, attempt, attempts - 1
                     )

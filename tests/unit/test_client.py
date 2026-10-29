@@ -361,3 +361,133 @@ async def test_non_db_500_not_retried(mock: respx.MockRouter) -> None:
     finally:
         await app.aclose()
     assert calls["n"] == 1  # a non-transient 500 is surfaced at once
+
+
+GENERIC_500 = {"response": {"message": "Bad Request. Please see logs for more details."}}
+
+
+@pytest.fixture
+def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ise_mcp.client._db_backoff", lambda attempt: 0.0)
+
+
+def _retries(reason: str = "ise_db") -> float:
+    from ise_mcp._core import metrics
+
+    return metrics.REGISTRY.value("mcp_upstream_retries_total", product="ISE", reason=reason)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/policy/network-access/time-condition",
+        "/api/v1/policy/device-admin/condition",
+        "/api/v1/trustsec/matrix",
+    ],
+)
+async def test_generic_500_retried_on_get(mock: respx.MockRouter, no_backoff: None, path: str) -> None:
+    from ise_mcp._core import metrics
+
+    was_enabled = metrics.enabled()
+    metrics.enable()
+    before = _retries()
+    route = mock.get(path)
+    route.side_effect = [httpx.Response(500, json=GENERIC_500), httpx.Response(200, json={"response": []})]
+    app = IseApp(make_settings())
+    try:
+        out = await app.openapi.get(path)
+    finally:
+        await app.aclose()
+        if not was_enabled:
+            metrics.disable()
+    assert route.call_count == 2
+    assert out == {"response": []}
+    assert _retries() == before + 1
+
+
+async def test_generic_500_three_times_raises(mock: respx.MockRouter, no_backoff: None) -> None:
+    from ise_mcp._core import UpstreamError
+
+    route = mock.get("/api/v1/policy/network-access/network-condition")
+    route.respond(500, json=GENERIC_500)
+    app = IseApp(make_settings())
+    try:
+        with pytest.raises(UpstreamError, match="Please see logs"):
+            await app.openapi.get("/api/v1/policy/network-access/network-condition")
+    finally:
+        await app.aclose()
+    assert route.call_count == 3
+
+
+async def test_generic_500_retried_on_put_and_delete(mock: respx.MockRouter, no_backoff: None) -> None:
+    path = "/api/v1/policy/network-access/time-condition/c1"
+    put = mock.put(path)
+    put.side_effect = [
+        httpx.Response(500, json=GENERIC_500),
+        httpx.Response(200, json={"response": {"id": "c1"}}),
+    ]
+    delete = mock.delete(path)
+    delete.side_effect = [httpx.Response(500, json=GENERIC_500), httpx.Response(204)]
+    app = IseApp(make_settings())
+    try:
+        await app.openapi.put(path, {"id": "c1"})
+        await app.openapi.delete(path)
+    finally:
+        await app.aclose()
+    assert put.call_count == 2
+    assert delete.call_count == 2
+
+
+async def test_generic_text_on_400_not_retried(mock: respx.MockRouter, no_backoff: None) -> None:
+    route = mock.get("/api/v1/policy/network-access/condition")
+    route.respond(400, json=GENERIC_500)
+    app = IseApp(make_settings())
+    try:
+        with pytest.raises(ValidationFailed):
+            await app.openapi.get("/api/v1/policy/network-access/condition")
+    finally:
+        await app.aclose()
+    assert route.call_count == 1  # a 400 with that text is a real bad request
+
+
+async def test_sqlexception_retried_on_get(mock: respx.MockRouter, no_backoff: None) -> None:
+    route = mock.get("/api/v1/policy/network-access/time-condition")
+    route.side_effect = [
+        httpx.Response(500, json={"message": "NSFEntityRetrievalException: failed to fetch"}),
+        httpx.Response(200, json={"response": []}),
+    ]
+    app = IseApp(make_settings())
+    try:
+        await app.openapi.get("/api/v1/policy/network-access/time-condition")
+    finally:
+        await app.aclose()
+    assert route.call_count == 2
+
+
+async def test_post_sqlexception_not_retried_says_rerun_safe(
+    mock: respx.MockRouter, no_backoff: None
+) -> None:
+    route = mock.post("/api/v1/policy/network-access/time-condition")
+    route.respond(400, json={"message": "SQLException: Failed to search the Resources under the given E"})
+    app = IseApp(make_settings())
+    try:
+        with pytest.raises(ValidationFailed, match="nothing was created or changed, a rerun is safe"):
+            await app.openapi.post("/api/v1/policy/network-access/time-condition", {"name": "mcp-t"})
+    finally:
+        await app.aclose()
+    assert route.call_count == 1
+
+
+async def test_post_generic_500_not_retried(mock: respx.MockRouter, no_backoff: None) -> None:
+    from ise_mcp._core import UpstreamError
+
+    route = mock.post("/api/v1/policy/network-access/time-condition")
+    route.respond(500, json=GENERIC_500)
+    app = IseApp(make_settings())
+    try:
+        with pytest.raises(UpstreamError) as ei:
+            await app.openapi.post("/api/v1/policy/network-access/time-condition", {"name": "mcp-t"})
+    finally:
+        await app.aclose()
+    assert route.call_count == 1
+    assert "rerun is safe" not in str(ei.value)  # the generic text alone doesn't prove nothing ran
