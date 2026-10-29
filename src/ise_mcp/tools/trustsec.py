@@ -206,6 +206,8 @@ REPORT_COLUMNS = [
     "policy_updated",
     "status_updated",
     "hint",
+    "push_id",
+    "pull_id",
 ]
 GENERAL_SETTINGS = "/api/v1/trustsec/general-settings"
 HTTPS_SERVERS = "/api/v1/trustsec/https-server"
