@@ -553,3 +553,122 @@ async def test_delete_500_gives_retry_hint(mock: respx.MockRouter) -> None:
         assert preview is not None and preview["preview"]["attributes"] == {"role": "role", "site": "site"}
         with pytest.raises(ToolError, match="preview the delete again"):
             await c.call_tool("ise_delete_object", {**args, "confirm": preview["confirm"]})
+
+
+# --- #189: an update without start must not send a past saved start --------------------------------
+
+# Frozen 'now' (naive UTC, as _start(None) uses): LIVE_GET's saved start 2026-10-28T23:20:00 is in the past.
+NOW = "2026-10-29T07:12:00"
+
+
+@pytest.fixture
+def frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime
+
+    from ise_mcp.tools import pxgrid_direct
+
+    monkeypatch.setattr(pxgrid_direct, "_now", lambda: datetime.strptime(NOW, "%Y-%m-%dT%H:%M:%S"))
+
+
+async def test_update_rolls_past_start_forward(mock: respx.MockRouter, frozen: None) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    put = mock.put(f"{CONFIG}/{LIVE_NAME}").respond(json={})
+    preview, done = await two_step(
+        "ise_set_pxgrid_direct_connector", {"name": LIVE_NAME, "description": "scratch (updated)"}
+    )
+    assert preview["status"] == "preview", preview
+    # Every 24 hours from 2026-10-28T23:20: the next sync time after now (07:12) is 2026-10-29T23:20.
+    side = " ".join(preview["side_effects"])
+    assert (
+        "ISE refuses a past start: the saved full sync start 2026-10-28T23:20:00 moves to "
+        "2026-10-29T23:20:00, same interval" in side
+    ), side
+    assert preview["preview"]["changes"]["full_sync"] == {
+        "from": "every 24 hours from 2026-10-28T23:20:00",
+        "to": "every 24 hours from 2026-10-29T23:20:00",
+    }
+    assert done is not None
+    sent = json.loads(put.calls.last.request.content)["connector"]
+    assert sent["fullsyncSchedule"] == {
+        "intervalUnit": "hours",
+        "interval": 24,
+        "startDate": "2026-10-29T23:20:00",
+    }
+    assert sent["description"] == "scratch (updated)"
+
+
+async def test_update_rolls_on_the_new_interval(mock: respx.MockRouter, frozen: None) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    put = mock.put(f"{CONFIG}/{LIVE_NAME}").respond(json={})
+    preview, done = await two_step(
+        "ise_set_pxgrid_direct_connector", {"name": LIVE_NAME, "full_sync_interval": 1}
+    )
+    assert preview["status"] == "preview", preview
+    # Hourly from 23:20: 07:20 is 8 minutes ahead of now, past the 5-minute margin, so that slot is kept.
+    assert any("moves to 2026-10-29T07:20:00, on the new interval" in s for s in preview["side_effects"])
+    assert done is not None
+    sched = json.loads(put.calls.last.request.content)["connector"]["fullsyncSchedule"]
+    assert sched == {"intervalUnit": "hours", "interval": 1, "startDate": "2026-10-29T07:20:00"}
+
+
+async def test_update_future_start_sent_unchanged(mock: respx.MockRouter, frozen: None) -> None:
+    c = live_connector()
+    c["fullsyncSchedule"]["startDate"] = "2026-10-29T08:00:00"
+    mock.get(CONFIG).respond(json={"response": [{"connector": c}], "version": "1.0.0"})
+    put = mock.put(f"{CONFIG}/{LIVE_NAME}").respond(json={})
+    preview, done = await two_step(
+        "ise_set_pxgrid_direct_connector", {"name": LIVE_NAME, "description": "scratch (updated)"}
+    )
+    assert preview["status"] == "preview", preview
+    assert not any("past start" in s for s in preview["side_effects"])
+    assert "full_sync" not in preview["preview"]["changes"]
+    assert done is not None
+    sent = json.loads(put.calls.last.request.content)["connector"]
+    assert sent["fullsyncSchedule"]["startDate"] == "2026-10-29T08:00:00"
+
+
+async def test_update_identical_with_past_start_still_no_change(mock: respx.MockRouter, frozen: None) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    put = mock.put(f"{CONFIG}/{LIVE_NAME}").respond(json={})
+    out, done = await two_step(
+        "ise_set_pxgrid_direct_connector", {"name": LIVE_NAME, "description": "mcp-r96 scratch CMDB"}
+    )
+    assert out["status"] == "no_change", out
+    assert done is None and not put.called
+
+
+async def test_update_past_start_400_names_start(mock: respx.MockRouter, frozen: None) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    mock.put(f"{CONFIG}/{LIVE_NAME}").respond(
+        400,
+        json={
+            "message": "Incorrect start date format or the date is in the past. Update the start date in "
+            "the Schedule tab."
+        },
+    )
+    server = make_server(mcp_enable_writes=True)
+    args = {"name": LIVE_NAME, "description": "scratch (updated)"}
+    async with Client(server) as c:
+        preview = (await c.call_tool("ise_set_pxgrid_direct_connector", args)).structured_content
+        assert preview is not None and preview["status"] == "preview"
+        with pytest.raises(ToolError, match="pass start='YYYY-MM-DDTHH:MM:SS'"):
+            await c.call_tool("ise_set_pxgrid_direct_connector", {**args, "confirm": preview["confirm"]})
+
+
+def test_rolled_start_grid() -> None:
+    from datetime import datetime
+
+    from ise_mcp.tools.pxgrid_direct import _rolled_start
+
+    now = datetime(2026, 10, 29, 7, 12)
+    sched = {"interval": 1, "intervalUnit": "hours", "startDate": "2026-10-28T23:20:00"}
+    assert _rolled_start(sched, now) == ("2026-10-28T23:20:00", "2026-10-29T07:20:00")
+    # Inside the 5-minute margin: the next slot after it.
+    assert _rolled_start({**sched, "startDate": "2026-10-28T23:15:00"}, now) == (
+        "2026-10-28T23:15:00",
+        "2026-10-29T08:15:00",
+    )
+    assert _rolled_start({**sched, "intervalUnit": "days", "interval": 2}, now)[1] == "2026-10-30T23:20:00"  # type: ignore[index]
+    assert _rolled_start({**sched, "startDate": "2026-10-29T09:00:00"}, now) is None
+    assert _rolled_start({**sched, "startDate": "not a date"}, now) is None
+    assert _rolled_start(None, now) is None

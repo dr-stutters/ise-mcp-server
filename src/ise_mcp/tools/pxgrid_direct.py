@@ -49,6 +49,7 @@ from ise_mcp._core import (
     ResponseFormat,
     ToolRegistrar,
     UpstreamError,
+    ValidationFailed,
     field_changes,
     get_client,
     object_result,
@@ -75,6 +76,14 @@ NUMERIC_ID_HINT = (
     "SCH_INPROGRESS: key the connector on a string attribute (NetBox 'name' or 'serial', or a custom field)"
 )
 START_FMT = "%Y-%m-%dT%H:%M:%S"
+UNIT_STEP = {"hours": timedelta(hours=1), "days": timedelta(days=1), "weeks": timedelta(weeks=1)}
+# A rolled-forward start lands at least this far ahead, so the confirm still sends a future time.
+START_MARGIN = timedelta(minutes=5)
+PAST_START = "the date is in the past"
+PAST_START_HINT = (
+    "ISE 3.5 refuses a schedule whose start is in the past: pass start='YYYY-MM-DDTHH:MM:SS' (a future time "
+    "in ISE's time zone), or preview again (an update without start moves a past saved start forward)"
+)
 TEST_DATA_CHARS = 4000  # the test answers the CMDB's whole page: keep a sample
 
 
@@ -274,6 +283,40 @@ def _start(value: str | None) -> str:
             f"start is 'YYYY-MM-DDTHH:MM:SS' (ISE's time zone), e.g. '2026-11-01T02:00:00': {value!r}"
         ) from None
     return _round5(at).strftime(START_FMT)
+
+
+def _now() -> datetime:
+    """Now as a naive UTC time, the clock `_start(None)` uses (tests freeze it)."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _rolled_start(sched: Any, now: datetime) -> tuple[str, str] | None:
+    """(saved, next) when a schedule's saved startDate is in the past: the next sync time the schedule
+    implies (startDate + n x interval, on the 5-minute mark) at least START_MARGIN ahead of `now`. None when
+    the start is still ahead, or the schedule has no interval / unreadable start."""
+    if not isinstance(sched, dict) or not sched.get("startDate") or not sched.get("interval"):
+        return None
+    saved = str(sched["startDate"])
+    try:
+        at = datetime.strptime(saved[:19], START_FMT)
+        step = UNIT_STEP[str(sched.get("intervalUnit") or "hours").lower()] * int(sched["interval"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    floor = now + START_MARGIN
+    if at > floor or step <= timedelta(0):
+        return None
+    n = -(-(floor - at) // step)  # ceil: the first slot past the margin
+    nxt = at + step * n
+    if nxt <= floor:
+        nxt += step
+    return saved, _round5(nxt).strftime(START_FMT)
+
+
+def _past_start_hint(e: UpstreamError) -> UpstreamError | None:
+    """ISE's 400 'Incorrect start date format or the date is in the past', with what to do about it."""
+    if e.status_code == 400 and PAST_START in str(e).lower():
+        return ValidationFailed(f"{e} {PAST_START_HINT}", 400)
+    return None
 
 
 def _redacted(value: Any, secrets: list[str]) -> Any:
@@ -779,6 +822,31 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                     "to": "******",
                 }
             noop = unchanged({k: v for k, v in changes.items() if k != "credential"}, secret)
+            if not noop and start_at is None:
+                # ISE 3.5 validates startDate on every PUT and refuses a past one (#189): the PUT carries
+                # the saved start from the GET, so move a past one to the next sync time it implies.
+                rolled = False
+                for key, label in (
+                    ("fullsyncSchedule", "full sync"),
+                    ("deltasyncSchedule", "incremental sync"),
+                ):
+                    if (r := _rolled_start(desired.get(key), _now())) is None:
+                        continue
+                    same = (base.get(key) or {}).get("interval") == desired[key].get("interval") and (
+                        base.get(key) or {}
+                    ).get("intervalUnit") == desired[key].get("intervalUnit")
+                    desired[key] = {**desired[key], "startDate": r[1]}
+                    rolled = True
+                    side.append(
+                        f"ISE refuses a past start: the saved {label} start {r[0]} moves to {r[1]}, "
+                        + ("same interval" if same else "on the new interval")
+                        + " (pass start to choose another)"
+                    )
+                if rolled:
+                    changes = {
+                        **field_changes(connector_view(base), connector_view(desired)),
+                        **({"credential": changes["credential"]} if "credential" in changes else {}),
+                    }
             if desired.get("skipCertificateValidations") and not base.get("skipCertificateValidations"):
                 side.append(
                     "ISE stops validating the CMDB's certificate: anyone on the path can feed it records"
@@ -799,7 +867,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             )
 
             async def update() -> Any:
-                await app.openapi.put(f"{CONFIG}/{quote(cname, safe='')}", {"connector": desired})
+                try:
+                    await app.openapi.put(f"{CONFIG}/{quote(cname, safe='')}", {"connector": desired})
+                except UpstreamError as e:
+                    if (hinted := _past_start_hint(e)) is None:
+                        raise
+                    raise hinted from e
                 return {"updated": cname, "connector": connector_view(desired)}
 
             return await preview_or_apply(
@@ -871,7 +944,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         )
 
         async def create() -> Any:
-            await app.openapi.post(CONFIG, {"connector": body})
+            try:
+                await app.openapi.post(CONFIG, {"connector": body})
+            except UpstreamError as e:
+                if (hinted := _past_start_hint(e)) is None:
+                    raise
+                raise hinted from e
             return {"created": name, "connector": connector_view(body)}
 
         return await preview_or_apply(

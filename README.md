@@ -653,7 +653,9 @@ instead of profiling guesses. `ise_set_pxgrid_direct_connector` creates or updat
 identifier (a string attribute such as NetBox `name` or `serial`: ISE 3.5 leaves a sync keyed on a numeric
 id such as NetBox `id` at SCH_INPROGRESS), the correlation identifier (the record attribute with the endpoint
 MAC), the attribute mapping (dictionary attribute -> record attribute), the sync schedule (ISE starts it on
-a 5-minute mark; the preview rounds the same way) and the CoA on change. The token or
+a 5-minute mark; the preview rounds the same way; ISE refuses a start in the past, so an update without
+`start` moves a past saved start to the next sync time its schedule implies and the preview says so) and the
+CoA on change. The token or
 password comes from an `ISE_PXGRID_DIRECT_<NAME>` server variable and is never shown; an apikey connector
 sends it as `Authorization: Token <token>` by default (NetBox; `token_scheme='Bearer'` for v2 tokens).
 `ise_test_pxgrid_direct` has ISE fetch the URL now (record count and the first record; it warns when the
