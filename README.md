@@ -300,7 +300,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-188 tools and 13 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+188 tools and 14 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 96 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -507,7 +507,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_default_egress_rule` | Change the TrustSec matrix default (the ANY-ANY egress cell): the catch-all, SGACLs and status that apply to every source/destination SGT pair without an explicit cell. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (13)
+### Prompts (14)
 
 | Prompt | What it does |
 |---|---|
@@ -524,6 +524,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `suite_change_check` | Did anything else break? |
 | `suite_decommission_site` | Remove one site everywhere it exists, without leaving orphans: SD-WAN edges and their configuration group association, ISE NADs and the site's location group, the Catalyst Center site with its devices, fabric site and pool reservations, FMC network objects for the site's subnets, and the Windows DHCP scope and DNS records. |
 | `suite_maintenance_window` | Run one maintenance window at a site across products: inventory what runs where, write one plan (order, blast radius, rollback, go/no-go), take the pre snapshots, then upgrade product by product with each product's preview-first upgrade tool: SD-WAN edges (install, activate), Catalyst Center switches (SWIM distribute, then activate one device at a time) and the ISE patch check with a backup first (ISE patches install from its GUI). |
+| `suite_segmentation_audit` | Is segmentation enforced end to end at one site? Pairs each segment (SD-WAN VPN, Catalyst Center VN, ISE SGT, FMC zone) against the intended flows, reads every product's control for the pair (ISE TrustSec egress matrix, SD-WAN policy, FMC rules, fabric enforcement), tests the pair from CML hosts where a lab exists, and reports leaks, over-blocking and policy conflicts as an evidence pack. |
 
 ### Config export, diff and import
 
