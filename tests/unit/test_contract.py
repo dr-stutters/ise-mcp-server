@@ -27,10 +27,18 @@ PROMPT_SAMPLES = {
         "fmc_block": "true",
         "switch": "lab/sw1",
     },
+    # I69: the window-only mode (the snapshot); the host path is covered in test_incident_timeline.py.
     "ise_incident_timeline": {
-        "mac": "aa:bb:cc:dd:ee:ff",
-        "ip": "10.0.0.5",
-        "username": "alice",
+        "mac": "",
+        "ip": "",
+        "username": "",
+        "minutes": "60",
+        "window_start": "2026-10-29T09:10Z",
+        "window_end": "2026-10-29T09:20Z",
+        "nad": "192.0.2.21",
+        "switch": "lab/sw1",
+        "firewall": "ftd1",
+        "lab": "lab",
     },
     "ise_aaa_chain_check": {
         "nad": "198.18.128.154",
@@ -100,9 +108,11 @@ SNAPSHOT_PROMPTS = (
     "ise_policy_change_review",
     "ise_guest_onboarding",
     "ise_cert_renewal",
+    "ise_incident_timeline",
 )
-# win = the Windows_Server MCP (hand-written manifest tests/manifests/win.json, I52).
-KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win"}
+# win = the Windows_Server MCP (hand-written manifest tests/manifests/win.json, I52); netbox = netbox-mcp
+# (hand-written tests/manifests/netbox.json, the same file cat-sdwan-mcp-server carries, I69).
+KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win", "netbox"}
 # Every fmc_*/catc_*/catsdwan_*/win_* tool a prompt references must exist in that server's manifest
 # (tests/manifests/).
 EXTERNAL = load_tool_manifests("tests/manifests")
@@ -240,12 +250,6 @@ async def test_incident_timeline_renders() -> None:
     assert "`catc_list_issues`" in text
     assert "not connected" in text  # FMC/CatC optional, skipped with a note
     assert 'mac="52:54:00:61:3D:9E"'.lower() not in text.lower()  # uses the given MAC, normalised
-
-
-async def test_incident_timeline_needs_identifier() -> None:
-    async with Client(make_server()) as c:
-        with pytest.raises(Exception, match="mac, ip or username"):
-            await c.get_prompt("ise_incident_timeline", {})
 
 
 async def test_incident_timeline_listed_read_tier() -> None:

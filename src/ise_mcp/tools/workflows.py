@@ -3,6 +3,7 @@
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -350,52 +351,177 @@ user's approval, and never pass confirm yourself.
      held supplicant may need a restart (or a port bounce) before a new session shows up."""
 
 
+SAFE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:?\d{2})?$")
+SAFE_DEVICE = re.compile(r"^[\w.:-]{1,128}$")
+SAFE_LAB = re.compile(r"^[\w .()-]{1,64}$")
+MAX_TIMELINE_MINUTES = 10080
+# Security-log events for a member added to / removed from a security-enabled global group. The
+# script is fixed: only the validated window times are put into it.
+AD_GROUP_EVENTS = (4728, 4729)
+
+
+def _utc(value: str, arg: str) -> datetime | None:
+    value = value.strip()
+    if not value:
+        return None
+    if not SAFE_TIME.match(value):
+        raise InvalidRequest(
+            f"{arg} must be an ISO 8601 date and time, e.g. 2026-10-29T09:10Z or 2026-10-29 09:10+10:00 "
+            "(UTC when no offset is given)"
+        )
+    try:
+        parsed = datetime.fromisoformat(value.replace(" ", "T"))
+    except ValueError as e:
+        raise InvalidRequest(f"{arg}: {e}") from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _window(window_start: str, window_end: str) -> tuple[datetime | None, datetime | None]:
+    start = _utc(window_start, "window_start")
+    end = _utc(window_end, "window_end")
+    if end is not None and start is None:
+        raise InvalidRequest("window_end needs a window_start")
+    if start is not None and end is not None:
+        if end <= start:
+            raise InvalidRequest("window_end must be after window_start")
+        if end - start > timedelta(minutes=MAX_TIMELINE_MINUTES):
+            raise InvalidRequest("the window may be at most 7 days (10080 minutes)")
+    return start, end
+
+
+def _iso(t: datetime) -> str:
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _optional(value: str, pattern: re.Pattern[str], arg: str, shape: str) -> str:
+    value = value.strip()
+    if value and not pattern.match(value):
+        raise InvalidRequest(f"{arg} must be {shape}")
+    return value
+
+
+def ad_group_events_script(start: str, end: str) -> str:
+    """The fixed Get-WinEvent query for AD group membership changes in [start, end] (ISO, UTC)."""
+    ids = ",".join(str(i) for i in AD_GROUP_EVENTS)
+    return (
+        f"Get-WinEvent -FilterHashtable @{{LogName='Security'; Id={ids}; "
+        f"StartTime=[datetime]::Parse('{start}'); EndTime=[datetime]::Parse('{end}')}} "
+        "-ErrorAction SilentlyContinue | Select-Object "
+        "@{n='Time';e={$_.TimeCreated.ToUniversalTime().ToString('o')}}, Id, "
+        "@{n='Member';e={$_.Properties[0].Value}}, @{n='Group';e={$_.Properties[2].Value}}, "
+        "@{n='By';e={$_.Properties[6].Value}}"
+    )
+
+
 def register_incident_timeline(reg: ToolRegistrar) -> None:
     @reg.prompt(
-        title="Incident timeline across ISE, FMC and Catalyst Center",
-        uses=["ise", "fmc", "catc"],
-        example={"mac": "AA:BB:CC:DD:EE:FF"},
+        title="Incident timeline across ISE, FMC, Catalyst Center and the lab",
+        uses=["ise", "fmc", "catc", "cml", "netbox", "win"],
+        example={"window_start": "2026-10-29T09:10Z", "window_end": "2026-10-29T09:20Z"},
         tools=[
             "ise_find_session",
             "ise_endpoint_360",
             "ise_get_auth_history",
+            "ise_get_auth_list",
             "ise_recent_auth_failures",
             "ise_list_anc_endpoints",
+            "ise_why_auth_failed",
             "fmc_list_audit_records",
             "fmc_list_deployments",
             "fmc_device_health",
+            "fmc_recent_activity",
+            "fmc_run_show_command",
             "catc_device_360",
             "catc_client_360",
             "catc_list_events",
             "catc_list_issues",
             "catc_list_audit_logs",
+            "catc_recent_activity",
+            "catc_run_show_commands",
+            "cml_run_commands",
+            "cml_list_labs",
+            "cml_list_lab_events",
+            "netbox_change_history",
+            "win_run_powershell_json",
         ],
     )
     def ise_incident_timeline(
-        mac: Annotated[str, Field(description="Host MAC address, any notation (best)")] = "",
+        mac: Annotated[
+            str, Field(description="Host MAC address, any notation (best). Empty: window-only")
+        ] = "",
         ip: Annotated[str, Field(description="Host IP address, if the MAC is not known")] = "",
         username: Annotated[str, Field(description="Username, if neither MAC nor IP is known")] = "",
         minutes: Annotated[
-            int, Field(ge=1, le=10080, description="How far back to look, in minutes")
+            int,
+            Field(
+                ge=1,
+                le=MAX_TIMELINE_MINUTES,
+                description="How far back to look, in minutes (ignored when window_start is given)",
+            ),
         ] = DEFAULT_LOOKBACK_MINUTES,
+        window_start: Annotated[
+            str,
+            Field(
+                description="Start of the window, ISO 8601 date and time (UTC if no offset), "
+                "e.g. 2026-10-29T09:10Z"
+            ),
+        ] = "",
+        window_end: Annotated[
+            str, Field(description="End of the window, ISO 8601 (UTC if no offset); default now")
+        ] = "",
+        nad: Annotated[str, Field(description="Window-only: narrow ISE to this NAD (name or IP)")] = "",
+        switch: Annotated[
+            str,
+            Field(
+                description="Window-only: where to read 'show logging' on the switch: a Catalyst Center "
+                "device name/IP, or 'lab/node' for a CML node"
+            ),
+        ] = "",
+        firewall: Annotated[
+            str, Field(description="Window-only: the FTD (FMC device name) to read 'show logging' on")
+        ] = "",
+        lab: Annotated[
+            str, Field(description="Window-only: the CML lab whose events to read (default: running labs)")
+        ] = "",
     ) -> str:
-        """Build one time-ordered incident timeline for a host across ISE, FMC (Firepower) and Catalyst
-        Center, each queried on demand and merged by timestamp. ISE gives authentications, failures,
-        the live session and ANC (quarantine) state; FMC gives recent config/audit and deployment
-        activity and device health; Catalyst Center gives the client/device 360, events, issues and
-        audit log. Read-only. The FMC and Catalyst Center steps are skipped (noted) if those servers
-        are not connected to this client."""
-        mac, username, ip, _ = _validated(mac, username, ip, "")
-        if not (mac or username or ip):
-            raise InvalidRequest("Give the host's mac, ip or username")
-        who = _who(mac, username, ip)
-        by_mac = f'mac="{mac}"' if mac else "mac=<the MAC from step 1>"
-        finder = f"{tool_ref('ise_find_session')} with " + (
-            f'mac="{mac}"' if mac else f'username="{username}"' if username else f'ip="{ip}"'
+        """Build one time-ordered incident timeline, merged by timestamp. With a host (MAC, IP or user):
+        its ISE authentications, session and ANC state, FMC audit/deployments and Catalyst Center 360,
+        events, issues and audit. Without one ('what happened between 09:10 and 09:20?'): every
+        operator change and event in the window - FMC activity and the FTD's show logging, Catalyst
+        Center activity and the switch's logging, ISE authentications and failures by NAD and user,
+        CML lab events, and NetBox changes and AD group changes when those servers are connected.
+        Read-only; sources whose server is not connected are skipped with a note."""
+        mac, username, ip, switch = _validated(mac, username, ip, switch)
+        nad = _optional(nad, SAFE_SWITCH, "nad", "a NAD name or IP (letters, digits, . : - _)")
+        firewall = _optional(
+            firewall, SAFE_DEVICE, "firewall", "an FMC device name (letters, digits, . : - _)"
         )
-        return f"""Build an incident timeline for {who} over the last {minutes} minutes. Query each
+        lab = _optional(lab, SAFE_LAB, "lab", "a CML lab title (letters, digits, space . ( ) - _)")
+        start, end = _window(window_start, window_end)
+        if mac or username or ip:
+            return _host_timeline(mac, username, ip, minutes, start, end)
+        return _window_timeline(minutes, start, end, nad=nad, switch=switch, firewall=firewall, lab=lab)
+
+
+def _host_timeline(
+    mac: str, username: str, ip: str, minutes: int, start: datetime | None, end: datetime | None
+) -> str:
+    who = _who(mac, username, ip)
+    by_mac = f'mac="{mac}"' if mac else "mac=<the MAC from step 1>"
+    finder = f"{tool_ref('ise_find_session')} with " + (
+        f'mac="{mac}"' if mac else f'username="{username}"' if username else f'ip="{ip}"'
+    )
+    if start is None:
+        span, lookback, clip = f"over the last {minutes} minutes", str(minutes), ""
+    else:
+        span = f"from {_iso(start)} to {_iso(end) if end else 'now'}"
+        lookback = f"<minutes from {_iso(start)} until now, rounded up>"
+        clip = " Drop rows outside the window (the look-backs below reach until now)."
+    return f"""Build an incident timeline for {who} {span}. Query each
 source on demand, collect (time, source, event) rows, then present them merged in time order. Every
-tool here is read-only; change nothing. Use UTC and note each source's own clock in the output.
+tool here is read-only; change nothing. Use UTC and note each source's own clock in the output.{clip}
 
 Only this server's tools (ise_*) are certain to exist. The fmc_* tools need the fmc-mcp server and
 the catc_* tools the catc-mcp server to be connected to this client: if a call isn't available, write
@@ -406,9 +532,9 @@ the catc_* tools the catc-mcp server to be connected to this client: if a call i
      framed_ip_address as the IP. If there is no session, keep the identifier you were given.
 
 2. ISE events.
-   - {tool_ref("ise_get_auth_history")} with {by_mac} and minutes={minutes}: each authentication
+   - {tool_ref("ise_get_auth_history")} with {by_mac} and minutes={lookback}: each authentication
      (PASS/FAIL, policy set, authz rule, SGT, NAD) is a timeline row at its acs_timestamp.
-   - {tool_ref("ise_recent_auth_failures")} with since_minutes={minutes} (and nad=/user= if known): failures
+   - {tool_ref("ise_recent_auth_failures")} with since_minutes={lookback} (and nad=/user= if known): failures
      in the window with decoded reasons, for this host and the NAD it uses.
    - {tool_ref("ise_endpoint_360")} with {by_mac}: profile, identity group, current ANC policy.
    - {tool_ref("ise_list_anc_endpoints")}: is the host quarantined now (and since when, if shown)?
@@ -434,6 +560,127 @@ the catc_* tools the catc-mcp server to be connected to this client: if a call i
      ANC quarantine lining up with a CatC issue.
    - End with a short "what happened" summary and the gaps (sources not connected, windows with no
      data). Suggest next steps as read-only lookups; propose no change without the user asking."""
+
+
+def _window_timeline(
+    minutes: int,
+    start: datetime | None,
+    end: datetime | None,
+    *,
+    nad: str,
+    switch: str,
+    firewall: str,
+    lab: str,
+) -> str:
+    if start is None:
+        span = f"the last {minutes} minutes"
+        lookback, hours = str(minutes), f"{minutes / 60:g}"
+        start_s, end_s = f"<now minus {minutes} minutes, UTC>", "<now, UTC>"
+        auth_list = f"since_minutes={minutes}"
+        nb_window = f'since="{minutes}m"'
+    else:
+        start_s = _iso(start)
+        end_s = _iso(end) if end else "<now, UTC>"
+        span = f"{start_s} to {_iso(end) if end else 'now'}"
+        lookback = f"<minutes from {start_s} until now, rounded up>"
+        hours = f"<hours from {start_s} until now, rounded up>"
+        if end is not None:
+            auth_list = f'since_minutes={int((end - start).total_seconds() + 59) // 60}, until="{_iso(end)}"'
+            nb_window = f'since="{start_s}", until="{_iso(end)}"'
+        else:
+            auth_list = f"since_minutes={lookback}"
+            nb_window = f'since="{start_s}"'
+    nad_arg = f', nad="{nad}"' if nad else ""
+    if firewall:
+        ftd = f'{tool_ref("fmc_run_show_command")} with device="{firewall}", command="show logging"'
+        fmc_dev = f', device="{firewall}"'
+    else:
+        ftd = (
+            f'{tool_ref("fmc_run_show_command")} with command="show logging" on the FTD(s) the activity '
+            "above names (devices=[...], at most a few)"
+        )
+        fmc_dev = ""
+    if switch and "/" in switch:
+        sw_lab, sw_node = switch.split("/", 1)
+        sw_log = (
+            f'{tool_ref("cml_run_commands")} with lab="{sw_lab}", nodes=["{sw_node}"], '
+            'commands=["show logging"]'
+        )
+        catc_dev = ""
+    elif switch:
+        sw_log = f'{tool_ref("catc_run_show_commands")} with devices=["{switch}"], commands=["show logging"]'
+        catc_dev = f', device="{switch}"'
+    else:
+        sw_log = (
+            f'{tool_ref("catc_run_show_commands")} with commands=["show logging"] on the switch(es) the '
+            f"activity or the ISE NADs point at (a CML node: {tool_ref('cml_run_commands')})"
+        )
+        catc_dev = ""
+    labs = (
+        f'lab="{lab}"'
+        if lab
+        else f"each running lab from {tool_ref('cml_list_labs')} (state STARTED; lab=... narrows this)"
+    )
+    win_end = end_s if end is not None else "<now, UTC>"
+    script = ad_group_events_script(start_s, win_end) if start is not None and end is not None else None
+    ps = (
+        f"script exactly:\n     {script}"
+        if script
+        else "the script below with the window's start and end (ISO, UTC) in place of START and END, and\n"
+        f"     nothing else changed:\n     {ad_group_events_script('START', 'END')}"
+    )
+    return f"""Build an incident timeline for the window {span} (UTC). No host is given: collect every
+operator change and event in the window first, then point at the hosts or devices worth a closer look.
+Query each source on demand, collect (time, source, event, who) rows, then present them merged in time
+order. Every tool here is read-only; change nothing. Use UTC and note each source's own clock offset.
+Several tools only take a look-back that ends now: use the look-back given and drop rows outside the
+window yourself.
+
+Only this server's tools (ise_*) are certain to exist. The fmc_*, catc_*, cml_*, netbox_* and win_* tools
+need those servers connected to this client: if a call isn't available, write "<source> not connected -
+skipped" for that section and carry on.
+
+1. ISE (authentications in the window, by NAD and user).
+   - {tool_ref("ise_get_auth_list")} with {auth_list}{nad_arg}: every authentication in the window; group
+     the rows by NAD and by user (count, PASS/FAIL) and keep the first and last time of each group.
+   - {tool_ref("ise_recent_auth_failures")} with since_minutes={lookback}{nad_arg}: failures with decoded
+     reasons; a burst of one reason on one NAD is a timeline row of its own.
+   - ISE's configuration change audit is not available over REST: say so in the report (ISE GUI:
+     Operations > Reports > Audit > Change Configuration Audit, or ISE syslog in a SIEM). Don't search
+     for it.
+
+2. FMC (Firepower) - skip with a note if fmc is not connected.
+   - {tool_ref("fmc_recent_activity")} with since_minutes={lookback}{fmc_dev}: audit (who changed what),
+     deployments and health alerts, one row each.
+   - {ftd}: interface, failover, VPN and routing messages in the window (the FTD's clock may differ
+     from FMC's).
+
+3. Catalyst Center and the switch - skip with a note if catc is not connected.
+   - {tool_ref("catc_recent_activity")} with hours={hours}{catc_dev}: issues, syslog, notifications and audit
+     (template pushes, provisioning, who did it).
+   - {sw_log}: link up/down, AAA/RADIUS server dead/alive and authentication messages in the window.
+
+4. CML (the lab itself) - skip with a note if cml is not connected.
+   - {tool_ref("cml_list_lab_events")} for {labs}: link and node state changes
+     (link down, node stopped). The tool has no time filter: keep only events in the window.
+
+5. NetBox (source of truth) - optional: skipped if not connected.
+   - {tool_ref("netbox_change_history")} with {nb_window}: who created, changed or deleted which object.
+
+6. Windows / Active Directory - optional: skipped if not connected (the tool is a raw-PowerShell tool
+   that may need its server's higher tier; run only this fixed, read-only query).
+   - {tool_ref("win_run_powershell_json")} with the {ps}
+     Event 4728 = member added to a security group, 4729 = member removed: a row per event (who, group,
+     by whom). Group changes decide ISE authorization results for AD users.
+
+7. Merge and report.
+   - Order every row by time (oldest first). Show: time (UTC), source (ISE/FMC/FTD/CatC/switch/CML/
+     NetBox/AD), event, key detail and who did it.
+   - Operator changes first: an FMC deploy, a CatC template push, a lab link down, an AD group change or
+     a NetBox edit just before an auth failure burst or an interface/AAA message is the likely cause.
+   - End with a short "what happened" summary, the gaps (sources not connected, ISE's config audit, empty
+     windows) and the hosts or NADs worth a closer look: rerun this prompt with mac=/ip=/username= for a
+     host, or {tool_ref("ise_why_auth_failed")} for one failure. Propose no change without the user asking."""
 
 
 CHAIN_FIX_TOOLS = ("ise_create_nad", "ise_update_nad", "ise_approve_pxgrid_client")

@@ -1,0 +1,231 @@
+{
+  "manifest": 1,
+  "server": "netbox-mcp",
+  "prefix": "netbox",
+  "version": null,
+  "core_version": null,
+  "note": "Hand-written (core C37): netbox-mcp has no `tools --json`. Names and tiers from the hosted server's tool list (2026-10-23); writes are preview-first there.",
+  "tools": {
+    "netbox_add_journal_entry": {
+      "tier": "write",
+      "title": "add journal entry"
+    },
+    "netbox_allocate_asns": {
+      "tier": "write",
+      "title": "allocate asns"
+    },
+    "netbox_allocate_ips": {
+      "tier": "write",
+      "title": "allocate ips"
+    },
+    "netbox_allocate_prefix": {
+      "tier": "write",
+      "title": "allocate prefix"
+    },
+    "netbox_allocate_vlans": {
+      "tier": "write",
+      "title": "allocate vlans"
+    },
+    "netbox_api_call": {
+      "tier": "write",
+      "title": "api call"
+    },
+    "netbox_change_history": {
+      "tier": "read",
+      "title": "change history"
+    },
+    "netbox_circuit_summary": {
+      "tier": "read",
+      "title": "circuit summary"
+    },
+    "netbox_cluster_summary": {
+      "tier": "read",
+      "title": "cluster summary"
+    },
+    "netbox_compare": {
+      "tier": "read",
+      "title": "compare"
+    },
+    "netbox_config_context": {
+      "tier": "read",
+      "title": "config context"
+    },
+    "netbox_connect_cable": {
+      "tier": "write",
+      "title": "connect cable"
+    },
+    "netbox_contacts_for": {
+      "tier": "read",
+      "title": "contacts for"
+    },
+    "netbox_create_object": {
+      "tier": "write",
+      "title": "create object"
+    },
+    "netbox_custom_fields": {
+      "tier": "read",
+      "title": "custom fields"
+    },
+    "netbox_data_hygiene": {
+      "tier": "read",
+      "title": "data hygiene"
+    },
+    "netbox_delete_object": {
+      "tier": "write",
+      "title": "delete object"
+    },
+    "netbox_device_summary": {
+      "tier": "read",
+      "title": "device summary"
+    },
+    "netbox_export": {
+      "tier": "read",
+      "title": "export"
+    },
+    "netbox_find_rack_space": {
+      "tier": "read",
+      "title": "find rack space"
+    },
+    "netbox_get_definition": {
+      "tier": "read",
+      "title": "get definition"
+    },
+    "netbox_get_object": {
+      "tier": "read",
+      "title": "get object"
+    },
+    "netbox_graphql": {
+      "tier": "read",
+      "title": "graphql"
+    },
+    "netbox_impact_analysis": {
+      "tier": "read",
+      "title": "impact analysis"
+    },
+    "netbox_interface_detail": {
+      "tier": "read",
+      "title": "interface detail"
+    },
+    "netbox_job_status": {
+      "tier": "read",
+      "title": "job status"
+    },
+    "netbox_journal": {
+      "tier": "read",
+      "title": "journal"
+    },
+    "netbox_l2vpn_summary": {
+      "tier": "read",
+      "title": "l2vpn summary"
+    },
+    "netbox_list_object_types": {
+      "tier": "read",
+      "title": "list object types"
+    },
+    "netbox_list_objects": {
+      "tier": "read",
+      "title": "list objects"
+    },
+    "netbox_list_scripts": {
+      "tier": "read",
+      "title": "list scripts"
+    },
+    "netbox_lookup_ip": {
+      "tier": "read",
+      "title": "lookup ip"
+    },
+    "netbox_lookup_mac": {
+      "tier": "read",
+      "title": "lookup mac"
+    },
+    "netbox_next_available_asns": {
+      "tier": "read",
+      "title": "next available asns"
+    },
+    "netbox_next_available_ips": {
+      "tier": "read",
+      "title": "next available ips"
+    },
+    "netbox_next_available_prefixes": {
+      "tier": "read",
+      "title": "next available prefixes"
+    },
+    "netbox_next_available_vlans": {
+      "tier": "read",
+      "title": "next available vlans"
+    },
+    "netbox_power_trace": {
+      "tier": "read",
+      "title": "power trace"
+    },
+    "netbox_prefix_utilization": {
+      "tier": "read",
+      "title": "prefix utilization"
+    },
+    "netbox_rack_elevation": {
+      "tier": "read",
+      "title": "rack elevation"
+    },
+    "netbox_render_config": {
+      "tier": "read",
+      "title": "render config"
+    },
+    "netbox_run_script": {
+      "tier": "write",
+      "title": "run script"
+    },
+    "netbox_search": {
+      "tier": "read",
+      "title": "search"
+    },
+    "netbox_search_spec": {
+      "tier": "read",
+      "title": "search spec"
+    },
+    "netbox_service_lookup": {
+      "tier": "read",
+      "title": "service lookup"
+    },
+    "netbox_site_summary": {
+      "tier": "read",
+      "title": "site summary"
+    },
+    "netbox_status": {
+      "tier": "read",
+      "title": "status"
+    },
+    "netbox_tenant_summary": {
+      "tier": "read",
+      "title": "tenant summary"
+    },
+    "netbox_topology": {
+      "tier": "read",
+      "title": "topology"
+    },
+    "netbox_trace_cable": {
+      "tier": "read",
+      "title": "trace cable"
+    },
+    "netbox_tunnel_summary": {
+      "tier": "read",
+      "title": "tunnel summary"
+    },
+    "netbox_update_object": {
+      "tier": "write",
+      "title": "update object"
+    },
+    "netbox_vlan_lookup": {
+      "tier": "read",
+      "title": "vlan lookup"
+    },
+    "netbox_whats_connected": {
+      "tier": "read",
+      "title": "whats connected"
+    },
+    "netbox_wireless_lookup": {
+      "tier": "read",
+      "title": "wireless lookup"
+    }
+  },
+  "prompts": {}
+}
