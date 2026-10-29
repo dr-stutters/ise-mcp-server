@@ -102,12 +102,26 @@ async def test_import_trusted_cert(mock: respx.MockRouter) -> None:
     mock.get("/api/v1/certs/trusted-certificate").respond(json={"response": []})
     post = mock.post("/api/v1/certs/trusted-certificate/import").respond(json={"response": {"id": "t1"}})
     preview, applied = await two_step(
-        "ise_import_trusted_cert", {"name": "lab-ca", "certificate_pem": PEM, "trust_for": ["client_auth"]}
+        "ise_import_trusted_cert",
+        {"name": "lab-ca", "certificate_pem": PEM, "trust_for": ["client_auth", "ise_auth"]},
     )
     assert "data" not in preview["preview"]
     body = json.loads(post.calls.last.request.content)
-    assert body["trustForClientAuth"] is True and "trustForIseAuth" not in body
+    assert body["trustForClientAuth"] is True and body["trustForIseAuth"] is True
+    assert "trustForCertificateBasedAdminAuth" not in body
     assert applied["status"] == "applied"
+
+
+async def test_import_trusted_cert_client_auth_needs_ise_auth(mock: respx.MockRouter) -> None:
+    """ISE answers 417 to client_auth without ise_auth (#169): blocked in the preview, nothing sent."""
+    mock.get("/api/v1/certs/trusted-certificate").respond(json={"response": []})
+    post = mock.post("/api/v1/certs/trusted-certificate/import").respond(json={"response": {"id": "t1"}})
+    preview, applied = await two_step(
+        "ise_import_trusted_cert", {"name": "lab-ca", "certificate_pem": PEM, "trust_for": ["client_auth"]}
+    )
+    assert preview["status"] == "blocked"
+    assert any("ise_auth" in b and "417" in b for b in preview["blockers"])
+    assert applied is None and not post.called
 
 
 async def test_import_trusted_cert_refuses_unsafe_description(mock: respx.MockRouter) -> None:

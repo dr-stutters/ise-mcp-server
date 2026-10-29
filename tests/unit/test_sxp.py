@@ -184,14 +184,109 @@ async def test_list_sxp_bindings(mock: respx.MockRouter) -> None:
     assert out["results"][0]["domains"] == ["default", "dc"]
 
 
+def ts_nad(nid: str, name: str, ip: str, *, trustsec: bool = True, push: bool = True) -> dict[str, Any]:
+    nad: dict[str, Any] = {
+        "id": nid,
+        "name": name,
+        "NetworkDeviceIPList": [{"ipaddress": ip, "mask": 32}],
+        "NetworkDeviceGroupList": ["Location#All Locations#Lab", "Device Type#All Device Types#Switch"],
+    }
+    if trustsec:
+        nad["trustsecsettings"] = {
+            "deviceAuthenticationSettings": {"sgaDeviceId": name},
+            "sgaNotificationAndUpdates": {"sendConfigurationToDevice": push},
+        }
+    return {"NetworkDevice": nad}
+
+
+PUSH_NADS = [
+    ts_nad("n1", "edge-a", "192.0.2.11"),
+    ts_nad("n2", "edge-b", "192.0.2.12"),
+    ts_nad("n3", "radius-only", "192.0.2.13", trustsec=False),
+    ts_nad("n4", "edge-nopush", "192.0.2.14", push=False),
+]
+
+
+def push_routes(mock: respx.MockRouter, nads: list[dict[str, Any]] = PUSH_NADS) -> respx.Route:
+    mock.get("/ers/config/networkdevice").respond(
+        json=ers_page([{"id": n["NetworkDevice"]["id"], "name": n["NetworkDevice"]["name"]} for n in nads])
+    )
+    for n in nads:
+        mock.get(f"/ers/config/networkdevice/{n['NetworkDevice']['id']}").respond(json=n)
+    return mock.put("/api/v1/trustsec/coa/push").respond(json={"success": {"message": "ok"}})
+
+
 async def test_push_trustsec_matrix(mock: respx.MockRouter) -> None:
-    push = mock.put("/api/v1/trustsec/coa/push").respond(json={"success": {"message": "ok"}})
+    push = push_routes(mock)
     preview, applied = await two_step(
         "ise_push_trustsec_matrix", {"coa_type": "SGACL"}, mcp_enable_dangerous=True
     )
     assert preview["status"] == "preview"
+    assert preview["blast_radius"] == 2
+    details = preview["preview"]
+    assert details["trustsec_devices"] == 2
+    assert [d["name"] for d in details["devices"]] == ["edge-a", "edge-b"]
+    assert details["devices"][0]["ips"] == ["192.0.2.11/32"]
+    assert "Location#All Locations#Lab" in details["devices"][0]["groups"]
+    assert "cts refresh policy" in details["one_device_instead"]
+    assert details["trustsec_without_push"]["names"] == ["edge-nopush"]
     assert json.loads(push.calls.last.request.content) == {"coaType": "SGACL"}
     assert applied["status"] == "applied"
+
+
+MATRICES = {
+    "response": [
+        {
+            "matrixUuId": "00000000-0000-4000-8000-000000000001",
+            "name": "Production",
+            "noOfNads": 0,
+            "matrixPolicyType": "TRUSTSEC_POLICY",
+            "type": "PRODUCTION",
+            "ndgList": [],
+            "nadList": [],
+        },
+        {
+            "matrixUuId": "00000000-0000-4000-8000-000000000002",
+            "name": "Staging",
+            "noOfNads": 1,
+            "matrixPolicyType": "TRUSTSEC_POLICY",
+            "type": "STAGING",
+            "ndgList": [],
+            "nadList": ["edge-b"],
+        },
+    ],
+    "version": "1.0.0",
+}
+
+
+async def test_push_trustsec_matrix_with_matrix_sends_matrix_id(mock: respx.MockRouter) -> None:
+    push = push_routes(mock)
+    mock.get("/api/v1/trustsec/matrix").respond(json=MATRICES)
+    preview, _ = await two_step("ise_push_trustsec_matrix", {"matrix": "staging"}, mcp_enable_dangerous=True)
+    assert preview["status"] == "preview" and preview["blast_radius"] == 1
+    assert [d["name"] for d in preview["preview"]["devices"]] == ["edge-b"]
+    assert preview["preview"]["matrix"]["type"] == "STAGING"
+    assert json.loads(push.calls.last.request.content) == {
+        "coaType": "POLICY",
+        "matrixId": "00000000-0000-4000-8000-000000000002",
+    }
+
+
+async def test_push_trustsec_matrix_unknown_matrix(mock: respx.MockRouter) -> None:
+    push_routes(mock)
+    mock.get("/api/v1/trustsec/matrix").respond(json=MATRICES)
+    async with Client(make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)) as c:
+        r = await c.call_tool("ise_push_trustsec_matrix", {"matrix": "nope"}, raise_on_error=False)
+    assert r.is_error and "Production" in str(r.content)
+
+
+async def test_push_trustsec_matrix_ers_down_is_not_counted(mock: respx.MockRouter) -> None:
+    mock.get("/ers/config/networkdevice").respond(401, json={"message": "ERS disabled"})
+    mock.put("/api/v1/trustsec/coa/push").respond(json={"success": {"message": "ok"}})
+    preview, _ = await two_step("ise_push_trustsec_matrix", {}, mcp_enable_dangerous=True)
+    assert preview["status"] == "preview"
+    assert "blast_radius" not in preview or preview["blast_radius"] is None
+    assert "could not all be listed" in json.dumps(preview)
 
 
 async def test_set_ip_sgt_deploy_all_preview_shows_removed_target(mock: respx.MockRouter) -> None:

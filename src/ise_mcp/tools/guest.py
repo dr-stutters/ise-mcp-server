@@ -13,7 +13,14 @@ ERS quirks (ISE 3.5, checked live):
   must equal the calendar days between the two dates, and the guest type's maximum duration is enforced.
 - Extending is a full PUT with a new toDate/validDays; suspend (`/suspend/{id}` with an optional reason)
   and reinstate (`/reinstate/{id}`) are PUTs. guestlocation and sponsorgroupmember are list-only.
-- Guest passwords: returned once by ise_create_guest_user on confirm and never shown anywhere else.
+- Guest passwords: returned once by ise_create_guest_user / ise_reset_guest_password on confirm and
+  never shown anywhere else (not in previews, audit events or the other tools).
+- Service-desk operations (I72), PUTs of the same unlisted class as suspend/reinstate (Cisco ERS SDK):
+  `resetpassword/{id}` (ISE generates the password; OperationResult resultValue carries it),
+  `email/{id}/portalId/{portalId}` and `sms/{id}/portalId/{portalId}` (send the account details with the
+  portal's notification template; optional additionalData senderEmail), `approve/{id}` and `deny/{id}`
+  (self-registered guests in PENDING_APPROVAL). The sponsor group's permissions (canResetGuestPasswords,
+  canSendSmsNotifications, canApproveSelfregGuests) decide whether ISE accepts each.
 - Portal pages, themes and most portal settings stay in the GUI; the tools read the key settings.
 """
 
@@ -68,8 +75,10 @@ STATUS_HINTS = {
     "SUSPENDED": "Suspended by a sponsor: logins fail until ise_reinstate_guest_user",
     "EXPIRED": "Past valid_to: logins fail (ise_extend_guest_user, or create a new account)",
     "DENIED": "A self-registration request a sponsor denied",
-    "PENDING_APPROVAL": "A self-registered guest waiting for sponsor approval (GUI or sponsor portal)",
+    "PENDING_APPROVAL": "A self-registered guest waiting for sponsor approval (ise_approve_guest)",
 }
+# Statuses a sponsor can't reset the password of or notify (no usable account behind them yet / any more).
+NOT_ISSUED = ("PENDING_APPROVAL", "DENIED")
 PORTAL_KINDS = {
     "sponsor": "sponsorportal",
     "sponsored_guest": "sponsoredguestportal",
@@ -342,6 +351,21 @@ def new_password(length: int = 10) -> str:
     chars += [secrets.choice(PW_LOWER + PW_UPPER) for _ in range(length - len(chars))]
     secrets.SystemRandom().shuffle(chars)
     return "".join(chars)
+
+
+def reset_password_value(data: Any) -> str | None:
+    """The new password from resetpassword's OperationResult ({"resultValue": [{"name": "password",
+    "value": ...}]}); a lone unnamed value counts too. None when ISE returned none."""
+    if not isinstance(data, dict):
+        return None
+    result = data.get("OperationResult", data)
+    values = result.get("resultValue") if isinstance(result, dict) else None
+    if isinstance(values, dict):
+        values = [values]
+    items = [v for v in values or [] if isinstance(v, dict) and v.get("value") not in (None, "")]
+    named = [v for v in items if str(v.get("name") or "").lower() == "password"]
+    pick = named or (items if len(items) == 1 else [])
+    return str(pick[0]["value"]) if pick else None
 
 
 def match_names(wanted: list[str], available: list[str], what: str) -> tuple[list[str], list[str]]:
@@ -862,6 +886,177 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         Preview-first."""
         return await _set_suspended(
             ctx, tool="ise_reinstate_guest_user", user=user, suspend=False, reason=None, confirm=confirm
+        )
+
+    # --- write: service desk (sponsor, I72) -------------------------------------------------------
+
+    @reg.write(title="Reset a guest's password")
+    async def ise_reset_guest_password(
+        ctx: Context,
+        user: Annotated[str, Field(description="Guest username or id")],
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Reset a guest account's password as the sponsor ("I lost my password"): ISE generates a new one
+        under the guest password policy and the old one stops working. On confirm the result carries the
+        new password, the only time it is shown (not in the preview or the audit log); hand it to the
+        guest or send it with ise_notify_guest. Needs the sponsor group's 'reset guest passwords'
+        permission. Preview-first."""
+        app: IseApp = get_client(ctx)
+        current = await resolve_guest(app, user)
+        status = str(current.get("status") or "")
+        blockers: list[str] = []
+        if status in NOT_ISSUED:
+            blockers.append(
+                f"The account is {status}: approve it first (ise_approve_guest)"
+                if status == "PENDING_APPROVAL"
+                else f"The account is {status}: there is no password to reset"
+            )
+        name = current.get("name")
+        gid = quote(str(current["id"]), safe="")
+
+        async def apply() -> dict[str, Any]:
+            data = await app.sponsor_request("PUT", f"/ers/config/guestuser/resetpassword/{gid}")
+            secret = reset_password_value(data)
+            out: dict[str, Any] = {"username": name, "password": secret}
+            out["note"] = (
+                "The new password is shown only now; ISE and these tools never show it again."
+                if secret
+                else "ISE reset the password but returned none: send it to the guest with "
+                "ise_notify_guest, or view it in the sponsor portal (needs 'view guest passwords')."
+            )
+            return out
+
+        return await preview_or_apply(
+            ctx,
+            tool="ise_reset_guest_password",
+            args={"user": user},
+            confirm=confirm,
+            plan=Plan(
+                f"Reset the password of guest account {name}",
+                details={
+                    **compact(
+                        {
+                            "sponsor": app.sponsor_username,
+                            "status": status,
+                            "valid_to": (current.get("guestAccessInfo") or {}).get("toDate"),
+                        }
+                    ),
+                    # Outside compact(), which masks any 'password' key.
+                    "password": "generated by ISE, returned once on confirm",
+                },
+                blockers=blockers,
+                side_effects=[
+                    "The old password stops working at once",
+                    "Sessions already connected stay up until they re-authenticate",
+                ],
+                fingerprint=fingerprint(current),
+            ),
+            apply=apply,
+        )
+
+    @reg.write(title="Send a guest their account details")
+    async def ise_notify_guest(
+        ctx: Context,
+        user: Annotated[str, Field(description="Guest username or id")],
+        via: Annotated[
+            Literal["email", "sms"], Field(description="email (the guest's address) or sms (mobile number)")
+        ] = "email",
+        sender_email: Annotated[
+            str | None, Field(description="From address for the email; default the portal's setting")
+        ] = None,
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Send a guest their account details (username, password, validity) by email or SMS as the
+        sponsor, with the sponsor portal's notification template ("resend my credentials"). ISE needs an
+        SMTP server (email) or an SMS gateway (sms) configured, and SMS needs the sponsor group's 'send SMS
+        notifications' permission; ISE's notification log shows the delivery. Preview-first."""
+        app: IseApp = get_client(ctx)
+        if sender_email and via != "email":
+            raise InvalidRequest("sender_email goes with via='email'")
+        current = await resolve_guest(app, user)
+        info = current.get("guestInfo") or {}
+        status = str(current.get("status") or "")
+        to = info.get("emailAddress") if via == "email" else info.get("phoneNumber")
+        blockers: list[str] = []
+        if not to:
+            field = "email" if via == "email" else "phone"
+            blockers.append(f"The account has no {field}: set one with ise_update_guest_user({field}=...)")
+        if status in NOT_ISSUED:
+            blockers.append(f"The account is {status}: there are no credentials to send")
+        portal = await sponsor_portal_id(app)
+        gid = quote(str(current["id"]), safe="")
+        path = f"/ers/config/guestuser/{via}/{gid}/portalId/{quote(portal, safe='')}"
+        body: Any = (
+            {"OperationAdditionalData": {"additionalData": [{"name": "senderEmail", "value": sender_email}]}}
+            if sender_email
+            else None
+        )
+        return await preview_or_apply(
+            ctx,
+            tool="ise_notify_guest",
+            args={"user": user, "via": via, "sender_email": sender_email},
+            confirm=confirm,
+            plan=Plan(
+                f"Send guest {current.get('name')} their account details by {via}",
+                details=compact(
+                    {
+                        "sponsor": app.sponsor_username,
+                        "to": to,
+                        "status": status,
+                        "sender_email": sender_email,
+                        "sponsor_portal": portal,
+                    }
+                ),
+                blockers=blockers,
+                side_effects=[
+                    f"ISE sends an {via} with the portal's template (it usually includes the password)",
+                ],
+                fingerprint=fingerprint(current),
+            ),
+            apply=lambda: app.sponsor_request("PUT", path, json=body),
+        )
+
+    @reg.write(title="Approve or deny a self-registered guest")
+    async def ise_approve_guest(
+        ctx: Context,
+        user: Annotated[str, Field(description="Guest username or id (ise_list_guest_users status=...)")],
+        approve: Annotated[bool, Field(description="True approves the request, False denies it")] = True,
+        confirm: Confirm = None,
+    ) -> dict[str, Any]:
+        """Approve or deny a self-registered guest waiting for sponsor approval ("approve my visitor"):
+        find them with ise_list_guest_users(status='PENDING_APPROVAL'). Approved, the account becomes
+        usable and ISE sends the credentials as the self-registration portal is set to; denied, it moves to
+        DENIED and can't log in. Needs the sponsor group's 'approve self-registered guests' permission
+        (and, with 'only guests that named this sponsor', the guest must have named the sponsor).
+        Preview-first."""
+        app: IseApp = get_client(ctx)
+        current = await resolve_guest(app, user)
+        status = str(current.get("status") or "")
+        blockers: list[str] = []
+        if status != "PENDING_APPROVAL":
+            blockers.append(f"The account is not waiting for approval (status {status or 'unknown'})")
+        op = "approve" if approve else "deny"
+        verb = "Approve" if approve else "Deny"
+        side = (
+            ["The guest can log in until valid_to", "ISE sends the credentials as the portal is set to"]
+            if approve
+            else ["The account moves to DENIED; logins fail"]
+        )
+        return await preview_or_apply(
+            ctx,
+            tool="ise_approve_guest",
+            args={"user": user, "approve": approve},
+            confirm=confirm,
+            plan=Plan(
+                f"{verb} self-registered guest {current.get('name')}",
+                details=guest_row(current),
+                blockers=blockers,
+                side_effects=side,
+                fingerprint=fingerprint(current),
+            ),
+            apply=lambda: app.sponsor_request(
+                "PUT", f"/ers/config/guestuser/{op}/{quote(str(current['id']), safe='')}"
+            ),
         )
 
     @reg.write(title="Delete a guest account")

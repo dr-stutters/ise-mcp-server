@@ -14,6 +14,7 @@ import hashlib
 import os
 import re
 import secrets
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -58,6 +59,21 @@ TRUST_FIELDS = {
     "admin_auth": "trustForCertificateBasedAdminAuth",
     "cisco_services": "trustForCiscoServicesAuth",
 }
+# ISE refuses client_auth ('Trust for client authentication and Syslog') without ise_auth ('Trust for
+# authentication within ISE') with HTTP 417, so previews block it before anything is sent (#169).
+CLIENT_AUTH_NEEDS_ISE_AUTH = (
+    "ISE refuses client_auth without ise_auth (HTTP 417: 'Trust for client authentication and Syslog' "
+    "needs 'Trust for authentication within ISE'): add 'ise_auth' to trust_for"
+)
+
+
+def trust_for_blockers(trust_for: Sequence[str] | None) -> list[str]:
+    """Blockers for a trust_for set ISE would refuse."""
+    if trust_for is not None and "client_auth" in trust_for and "ise_auth" not in trust_for:
+        return [CLIENT_AUTH_NEEDS_ISE_AUTH]
+    return []
+
+
 CERT_ATTRIBUTES = Literal[
     "SUBJECT_COMMON_NAME",
     "SUBJECT_ALTERNATIVE_NAME",
@@ -601,8 +617,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
     ) -> dict[str, Any]:
         """Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client
         certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth).
-        Needed before ise_bind_certificate with a new CA. Preview-first; a certificate already in the
-        store is refused by ISE."""
+        Needed before ise_bind_certificate with a new CA. ISE requires ise_auth whenever client_auth is
+        set (it answers 417 otherwise), so client_auth alone is blocked in the preview. Preview-first; a
+        certificate already in the store is refused by ISE."""
         app: IseApp = get_client(ctx)
         if description and not SAFE_TEXT.fullmatch(description):
             raise InvalidRequest(
@@ -619,7 +636,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             [f"A trusted certificate named {name!r} exists"]
             if any(c.get("friendlyName") == name for c in existing)
             else []
-        )
+        ) + trust_for_blockers(trust_for)
         body: dict[str, Any] = {
             "name": name,
             "data": certs[0],
@@ -921,7 +938,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
     ) -> dict[str, Any]:
         """Change a trusted (CA) certificate in ISE's trust store: what it is trusted for (the 'Trust for
         client authentication' flag is the classic EAP-TLS 'unknown CA' fix), enable/disable it, and
-        revocation checking (CRL download from a distribution URL, OCSP). Only the given settings change;
+        revocation checking (CRL download from a distribution URL, OCSP). A trust_for with client_auth
+        but not ise_auth is blocked (ISE refuses it with 417). Only the given settings change;
         the preview diffs ISE's current settings against the PUT and is a no_change when nothing would.
         Disabling a CA that issued a node's in-use Admin or EAP certificate is blocked. Turning on CRL
         checking without crl_bypass_if_not_received rejects this CA's client certificates until the first
@@ -970,6 +988,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             blockers: list[str] = []
             side: list[str] = []
             if trust_for is not None:
+                blockers.extend(trust_for_blockers(trust_for))
                 for flag in TRUST_FIELDS.values():
                     desired[flag] = False
                 for t in trust_for:

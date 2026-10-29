@@ -300,7 +300,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-185 tools and 14 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+188 tools and 14 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 96 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -410,6 +410,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | Tool | What it does |
 |---|---|
 | `ise_add_ad_groups` | Make AD groups usable in policy: after this, '<join point>:ExternalGroups EQUALS <group name>' conditions accept them (ise_create_authz_rule). |
+| `ise_approve_guest` | Approve or deny a self-registered guest waiting for sponsor approval ("approve my visitor"): find them with ise_list_guest_users(status='PENDING_APPROVAL'). |
 | `ise_approve_pxgrid_client` | Approve a pending pxGrid client so it can look up and subscribe to ISE's pxGrid services (sessions, TrustSec, ANC). |
 | `ise_bulk_endpoints` | Create, update or delete many endpoints in one ISE bulk task (e.g. |
 | `ise_bulk_internal_users` | Create, update or delete many internal users with one preview, such as a batch of contractor accounts with an expiry date or a cleanup. |
@@ -436,9 +437,11 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_generate_csr` | Have ISE generate a key pair and a certificate signing request (one per node). |
 | `ise_import_trusted_cert` | Add a CA certificate to ISE's trusted store, so ISE accepts certificates it issued: client certificates for EAP-TLS (client_auth), CA-signed node certificates being bound (ise_auth). |
 | `ise_issue_pxgrid_client_cert` | Issue the certificate an external pxGrid consumer (FMC, a SIEM) authenticates to ISE with. |
+| `ise_notify_guest` | Send a guest their account details (username, password, validity) by email or SMS as the sponsor, with the sponsor portal's notification template ("resend my credentials"). |
 | `ise_patch_readiness` | Run ISE's own patch / upgrade / rollback pre-checks on the whole deployment and report each check per node as pass / warn / fail with the fix ISE names, and `ready` ('is this deployment ready for patch N?'). |
 | `ise_reinstate_guest_user` | Reinstate a suspended guest account as the sponsor (logins work again until valid_to). |
 | `ise_release_rejected_endpoint` | Release endpoints from ISE's rejected list (Context Visibility > Rejected Endpoints), e.g. |
+| `ise_reset_guest_password` | Reset a guest account's password as the sponsor ("I lost my password"): ISE generates a new one under the guest password policy and the old one stops working. |
 | `ise_run_snmp_scan` | Run a profiler SNMP scan now (start), stop one that is running, or enable / disable scans. |
 | `ise_set_allowed_protocols` | Create an allowed-protocols service (the one a policy set selects) from a hardening preset, or harden or adjust an existing one. |
 | `ise_set_cert_auth_profile` | A certificate authentication profile tells ISE how to read an EAP-TLS client certificate: which field is the username, and optionally which identity store to look it up in. |
@@ -638,8 +641,12 @@ group with REST access (`ise_set_sponsor_group rest_access=true`; AD groups need
 first). `ise_status` and `ise-mcp-server check` show whether ISE accepts it (the password only as set).
 Then `ise_create_guest_user` -> `ise_list_guest_users` / `ise_get_guest_user` -> `ise_extend_guest_user`,
 `ise_update_guest_user`, `ise_suspend_guest_user` / `ise_reinstate_guest_user`, `ise_delete_guest_user`.
-The guest's password is returned once, on confirm of `ise_create_guest_user` (random unless given), and is
-masked everywhere else. A sponsor sees only the guests its group may manage (own, group or all). Guest
+Service desk: `ise_reset_guest_password` (ISE generates the new password), `ise_notify_guest` (resend the
+account details by email or SMS with the sponsor portal's template; needs ISE's SMTP server or SMS
+gateway), and `ise_list_guest_users status=PENDING_APPROVAL` -> `ise_approve_guest` (approve, or
+`approve=false` to deny, a self-registered guest). Each needs the matching sponsor group permission.
+The guest's password is returned once, on confirm of `ise_create_guest_user` (random unless given) or
+`ise_reset_guest_password`, and is masked everywhere else. A sponsor sees only the guests its group may manage (own, group or all). Guest
 dates are in the guest location's local time (`ISE_GUEST_TIMEZONE`; unset, new accounts start at "now" in
 UTC-12 so they are never in the future). Portal creation, pages and themes stay in the GUI.
 
