@@ -609,15 +609,17 @@ ISE 3.5 can pull a REST CMDB (NetBox, ServiceNow, any JSON source) on a schedule
 endpoints its attributes (role, site, owner), so IoT and OT devices are authorized from the source of truth
 instead of profiling guesses. `ise_set_pxgrid_direct_connector` creates or updates the connector: the bulk
 (and optional incremental) URL, the top-level object holding the records (`results` for NetBox), the unique
-identifier (`id`), the correlation identifier (the record attribute with the endpoint MAC), the attribute
-mapping (dictionary attribute -> record attribute), the sync schedule and the CoA on change. The token or
+identifier (a string attribute such as NetBox `name` or `serial`: ISE 3.5 leaves a sync keyed on a numeric
+id such as NetBox `id` at SCH_INPROGRESS), the correlation identifier (the record attribute with the endpoint
+MAC), the attribute mapping (dictionary attribute -> record attribute), the sync schedule (ISE starts it on
+a 5-minute mark; the preview rounds the same way) and the CoA on change. The token or
 password comes from an `ISE_PXGRID_DIRECT_<NAME>` server variable and is never shown; an apikey connector
 sends it as `Authorization: Token <token>` by default (NetBox; `token_scheme='Bearer'` for v2 tokens).
-`ise_test_pxgrid_direct` has ISE fetch the URL now (record count and the first record), and
-`ise_pxgrid_direct_status` shows the connectors, their last sync (INPROGRESS, QUEUED, SYNC COMPLETED,
-ERRORED) and one record as ISE holds it. Authorization rules then match `<connector>:<attribute>`;
+`ise_test_pxgrid_direct` has ISE fetch the URL now (record count and the first record; it warns when the
+unique id is a number), and `ise_pxgrid_direct_status` shows the connectors, their last sync (INPROGRESS,
+QUEUED, SCH_INPROGRESS, SYNC COMPLETED, ERRORED) and one record as ISE holds it. Authorization rules then match `<connector>:<attribute>`;
 `ise_delete_object(kind='pxgrid_direct_connector')` removes a connector. ISE does the pulling: the server
-subscribes to nothing. ISE must trust the CMDB's certificate chain.
+subscribes to nothing. With an https URL ISE must trust the CMDB's certificate chain.
 
 ### Active Directory
 `ise_create_ad_join_point` (the join point name becomes the policy dictionary, e.g. `CORP:ExternalGroups`) ->
