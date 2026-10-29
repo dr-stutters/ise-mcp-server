@@ -175,6 +175,11 @@ async def test_list_config_reads(mock: respx.MockRouter) -> None:
     groups = await call_tool(server, "ise_list_sponsor_groups", {"response_format": "json"})
     g = groups["results"][0]
     assert g["manage"] == "own" and g["rest_access"] is True and g["ad_members"]
+    # I44: markdown keeps id and description (the rows have more than 10 keys)
+    md_types = str(await call_tool(server, "ise_list_guest_types", {}))
+    assert DAILY_ID in md_types and "just 1-5 days" in md_types
+    md_groups = str(await call_tool(server, "ise_list_sponsor_groups", {}))
+    assert SG_ID in md_groups and "test sponsors" in md_groups
     portals = await call_tool(
         server, "ise_list_guest_portals", {"kind": "sponsor", "response_format": "json"}
     )

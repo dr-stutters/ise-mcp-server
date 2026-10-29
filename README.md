@@ -200,7 +200,36 @@ so install from a release wheel rather than `git+https://...`.
 | `MCP_CACHE_DIR` | `~/.cache/ise-mcp-server` | Spec index cache (`""` disables) |
 | `MCP_MAX_RESPONSE_CHARS` | `40000` | Response size budget |
 | `MCP_AUDIT_LOG` | `stderr` | `stderr`, a file path, or `off` |
+| `ISE_TOOLSETS` | all | Load only these tool areas, e.g. `troubleshoot,policy` or `-guest`. See [Loading only some tools](#loading-only-some-tools-ise_toolsets) |
 | `LOG_LEVEL` | `INFO` | |
+
+### Loading only some tools (`ISE_TOOLSETS`)
+
+With every tier on the server registers about 190 tools, and most clients load every description on every
+turn (some cap the number of tools). `ISE_TOOLSETS` registers only some areas, e.g.
+`ISE_TOOLSETS=troubleshoot,policy` for a help-desk laptop; `-guest` loads everything but one area; unset,
+empty or `all` loads everything (the default). The tier switches and `MCP_ALLOW_TOOLS` / `MCP_DENY_TOOLS`
+still apply on top (`policy` without `MCP_ENABLE_WRITES` is the policy reads). A tool in two areas loads
+when either is selected and is hidden when either is excluded. Always loaded: `ise_api_call`, `ise_compare_snapshot`, `ise_delete_object`, `ise_get_definition`, `ise_get_task`, `ise_search_spec`, `ise_snapshot`, `ise_status`. `ise_status`
+shows the setting, the areas loaded and not loaded, and any name no tool declares (`server.toolsets.unknown`;
+also logged at startup). Prompts are always registered. The table lives in `src/ise_mcp/toolsets.py`.
+
+| Toolset | Tools | Covers |
+|---|---|---|
+| `troubleshoot` | 16 | why can't X connect: auth history and failures, live sessions, accounting, RADIUS stats, CoA |
+| `policy` | 27 | policy sets, authentication and authorization rules, authorization profiles, dACLs, allowed protocols, conditions, where-used, policy audit and hit counts |
+| `network` | 10 | network access devices (NADs), network device groups, external RADIUS servers and sequences |
+| `identity` | 17 | internal users, identity groups, identity sources and sequences, certificate authentication profiles, Active Directory join points and groups |
+| `endpoints` | 11 | endpoints and endpoint groups, bulk import, custom attributes, rejected endpoints, MAC randomization |
+| `anc` | 5 | Adaptive Network Control: quarantine policies and the endpoints they are applied to |
+| `trustsec` | 19 | SGTs, SGACLs, the egress matrix, TrustSec settings and device report, IP-SGT, SXP, SD-Access virtual networks |
+| `guest` | 17 | guest types, sponsor groups, portals and locations, and guest accounts (as the sponsor) |
+| `device_admin` | 9 | TACACS+ device administration: command sets, shell profiles, TACACS servers and sequences |
+| `profiler` | 12 | profiling (profiles, custom rules, probes, re-profiling, SNMP scans) and posture policies |
+| `certs` | 10 | system and trusted certificates, CSRs, certificate import and binding |
+| `pxgrid` | 11 | pxGrid persona, clients and certificates, and pxGrid Direct connectors |
+| `admin` | 11 | the deployment itself: nodes and services, health, licences, patches and upgrade pre-checks, admin users and RBAC |
+| `backup` | 8 | repositories, backups, configuration export, diff and import |
 
 ## ISE account (least privilege)
 
