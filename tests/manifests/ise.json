@@ -48,6 +48,39 @@
         "win"
       ]
     },
+    "ise_cert_renewal": {
+      "arguments": [
+        "role",
+        "node",
+        "days",
+        "template",
+        "test_mac",
+        "change_ref"
+      ],
+      "references": [
+        "ise_list_nodes",
+        "ise_list_certificates",
+        "ise_list_csrs",
+        "ise_export_csr",
+        "ise_get_auth_history",
+        "ise_recent_auth_failures",
+        "ise_status",
+        "ise_generate_csr",
+        "ise_import_trusted_cert",
+        "ise_delete_csr",
+        "ise_bind_certificate",
+        "win_adcs_ca_info",
+        "win_list_ca_templates",
+        "win_sign_csr",
+        "win_get_ca_certificate"
+      ],
+      "rendered": true,
+      "tier": "write",
+      "uses": [
+        "ise",
+        "win"
+      ]
+    },
     "ise_deployment_health_review": {
       "arguments": [
         "cert_warn_days",

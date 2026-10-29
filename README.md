@@ -53,6 +53,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 - **Prompt `ise_deployment_health_review`** (read tier; fmc and catc rows when connected): a weekly or pre-change
   review as one ranked report: deployment health, certificate expiry across ISE, FMC and Catalyst Center with the
   renewal path per row, licence, pxGrid, AD join, SXP, the admin access review and NAD coverage of a site.
+- **Prompt `ise_cert_renewal`** (write tier; signing through the Windows_Server MCP when connected): an expiring
+  certificate renewed in a change window: CSR with the same subject, `win_sign_csr` or any CA, the chain in the
+  trust store, the bind (Admin restarts the application server: dangerous tier, previewed), then EAP-TLS checked.
 - **Certificate lifecycle with any CA**: CSR -> export -> sign -> trust -> bind, plus certificate profiles and
   identity sequences for EAP-TLS.
 - **TrustSec writes**: static IP-SGT mappings, SXP connections/bindings, the TrustSec CoA push and SSH deploy.
@@ -523,6 +526,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_deployment_health_review` | A weekly or pre-change review of the whole ISE deployment as one ranked report with next steps: ise_deployment_health (nodes, redundancy, patches, backup, certificates, licence, AD, admins), then certificate expiry (system and trusted), licence compliance, pxGrid (persona, certificate, pending clients), AD join per node, SXP connections and bindings, the admin access review (Super Admins, never-disabled, external), FMC's certificates and Catalyst Center's trust of the ISE certificate sorted by days left with the renewal path per row, and NAD coverage of a Catalyst Center site. |
 | `ise_phased_8021x_rollout` | Roll wired 802.1X out by Cisco's phases for one location NDG: a readiness gate from MnT (who fails, who only gets in by the open policy's Default rule, MAB endpoints with no profile or static group) and each switch's current mode from Catalyst Center, then per phase an ise_snapshot, the ISE side (monitor permits and logs, low-impact adds dACLs, closed makes the Default rule DenyAccess) through the preview-first write tools, the switch CLI printed or staged as a previewed template (never pushed), ise_compare_snapshot and the rollback. |
 | `ise_policy_change_review` | Review an authorization policy change before it is applied, to catch "this rule now matches everyone": ise_export_config as the baseline, ise_policy_explain on sample logins (each NAD with each access flow, plus real logins from MnT) before, the change as a preview only (the user approves it), then ise_diff_config against the baseline (only the previewed change may show), the same samples explained again, and a summary of who gains or loses access with the rollback. |
+| `ise_cert_renewal` | Renew an expiring ISE system certificate the way a change window does it: find what expires (ise_list_certificates) and the EAP-TLS baseline, generate a CSR with the same subject and SANs (ise_generate_csr, ise_export_csr), sign it at the lab CA with win_sign_csr (Windows_Server MCP; without it any CA, marked skipped), import the issuing chain (ise_import_trusted_cert), bind the signed certificate in the change window (ise_bind_certificate: the Admin role restarts the application server, dangerous and previewed), then verify the new certificate is in service and EAP-TLS still works (ise_get_auth_history, ise_recent_auth_failures). |
 | `suite_access_review` | Who can change what, on every connected platform: admin accounts, roles and the external groups that grant them on ISE, Catalyst Center, FMC, SD-WAN Manager and CML, with Active Directory resolving those groups to people. |
 | `suite_asbuilt_drift` | Has the documentation drifted from the wiring? |
 | `suite_change_check` | Did anything else break? |
@@ -613,15 +617,17 @@ ISE 3.5 can pull a REST CMDB (NetBox, ServiceNow, any JSON source) on a schedule
 endpoints its attributes (role, site, owner), so IoT and OT devices are authorized from the source of truth
 instead of profiling guesses. `ise_set_pxgrid_direct_connector` creates or updates the connector: the bulk
 (and optional incremental) URL, the top-level object holding the records (`results` for NetBox), the unique
-identifier (`id`), the correlation identifier (the record attribute with the endpoint MAC), the attribute
-mapping (dictionary attribute -> record attribute), the sync schedule and the CoA on change. The token or
+identifier (a string attribute such as NetBox `name` or `serial`: ISE 3.5 leaves a sync keyed on a numeric
+id such as NetBox `id` at SCH_INPROGRESS), the correlation identifier (the record attribute with the endpoint
+MAC), the attribute mapping (dictionary attribute -> record attribute), the sync schedule (ISE starts it on
+a 5-minute mark; the preview rounds the same way) and the CoA on change. The token or
 password comes from an `ISE_PXGRID_DIRECT_<NAME>` server variable and is never shown; an apikey connector
 sends it as `Authorization: Token <token>` by default (NetBox; `token_scheme='Bearer'` for v2 tokens).
-`ise_test_pxgrid_direct` has ISE fetch the URL now (record count and the first record), and
-`ise_pxgrid_direct_status` shows the connectors, their last sync (INPROGRESS, QUEUED, SYNC COMPLETED,
-ERRORED) and one record as ISE holds it. Authorization rules then match `<connector>:<attribute>`;
+`ise_test_pxgrid_direct` has ISE fetch the URL now (record count and the first record; it warns when the
+unique id is a number), and `ise_pxgrid_direct_status` shows the connectors, their last sync (INPROGRESS,
+QUEUED, SCH_INPROGRESS, SYNC COMPLETED, ERRORED) and one record as ISE holds it. Authorization rules then match `<connector>:<attribute>`;
 `ise_delete_object(kind='pxgrid_direct_connector')` removes a connector. ISE does the pulling: the server
-subscribes to nothing. ISE must trust the CMDB's certificate chain.
+subscribes to nothing. With an https URL ISE must trust the CMDB's certificate chain.
 
 ### Active Directory
 `ise_create_ad_join_point` (the join point name becomes the policy dictionary, e.g. `CORP:ExternalGroups`) ->
