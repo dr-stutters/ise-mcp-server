@@ -424,3 +424,97 @@ async def test_sponsor_401_names_the_sponsor_not_the_admin(mock: respx.MockRoute
     text = r.content[0].text
     assert r.is_error and "sponsor1" in text and "programmatic interface" in text
     assert "sponsor-secret" not in text
+
+
+# --- service desk (I72) --------------------------------------------------------------------------
+
+# Synthetic resetpassword answer, shaped like the ERS SDK's OperationResult for PUT resetpassword/{id}.
+RESET = {"OperationResult": {"resultValue": [{"name": "password", "value": "Kx48273fRq"}]}}
+
+
+async def test_reset_guest_password_returns_it_once(
+    mock: respx.MockRouter, caplog: pytest.LogCaptureFixture
+) -> None:
+    mock_guest(mock)
+    put = mock.put(f"/ers/config/guestuser/resetpassword/{GID}").respond(json=RESET)
+    with caplog.at_level("INFO", logger="stutters_mcp_core.audit"):
+        preview, done = await two_step("ise_reset_guest_password", {"user": "mcp-guest-alice"}, **SPONSOR)
+    assert preview["status"] == "preview" and "returned once" in preview["preview"]["password"]
+    assert not json.dumps(preview).count("Kx48273fRq") and "should-never-leak" not in json.dumps(preview)
+    assert done["result"]["password"] == "Kx48273fRq" and done["result"]["username"] == "mcp-guest-alice"
+    assert put.calls.last.request.headers["authorization"] == SPONSOR_AUTH
+    assert "applied" in caplog.text and "Kx48273fRq" not in caplog.text
+
+
+async def test_reset_password_without_value_and_blocked_when_pending(mock: respx.MockRouter) -> None:
+    mock_guest(mock)
+    mock.put(f"/ers/config/guestuser/resetpassword/{GID}").respond(204)
+    _, done = await two_step("ise_reset_guest_password", {"user": "mcp-guest-alice"}, **SPONSOR)
+    assert done["result"]["password"] is None and "ise_notify_guest" in done["result"]["note"]
+    mock_guest(mock, guest(status="PENDING_APPROVAL"))
+    blocked, _ = await two_step("ise_reset_guest_password", {"user": "mcp-guest-alice"}, **SPONSOR)
+    assert blocked["status"] == "blocked" and "ise_approve_guest" in json.dumps(blocked["blockers"])
+
+
+async def test_notify_guest_email_and_sms(mock: respx.MockRouter) -> None:
+    mock_config(mock)
+    mock_guest(mock)
+    email = mock.put(f"/ers/config/guestuser/email/{GID}/portalId/{PORTAL_ID}").respond(204)
+    preview, done = await two_step(
+        "ise_notify_guest",
+        {"user": "mcp-guest-alice", "via": "email", "sender_email": "desk@example.com"},
+        **SPONSOR,
+    )
+    assert preview["preview"]["to"] == "alice@example.com" and done["status"] == "applied"
+    assert json.loads(email.calls.last.request.content)["OperationAdditionalData"]["additionalData"] == [
+        {"name": "senderEmail", "value": "desk@example.com"}
+    ]
+    assert email.calls.last.request.headers["authorization"] == SPONSOR_AUTH
+    # The fixture guest has no phone number: SMS is blocked with the fix.
+    blocked, _ = await two_step("ise_notify_guest", {"user": "mcp-guest-alice", "via": "sms"}, **SPONSOR)
+    assert blocked["status"] == "blocked" and "phone" in json.dumps(blocked["blockers"])
+    with_phone = copy.deepcopy(GUEST)
+    with_phone["GuestUser"]["guestInfo"]["phoneNumber"] = "+15555550100"
+    mock_guest(mock, with_phone)
+    sms = mock.put(f"/ers/config/guestuser/sms/{GID}/portalId/{PORTAL_ID}").respond(204)
+    _, done = await two_step("ise_notify_guest", {"user": "mcp-guest-alice", "via": "sms"}, **SPONSOR)
+    assert done["status"] == "applied" and sms.called and not sms.calls.last.request.content
+
+
+async def test_approve_and_deny_pending_guest(mock: respx.MockRouter) -> None:
+    pending = guest(status="PENDING_APPROVAL")
+    listing = mock.get("/ers/config/guestuser").respond(
+        json=ers_page([{"id": GID, "name": "mcp-guest-alice"}])
+    )
+    mock_guest(mock, pending)
+    out = await call_tool(
+        make_server(**SPONSOR),
+        "ise_list_guest_users",
+        {"status": "PENDING_APPROVAL", "response_format": "json"},
+    )
+    assert "status.EQ.PENDING_APPROVAL" in str(listing.calls.last.request.url)
+    assert "ise_approve_guest" in out["results"][0]["status_meaning"]
+    approve = mock.put(f"/ers/config/guestuser/approve/{GID}").respond(204)
+    preview, done = await two_step("ise_approve_guest", {"user": "mcp-guest-alice"}, **SPONSOR)
+    assert preview["action"].startswith("Approve")
+    assert done["status"] == "applied" and approve.calls.last.request.headers["authorization"] == SPONSOR_AUTH
+    deny = mock.put(f"/ers/config/guestuser/deny/{GID}").respond(204)
+    _, done = await two_step("ise_approve_guest", {"user": "mcp-guest-alice", "approve": False}, **SPONSOR)
+    assert done["status"] == "applied" and deny.called
+
+
+async def test_approve_blocked_unless_pending(mock: respx.MockRouter) -> None:
+    mock_guest(mock)
+    blocked, _ = await two_step("ise_approve_guest", {"user": "mcp-guest-alice"}, **SPONSOR)
+    assert blocked["status"] == "blocked" and "not waiting" in json.dumps(blocked["blockers"])
+
+
+def test_reset_password_value_shapes() -> None:
+    from ise_mcp.tools.guest import reset_password_value
+
+    assert reset_password_value(RESET) == "Kx48273fRq"
+    assert reset_password_value({"OperationResult": {"resultValue": [{"value": "abc"}]}}) == "abc"
+    assert (
+        reset_password_value({"OperationResult": {"resultValue": {"name": "password", "value": "x"}}}) == "x"
+    )
+    assert reset_password_value(None) is None and reset_password_value({}) is None
