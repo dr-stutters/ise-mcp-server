@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.23.0 (2026-10-29)
+
+Guest service-desk actions (reset password, resend credentials, approve or deny self-registered guests), library conditions
+shared across network access and device admin, and fixes to trusted-certificate usages, the TrustSec matrix push preview and
+the session SGT. Core 0.20.0 (from 0.19.0). 188 tools (96 read, 68 write, 24 dangerous) and fourteen prompts.
+
+### Added
+- `ise_reset_guest_password`, `ise_notify_guest` (email/SMS) and `ise_approve_guest` (approve/deny self-registered guests
+  waiting for sponsor approval) (I72, #50, #174).
+- `ise_push_trustsec_matrix` previews the TrustSec devices the CoA reaches as its blast radius (and the ones it skips) and takes
+  an optional `matrix` (#169, #173).
+- Core v0.20.0: the `suite_segmentation_audit` prompt, undo steps, the backup-age rail and toolsets (#171).
+
+### Changed
+- `ise_find_session` reports the current SGT as `sgt` and labels MnT's stale `security_group` as `security_group_previous`
+  (#169, #173).
+- Conditions that ISE shares across network access and device admin are exported once (`kind: shared`), imported with a single
+  create, and deleted or updated through either kind's path; where-used lists each rule once (I57, #167, #172).
+
+### Fixed
+- `ise_import_trusted_cert` / `ise_set_trusted_cert` block `client_auth` without `ise_auth` in the preview (ISE answered 417)
+  (#169, #173).
+- Time-condition updates no longer promise a description change that ISE ignores (#167, #172).
+
 ## 0.22.0 (2026-10-28)
 
 pxGrid Direct connectors (a REST CMDB such as NetBox as an ISE endpoint attribute source), and fixes to the v0.21.0 RADIUS
