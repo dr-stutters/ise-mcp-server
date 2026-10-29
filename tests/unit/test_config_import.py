@@ -1,4 +1,5 @@
-"""I43: ise_import_config planning (empty and populated targets, prune, only, secrets) and apply."""
+"""I43: ise_import_config planning (empty and populated targets, prune, only, secrets) and apply.
+I50: parametrised bundles (variables, the shipped bundles)."""
 
 from __future__ import annotations
 
@@ -10,17 +11,20 @@ import pytest
 import respx
 from fastmcp import Client
 
-from ise_mcp._core import InvalidRequest, UpstreamError
+from ise_mcp._core import InvalidRequest, NotFound, UpstreamError
 from ise_mcp.client import IseApp
 from ise_mcp.tools.config_export import HEADER, export_config, load_export, resolve_scope, to_yaml
 from ise_mcp.tools.config_import import (
     ImportPlan,
     Step,
     apply_plan,
+    bundle_names,
     condition_api,
     given_changes,
     plan_import,
     plan_view,
+    read_bundle,
+    substitute,
 )
 from tests.unit.conftest import BASE, make_server, make_settings, xml
 from tests.unit.test_config_export import SECRETS, _uuid, lab_objects, serve
@@ -286,3 +290,166 @@ async def test_tool_is_dangerous_tier() -> None:
     async with Client(make_server(mcp_enable_writes=True)) as c:
         names = {t.name for t in await c.list_tools()}
     assert "ise_import_config" not in names and "ise_export_config" in names
+
+
+# --- I50: parametrised bundles ------------------------------------------------------------------
+
+BUNDLE_VARS: dict[str, dict[str, Any]] = {
+    "wired-dot1x-mab": {"site": "Site2", "vlan_employee": 20},
+    "guest": {"site": "Site2", "guest_ssid": "Site2-Guest"},
+    "device-admin": {"site": "Site2"},
+}
+LIBRARY = ["Wired_802.1X", "Wired_MAB", "Wireless_MAB", "Guest_Flow"]
+DICT_ATTRS = [
+    {"dictionaryName": "DEVICE", "name": "Location", "dataType": "STRING"},
+    {"dictionaryName": "IdentityGroup", "name": "Name", "dataType": "STRING"},
+    {"dictionaryName": "Radius", "name": "Called-Station-ID", "dataType": "STRING"},
+]
+
+
+def bundle_target(r: respx.MockRouter) -> None:
+    """lab_objects() plus what the bundles reference on a default ISE (library conditions, dictionaries,
+    the built-in profiles, SGTs, command sets and shell profiles) and an empty device-admin policy."""
+    serve(r, lab_objects())
+    for kind in ("network-access", "device-admin"):
+        base = f"/api/v1/policy/{kind}"
+        r.get(f"{base}/condition").respond(
+            json={"response": [{"id": _uuid(80 + i), "name": n} for i, n in enumerate(LIBRARY)]}
+        )
+        for scope in ("authorization", "authentication", "policyset"):
+            r.get(f"{base}/dictionaries/{scope}").respond(json={"response": DICT_ATTRS})
+    da = "/api/v1/policy/device-admin"
+    r.get(f"{da}/policy-set").respond(json={"response": []})
+    r.get(f"{da}/policy-set/global-exception").respond(json={"response": []})
+    for resource in ("time-condition", "network-condition"):
+        r.get(f"{da}/{resource}").respond(json={"response": []})
+    names = {
+        "network-access/authorization-profiles": ["DenyAccess", "PermitAccess"],
+        "network-access/security-groups": ["Employees", "Guests"],
+        "device-admin/command-sets": ["DenyAllCommands"],
+        "device-admin/shell-profiles": ["Deny All Shell Profile"],
+    }
+    for path, items in names.items():
+        r.get(f"/api/v1/policy/{path}").respond(json={"response": [{"name": n} for n in items]})
+
+
+async def plan_bundle(doc: dict[str, Any], **kw: Any) -> ImportPlan:
+    with router() as r:
+        bundle_target(r)
+        app = IseApp(make_settings())
+        try:
+            return await plan_import(app, doc, **kw)
+        finally:
+            await app.aclose()
+
+
+def test_substitute_replaces_values_and_lists_each_place() -> None:
+    doc = {
+        HEADER: {"format": 1, "bundle": "t", "variables": {"site": {}, "vlan": {"default": "${n}0"}, "n": 3}},
+        "sgts": [{"name": "${site}-Users", "value": "${tag:int}", "description": "$${literal} ${site}"}],
+        "authz_profiles": [{"name": "${site}-P", "vlan": {"nameID": "${vlan}", "tagID": 1}}],
+    }
+    out, sub = substitute(doc, {"site": "Site2", "tag": "17", "spare": "x"})
+    assert out["sgts"] == [{"name": "Site2-Users", "value": 17, "description": "${literal} Site2"}]
+    assert out["authz_profiles"][0]["vlan"] == {"nameID": "30", "tagID": 1}  # a default naming a default
+    assert out[HEADER] is doc[HEADER] and doc["sgts"][0]["name"] == "${site}-Users"  # input untouched
+    assert sub.blockers() == []
+    assert {"at": "sgts[0].name", "from": "${site}-Users", "to": "Site2-Users"} in sub.done
+    assert len(sub.done) == 5
+    view = sub.view()
+    # Only variables a placeholder names (n is used through vlan's default) and the given ones.
+    assert view["values"] == {"site": "Site2", "spare": "x", "tag": "17", "vlan": "30"}
+    assert view["defaults_used"] == ["vlan"] and view["unused"] == ["spare"]
+
+
+def test_substitute_unresolved_and_bad_values_block() -> None:
+    doc = {
+        HEADER: {"format": 1, "variables": {"ndg": {"default": "All Locations#${site}"}}},
+        "ndgs": [{"name": "Location#${ndg}"}],
+        "sgts": [{"name": "x-${vlan_employee}", "value": "${tag:int}"}, {"name": "${tag:int}-y"}],
+    }
+    out, sub = substitute(doc, {"tag": "seventeen", "bad-name": 1})
+    blockers = sub.blockers()
+    assert "Variable names must be letters, digits and _: bad-name" in blockers[0]
+    assert any("${tag:int} needs a whole number" in b for b in blockers)
+    assert any("${tag:int} must be the whole value" in b for b in blockers)
+    assert any(
+        b.startswith("Unresolved variable ${ndg} (at ndgs[0].name)") and "needs a value too" in b
+        for b in blockers
+    )
+    assert any(b.startswith("Unresolved variable ${vlan_employee} (at sgts[0].name)") for b in blockers)
+    assert out["ndgs"][0]["name"] == "Location#${ndg}"
+    assert sub.view()["unresolved"] == ["ndg", "vlan_employee"]
+
+
+def test_shipped_bundles_parse_and_declare_their_variables() -> None:
+    assert bundle_names() == sorted(BUNDLE_VARS)
+    for name, given in BUNDLE_VARS.items():
+        doc = read_bundle(name)
+        assert doc[HEADER]["bundle"] == name and doc[HEADER]["sections"]
+        assert set(doc) - {HEADER} == set(doc[HEADER]["sections"])
+        declared = doc[HEADER]["variables"]
+        required = {k for k, v in declared.items() if "default" not in v}
+        assert required == set(given), name  # the README rows name exactly these
+        out, sub = substitute(doc, given)
+        assert sub.blockers() == [] and sub.unused == []
+        assert "${" not in json.dumps({k: v for k, v in out.items() if k != HEADER})
+        _, missing = substitute(doc, None)
+        assert sorted(missing.unresolved) == sorted(required) or missing.open_defaults
+    with pytest.raises(NotFound):
+        read_bundle("no-such-bundle")
+    with pytest.raises(InvalidRequest):
+        read_bundle("../etc/passwd")
+
+
+@pytest.mark.parametrize("name", sorted(BUNDLE_VARS))
+async def test_each_bundle_plans_on_a_default_ise(name: str) -> None:
+    doc, sub = substitute(read_bundle(name), BUNDLE_VARS[name])
+    assert sub.blockers() == []
+    plan = await plan_bundle(doc)
+    assert plan.blockers == [], plan.blockers
+    steps = [(s.op, s.section, s.name) for s in plan.steps]
+    assert all(op in ("create", "update") for op, _, _ in steps)
+    assert ("create", "ndgs", "Location#All Locations#Site2") in steps
+    kind = "device-admin" if name == "device-admin" else "network-access"
+    sets = [n for op, sec, n in steps if sec == "policy_sets"]
+    suffix = {"wired-dot1x-mab": "Wired", "guest": "Guest", "device-admin": "Device-Admin"}[name]
+    assert sets == [f"{kind}/Site2-{suffix}"]
+    rules = [n for _, sec, n in steps if sec == "policy_rules"]
+    assert rules and all(r.startswith(sets[0] + "/") for r in rules)
+    # The Default rules of the new set are only ever updated (ISE creates them with the set).
+    assert all(op == "update" for op, sec, n in steps if sec == "policy_rules" and n.endswith("/Default"))
+    assert all("Site2" in n or n.endswith("/Default") for _, _, n in steps)
+
+
+async def test_bundle_blocks_on_unknown_reference_and_prune_without_only() -> None:
+    doc, _ = substitute(read_bundle("wired-dot1x-mab"), {**BUNDLE_VARS["wired-dot1x-mab"], "sgt": "Nope"})
+    plan = await plan_bundle(doc, prune=True)
+    assert any("no SGT 'Nope' on the target or in the import" in b for b in plan.blockers)
+    assert any(b.startswith("prune with a bundle needs `only`") for b in plan.blockers)
+
+
+async def test_tool_stamps_a_bundle_with_variables() -> None:
+    with router() as r:
+        bundle_target(r)
+        server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
+        async with Client(server) as c:
+            args: dict[str, Any] = {"source": "bundle:wired-dot1x-mab", "variables": {"site": "Site2"}}
+            blocked = (await c.call_tool("ise_import_config", args)).structured_content
+            assert blocked is not None and blocked["status"] == "blocked", blocked
+            assert any("Unresolved variable ${vlan_employee}" in b for b in blocked["blockers"])
+            assert blocked["preview"]["summary"]["create"] == 0  # not planned while unresolved
+            args["variables"]["vlan_employee"] = 20
+            preview = (await c.call_tool("ise_import_config", args)).structured_content
+    assert preview is not None and preview["status"] == "preview", preview
+    details = preview["preview"]
+    assert details["source"] == {"bundle": "wired-dot1x-mab", "version": 1}
+    subs = details["variables"]
+    assert subs["values"]["site"] == "Site2" and subs["values"]["vlan_devices"] == "20"
+    assert "ndg" in subs["defaults_used"]
+    assert {
+        "at": "authz_profiles[0].vlan.nameID",
+        "from": "${vlan_employee}",
+        "to": "20",
+    } in subs["substitutions"]
+    assert any(s["name"] == "network-access/Site2-Wired" for s in details["steps"])

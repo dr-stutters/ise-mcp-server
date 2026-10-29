@@ -9,9 +9,11 @@ secrets; NAD secrets are passed separately. Applying stops at the first failure 
 # No `from __future__ import annotations`: FastMCP inspects these signatures at runtime.
 
 import fnmatch
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -43,6 +45,7 @@ from ise_mcp.tools.config_export import (
     _moved,
     export_config,
     field_changes,
+    load_export,
     norm_matrix,
     read_source,
     resolve_scope,
@@ -1032,6 +1035,168 @@ def _rule_delete(app: IseApp, base: _SetPath, rule_id: str) -> Callable[[], Awai
     return run
 
 
+# --- parametrised bundles (I50) -----------------------------------------------------------------
+
+BUNDLE_DIR = Path(__file__).resolve().parent.parent / "bundles"
+BUNDLE_PREFIX = "bundle:"
+# ${name}, ${name:int} (the whole value becomes a number), or $${ for a literal ${.
+_PLACEHOLDER = re.compile(r"\$\$\{|\$\{([A-Za-z_][A-Za-z0-9_]*)(:int)?\}")
+_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SUBSTITUTION_LIST_CAP = 200
+_DEFAULT_PASSES = 5
+
+Variables = Annotated[
+    dict[str, str | int] | None,
+    Field(
+        description="Values for the ${name} placeholders of a parametrised bundle, e.g. {'site': 'Site2', "
+        "'vlan_employee': 20}; a bundle's header lists its variables and their defaults. Every placeholder "
+        "must resolve, and the preview lists each substitution. Secrets go in `secrets`, never here"
+    ),
+]
+
+
+def bundle_names() -> list[str]:
+    return sorted(p.stem for p in BUNDLE_DIR.glob("*.yaml"))
+
+
+def read_bundle(name: str) -> dict[str, Any]:
+    """A bundle shipped with the server (src/ise_mcp/bundles), by name."""
+    name = name.strip()
+    if not _VAR_NAME.fullmatch(name.replace("-", "_")):
+        raise InvalidRequest(f"Bundle name {name!r} is not valid")
+    path = BUNDLE_DIR / f"{name}.yaml"
+    if not path.is_file():
+        raise NotFound(f"No bundle {name!r}; shipped bundles: {', '.join(bundle_names()) or 'none'}", 404)
+    return load_export(path.read_text(encoding="utf-8"))
+
+
+@dataclass
+class Substitution:
+    values: dict[str, Any] = field(default_factory=dict)  # every variable's effective value
+    defaults_used: list[str] = field(default_factory=list)
+    unused: list[str] = field(default_factory=list)  # given, but no placeholder names it
+    done: list[dict[str, Any]] = field(default_factory=list)  # {at, from, to} per changed string
+    unresolved: dict[str, list[str]] = field(default_factory=dict)  # variable -> where
+    errors: list[str] = field(default_factory=list)
+    open_defaults: dict[str, str] = field(default_factory=dict)  # default naming a variable with no value
+
+    def blockers(self) -> list[str]:
+        out = list(self.errors)
+        for var, where in sorted(self.unresolved.items()):
+            shown = ", ".join(where[:5]) + (f" and {len(where) - 5} more" if len(where) > 5 else "")
+            why = (
+                f" (its default {self.open_defaults[var]!r} needs a value too)"
+                if var in self.open_defaults
+                else ""
+            )
+            out.append(f"Unresolved variable ${{{var}}} (at {shown}): give it in `variables`{why}")
+        return out
+
+    def view(self, cap: int = SUBSTITUTION_LIST_CAP) -> dict[str, Any]:
+        out: dict[str, Any] = {"values": self.values, "substitutions": self.done[:cap]}
+        if len(self.done) > cap:
+            out["substitutions_not_shown"] = len(self.done) - cap
+        if self.defaults_used:
+            out["defaults_used"] = self.defaults_used
+        if self.unused:
+            out["unused"] = self.unused
+        if self.unresolved:
+            out["unresolved"] = sorted(self.unresolved)
+        return out
+
+
+def declared_variables(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """A bundle header's `variables`: {name: {description, default?, example?}} (a bare value is a
+    default)."""
+    raw = doc[HEADER].get("variables") or {}
+    if not isinstance(raw, dict):
+        raise InvalidRequest(f"{HEADER}.variables must be a mapping of variable name to its description")
+    return {str(k): v if isinstance(v, dict) else {"default": v} for k, v in raw.items()}
+
+
+def _replace(
+    text: str, values: dict[str, Any], where: str, sub: Substitution, *, unescape: bool = True
+) -> Any:
+    """One string with its placeholders replaced (a ${name:int} that is the whole string -> int)."""
+    whole = _PLACEHOLDER.fullmatch(text)
+    if whole and whole.group(1) and whole.group(2):
+        var = whole.group(1)
+        if var not in values:
+            sub.unresolved.setdefault(var, []).append(where)
+            return text
+        try:
+            return int(str(values[var]).strip())
+        except ValueError:
+            sub.errors.append(f"{where}: ${{{var}:int}} needs a whole number, not {values[var]!r}")
+            return text
+
+    def one(m: re.Match[str]) -> str:
+        if m.group(0) == "$${":
+            return "${" if unescape else "$${"
+        var = m.group(1)
+        if m.group(2):
+            sub.errors.append(f"{where}: ${{{var}:int}} must be the whole value")
+            return m.group(0)
+        if var not in values:
+            sub.unresolved.setdefault(var, []).append(where)
+            return m.group(0)
+        return str(values[var])
+
+    return _PLACEHOLDER.sub(one, text)
+
+
+def _walk(obj: Any, values: dict[str, Any], where: str, sub: Substitution) -> Any:
+    if isinstance(obj, dict):
+        return {k: _walk(v, values, f"{where}.{k}" if where else str(k), sub) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_walk(v, values, f"{where}[{i}]", sub) for i, v in enumerate(obj)]
+    if isinstance(obj, str) and "${" in obj:
+        new = _replace(obj, values, where, sub)
+        if new != obj:
+            sub.done.append({"at": where, "from": obj, "to": new})
+        return new
+    return obj
+
+
+def substitute(doc: dict[str, Any], variables: dict[str, Any] | None) -> tuple[dict[str, Any], Substitution]:
+    """The export with every ${name} replaced from `variables` and the header's defaults. The header
+    itself is left as it is. Placeholders that stay unresolved are listed (a blocker)."""
+    sub = Substitution()
+    given = dict(variables or {})
+    bad = sorted(k for k in given if not _VAR_NAME.fullmatch(k))
+    if bad:
+        sub.errors.append(f"Variable names must be letters, digits and _: {', '.join(bad)}")
+    declared = declared_variables(doc)
+    values: dict[str, Any] = {k: v.get("default") for k, v in declared.items() if "default" in v}
+    sub.defaults_used = sorted(k for k in values if k not in given)
+    values.update(given)
+    # Defaults may name other variables ("${site}-EMPLOYEE"): resolve them a few passes deep.
+    for _ in range(_DEFAULT_PASSES):
+        scratch = Substitution()
+        values = {
+            k: _replace(v, values, f"{HEADER}.variables.{k}", scratch, unescape=False)
+            if isinstance(v, str)
+            else v
+            for k, v in values.items()
+        }
+        if not any(isinstance(v, str) and _names_in(v) for v in values.values()):
+            break
+    # A default that still names a variable with no value: the places using it are unresolved.
+    sub.open_defaults = {k: v for k, v in values.items() if isinstance(v, str) and _names_in(v)}
+    values = {k: v for k, v in values.items() if k not in sub.open_defaults}
+    body = {k: v for k, v in doc.items() if k != HEADER}
+    out = _walk(body, values, "", sub)
+    used = {var for d in sub.done for var in _names_in(d["from"])} | set(sub.unresolved)
+    sub.unused = sorted(k for k in given if k not in used)
+    sub.values = {k: values[k] for k in sorted(values) if k in used or k in given}
+    sub.defaults_used = [k for k in sub.defaults_used if k in used]
+    return {HEADER: doc[HEADER], **out}, sub
+
+
+def _names_in(text: str) -> set[str]:
+    return {m.group(1) for m in _PLACEHOLDER.finditer(text) if m.group(1)}
+
+
 # --- the whole plan -----------------------------------------------------------------------------
 
 
@@ -1058,6 +1223,11 @@ async def plan_import(
             plan.blockers.append(
                 "prune is refused for a partial export: it would delete what the export missed"
             )
+    if source[HEADER].get("bundle") and prune and not only:
+        plan.blockers.append(
+            "prune with a bundle needs `only` (e.g. ['Site2-*']): a bundle holds one site's objects, so a "
+            "prune without it would delete every other site's"
+        )
     nads = {str(n.get("name")) for n in source.get("nads") or []}
     unknown = sorted(k for k in secrets if k not in nads or "nads" not in wanted)
     if unknown:
@@ -1154,12 +1324,18 @@ def _label_cells(raw: list[dict[str, Any]], run: Export) -> list[dict[str, Any]]
     return out
 
 
+def _source_view(header: dict[str, Any]) -> dict[str, Any]:
+    if not header.get("bundle"):
+        return {k: header.get(k) for k in ("hostname", "exported_at", "digest")}
+    return {k: header[k] for k in ("bundle", "version") if header.get(k) is not None}
+
+
 def plan_view(plan: ImportPlan, source: dict[str, Any], cap: int = STEP_LIST_CAP) -> dict[str, Any]:
     counts = {op: sum(1 for s in plan.steps if s.op == op) for op in ("create", "update", "delete")}
     counts["unchanged"] = sum(plan.skipped.values())
     header = source[HEADER]
     out: dict[str, Any] = {
-        "source": {k: header.get(k) for k in ("hostname", "exported_at", "digest")},
+        "source": _source_view(header),
         "summary": counts,
         "steps": [{"#": i + 1, **s.view()} for i, s in enumerate(plan.steps[:cap])],
     }
@@ -1200,8 +1376,14 @@ def register(reg: ToolRegistrar) -> None:
     async def ise_import_config(
         ctx: Context,
         source: Annotated[
-            str, Field(description="An ise_export_config export: a path to its .yaml file, or the YAML text")
+            str,
+            Field(
+                description="An ise_export_config export or a parametrised bundle: a path to its .yaml file, "
+                "the YAML text, or 'bundle:<name>' for a bundle shipped with the server (wired-dot1x-mab, "
+                "guest, device-admin)"
+            ),
         ],
+        variables: Variables = None,
         scope: Scope = None,
         only: Annotated[
             list[str] | None,
@@ -1229,12 +1411,26 @@ def register(reg: ToolRegistrar) -> None:
         alone unless prune=true. NAD secrets are masked in exports, so pass them in `secrets`. The
         preview is the whole plan
         with field-level changes; confirm applies it step by step and stops at the first failure,
-        saying what was applied. Afterwards ise_diff_config(before=<the export>) should be empty."""
+        saying what was applied. Afterwards ise_diff_config(before=<the export>) should be empty.
+        Parametrised bundles (one policy per site): ${name} placeholders are replaced from `variables`
+        and the bundle's defaults before planning; the preview lists every substitution, and an
+        unresolved placeholder blocks the import."""
         app: IseApp = get_client(ctx)
-        doc = read_source(app.settings, source)
+        text = source.strip()
+        if text.startswith(BUNDLE_PREFIX) and "\n" not in text:
+            raw = read_bundle(text[len(BUNDLE_PREFIX) :])
+        else:
+            raw = read_source(app.settings, source)
+        doc, sub = substitute(raw, variables)
         sections = resolve_scope(scope) if scope else None
-        plan = await plan_import(app, doc, sections, only=only, prune=prune, secrets=secrets)
+        if sub.blockers():
+            # Planning a half-substituted bundle would only add noise: fix the variables first.
+            plan = ImportPlan(blockers=sub.blockers())
+        else:
+            plan = await plan_import(app, doc, sections, only=only, prune=prune, secrets=secrets)
         view = plan_view(plan, doc)
+        if sub.done or variables or sub.unresolved or sub.errors:
+            view["variables"] = sub.view()
         counts = view["summary"]
         summary = (
             f"Import {counts['create']} create, {counts['update']} update, {counts['delete']} delete "
@@ -1249,7 +1445,14 @@ def register(reg: ToolRegistrar) -> None:
         return await preview_or_apply(
             ctx,
             tool="ise_import_config",
-            args={"source": source, "scope": scope, "only": only, "secrets": secrets, "prune": prune},
+            args={
+                "source": source,
+                "variables": variables,
+                "scope": scope,
+                "only": only,
+                "secrets": secrets,
+                "prune": prune,
+            },
             confirm=confirm,
             plan=Plan(
                 summary,

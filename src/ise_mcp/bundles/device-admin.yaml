@@ -1,0 +1,105 @@
+# Branch device administration (TACACS+): full access for network admins, show-only for operators, for
+# the switches and routers in the site's location device group. Stamp it with
+# ise_import_config(source="bundle:device-admin", variables={"site": "Site2"}). Needs the Device Admin
+# service on the PSNs. Put admins in <site>-NetAdmins and operators in <site>-NetOps (internal users), or
+# change the conditions to AD groups after stamping. Keep a local login on every device: ISE is never the
+# only way in.
+ise_export:
+  format: 1
+  bundle: device-admin
+  version: 1
+  description: Branch TACACS+ device admin policy set (admins full access, operators show-only)
+  sections: [ndgs, identity_groups, command_sets, shell_profiles, policy_sets]
+  variables:
+    site:
+      description: Site name; prefixes every object this bundle creates
+      example: Site2
+    ndg:
+      description: The site's location device group, without the 'Location#' root
+      default: All Locations#${site}
+    identity_source:
+      description: Identity source or sequence for administrator logins
+      default: Internal Users
+ndgs:
+- name: Location#${ndg}
+  description: ${site} network devices
+  othername: Location
+identity_groups:
+- name: ${site}-NetAdmins
+  description: ${site} network administrators (full access)
+  parent: NAC Group:NAC:IdentityGroups:User Identity Groups
+- name: ${site}-NetOps
+  description: ${site} network operators (show commands only)
+  parent: NAC Group:NAC:IdentityGroups:User Identity Groups
+command_sets:
+- name: ${site}-PermitAll
+  description: ${site} admins - every command
+  permitUnmatched: true
+- name: ${site}-ShowOnly
+  description: ${site} operators - show commands only
+  commands:
+    commandList:
+    - arguments: .*
+      command: show
+      grant: PERMIT
+    - command: exit
+      grant: PERMIT
+    - arguments: .*
+      command: terminal
+      grant: PERMIT
+    - arguments: .*
+      command: ping
+      grant: PERMIT
+    - arguments: .*
+      command: traceroute
+      grant: PERMIT
+  permitUnmatched: false
+shell_profiles:
+- name: ${site}-Priv15
+  description: ${site} privilege 15 (commands limited by the command set)
+  sessionAttributes:
+    sessionAttributeList:
+    - name: priv-lvl
+      type: MANDATORY
+      value: '15'
+    - name: idletime
+      type: MANDATORY
+      value: '30'
+policy_sets:
+  device-admin:
+    sets:
+    - name: ${site}-Device-Admin
+      rank: 0
+      state: enabled
+      description: ${site} TACACS+ device admin (bundle device-admin)
+      condition: DEVICE:Location equals ${ndg}
+      isProxy: false
+      serviceName: Default Device Admin
+      authentication:
+      - name: Default
+        rank: 0
+        state: enabled
+        default: true
+        identitySourceName: ${identity_source}
+        ifAuthFail: REJECT
+        ifProcessFail: DROP
+        ifUserNotFound: REJECT
+      authorization:
+      - name: ${site}-NetAdmins
+        rank: 0
+        state: enabled
+        condition: IdentityGroup:Name equals User Identity Groups:${site}-NetAdmins
+        commands: ['${site}-PermitAll']
+        profile: ${site}-Priv15
+      - name: ${site}-NetOps
+        rank: 1
+        state: enabled
+        condition: IdentityGroup:Name equals User Identity Groups:${site}-NetOps
+        commands: ['${site}-ShowOnly']
+        profile: ${site}-Priv15
+      - name: Default
+        rank: 2
+        state: enabled
+        default: true
+        commands: [DenyAllCommands]
+        profile: Deny All Shell Profile
