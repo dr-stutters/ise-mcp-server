@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.24.0 (2026-10-29)
+
+Two workflow prompts (sponsored guest onboarding and certificate renewal), `ISE_TOOLSETS` to load only some tool areas, and
+pxGrid Direct connectors that create and update on ISE 3.5. Core stays 0.20.0. 188 tools (96 read, 68 write, 24 dangerous) and
+sixteen prompts.
+
+### Added
+- Prompt `ise_guest_onboarding` (write tier): sponsored guest readiness, CWA policy check, account (preview first),
+  credentials by email/SMS or hand-over, and session/auth-history verification, with the password never repeated (I48, #14,
+  #180).
+- Prompt `ise_cert_renewal`: renew an expiring ISE certificate end to end (CSR, `win_sign_csr` or any CA, chain import, bind
+  in a change window with the Admin restart previewed, EAP-TLS verified) (I52, #34, #179).
+- `ISE_TOOLSETS` loads only some tool areas (e.g. `troubleshoot,policy`, `-guest`) on core's toolsets mechanism, and
+  `ise_status` reports what was loaded and any unknown names (I44, #10, #181).
+
+### Changed
+- In markdown, the sponsor-group and guest-type lists keep `id` and `description`, and the TrustSec device report keeps
+  `push_id` and `pull_id` (I44, #10, #181).
+
+### Fixed
+- pxGrid Direct connectors now create and update on ISE 3.5 (`flexibleUrl` only, `jsonAttribute`/`dictionaryAttribute`
+  mapping), show their attribute mapping, and warn about numeric unique ids that leave syncs at `SCH_INPROGRESS` (#170, #177).
+
 ## 0.23.0 (2026-10-29)
 
 Guest service-desk actions (reset password, resend credentials, approve or deny self-registered guests), library conditions
