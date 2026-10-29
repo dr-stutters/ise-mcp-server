@@ -58,6 +58,11 @@ def _cert_row(c: dict[str, Any], node: str | None) -> dict[str, Any]:
         "days_left": (expires - datetime.now(UTC)).days if expires else None,
         "status": c.get("status"),
         "trusted_for": c.get("trustedFor"),
+        # What a renewal copies (I52 #190). ISE's REST API has no SANs for a certificate.
+        "key_size": c.get("keySize"),
+        "signature_algorithm": c.get("signatureAlgorithm"),
+        "valid_from": c.get("validFrom"),
+        "self_signed": c.get("selfSigned"),
     }
     return {k: v for k, v in row.items() if v not in (None, "")}
 
@@ -163,7 +168,8 @@ def register(reg: ToolRegistrar) -> None:
         response_format: ResponseFormat = "markdown",
     ) -> ToolResult:
         """List system (per-node identity) or trusted certificates with what they are used for, issuer,
-        expiry and days left. Use expiring_within_days=60 to find certificates about to expire (a
+        expiry and days left (JSON rows also carry key size, signature algorithm, valid-from and
+        self-signed). Use expiring_within_days=60 to find certificates about to expire (a
         common cause of EAP-TLS/PEAP failures). Ids feed the certificate delete tool."""
         app: IseApp = get_client(ctx)
         rows: list[dict[str, Any]] = []

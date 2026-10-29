@@ -330,8 +330,6 @@ async def system_certs(app: IseApp, hosts: list[str], f: Findings) -> list[dict[
         for c in certs:
             if isinstance(c, dict):
                 row = _cert_row(c, host)
-                if c.get("selfSigned"):
-                    row["self_signed"] = True
                 if c.get("expirationDate") and row.get("days_left") is None:
                     f.add("low", "certificates", f"{host}: could not parse the expiry of '{row.get('name')}'")
                 out.append(row)

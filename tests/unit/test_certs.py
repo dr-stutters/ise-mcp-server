@@ -54,6 +54,77 @@ async def test_generate_csr_rejects_bad_key(mock: respx.MockRouter) -> None:
     assert r.is_error
 
 
+async def test_generate_csr_int_key_length_same_preview(mock: respx.MockRouter) -> None:
+    """#190: key_length=2048 as an int gives the same preview (and body) as '2048'."""
+    mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
+    post = mock.post("/api/v1/certs/certificate-signing-request").respond(
+        json={"response": [{"id": "csr1", "message": "ok"}]}
+    )
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        as_int = await c.call_tool("ise_generate_csr", {"usage": "EAP-AUTH", "key_length": 2048})
+        as_str = await c.call_tool("ise_generate_csr", {"usage": "EAP-AUTH", "key_length": "2048"})
+        ecdsa = await c.call_tool(
+            "ise_generate_csr", {"usage": "EAP-AUTH", "key_type": "ECDSA", "key_length": 384}
+        )
+        a, b = as_int.structured_content, as_str.structured_content
+        assert a is not None and b is not None and ecdsa.structured_content is not None
+        assert a["action"] == b["action"] and a["preview"] == b["preview"]
+        assert a["preview"]["keyLength"] == "2048"
+        assert ecdsa.structured_content["preview"]["keyLength"] == "384"
+        # The int call's token confirms the string form: both normalise to the same arguments.
+        applied = await c.call_tool(
+            "ise_generate_csr", {"usage": "EAP-AUTH", "key_length": "2048", "confirm": a["confirm"]}
+        )
+    assert applied.structured_content is not None and applied.structured_content["status"] == "applied"
+    assert json.loads(post.calls.last.request.content)["keyLength"] == "2048"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"key_length": 1024},  # not a size ISE offers
+        {"key_length": 256},  # an ECDSA size for an RSA key
+        {"key_type": "ECDSA", "key_length": 4096},
+    ],
+)
+async def test_generate_csr_refuses_bad_int_key(mock: respx.MockRouter, args: dict[str, object]) -> None:
+    post = mock.post("/api/v1/certs/certificate-signing-request").respond(json={"response": []})
+    async with Client(make_server(mcp_enable_writes=True)) as c:
+        r = await c.call_tool("ise_generate_csr", {"usage": "EAP-AUTH", **args}, raise_on_error=False)
+    assert r.is_error and not post.called
+
+
+async def test_system_cert_row_has_key_and_signature(mock: respx.MockRouter) -> None:
+    """#190: the system row carries what a renewal copies (key size, signature algorithm, validity)."""
+    mock.get("/api/v1/certs/system-certificate/ise").respond(
+        json={
+            "response": [
+                {
+                    "id": "c1",
+                    "friendlyName": "ise EAP",
+                    "usedBy": "EAP Authentication",
+                    "issuedTo": "ise.example.com",
+                    "issuedBy": "Example Root CA",
+                    "expirationDate": "Thu Jan 01 00:00:00 UTC 2099",
+                    "validFrom": "Mon Oct 26 00:00:00 UTC 2026",
+                    "keySize": 2048,
+                    "signatureAlgorithm": "SHA256withRSA",
+                    "selfSigned": False,
+                    "sha256Fingerprint": "ab:cd",
+                }
+            ]
+        }
+    )
+    async with Client(make_server()) as c:
+        r = await c.call_tool(
+            "ise_list_certificates", {"kind": "system", "node": "ise", "response_format": "json"}
+        )
+    row = json.loads(r.content[0].text)["results"][0]  # type: ignore[union-attr]
+    assert row["key_size"] == 2048 and row["signature_algorithm"] == "SHA256withRSA"
+    assert row["valid_from"] == "Mon Oct 26 00:00:00 UTC 2026" and row["self_signed"] is False
+    assert row["issued_to"] == "ise.example.com" and row["days_left"] > 0
+
+
 async def test_export_csr(mock: respx.MockRouter) -> None:
     mock.get("/api/v1/deployment/node", name="nodes").respond(json=NODES)
     mock.get("/api/v1/certs/certificate-signing-request").respond(json={"response": [CSR]})
