@@ -7,6 +7,7 @@ import copy
 import json
 from typing import Any
 
+import httpx
 import pytest
 import respx
 from fastmcp import Client
@@ -543,9 +544,34 @@ async def test_sponsor_group_update_shows_password_flags(mock: respx.MockRouter)
     assert "canViewGuestPasswords is off" in json.dumps(preview)
 
 
+SMTP = fixture_json("ers_guest_smtp.json")
+SMTP_ID = SMTP["settings"]["ERSGuestSmtpNotificationSettings"]["id"]
+
+
+def mock_smtp(mock: respx.MockRouter, **changes: Any) -> None:
+    """The recorded guest SMTP settings (admin ERS), with `changes` applied."""
+    body = copy.deepcopy(SMTP["settings"])
+    body["ERSGuestSmtpNotificationSettings"].update(changes)
+    mock.get("/ers/config/guestsmtpnotificationsettings").respond(json=SMTP["settings_list"])
+    mock.get(f"/ers/config/guestsmtpnotificationsettings/{SMTP_ID}").respond(json=body)
+
+
+async def notify_confirm(args: dict[str, Any], **settings: Any) -> tuple[Any, Any]:
+    """Preview then confirm ise_notify_guest, returning the confirm as a CallToolResult (errors kept)."""
+    server = make_server(mcp_enable_writes=True, **SPONSOR, **settings)
+    async with Client(server) as c:
+        preview = (await c.call_tool("ise_notify_guest", args)).structured_content
+        assert preview is not None and preview["status"] == "preview"
+        done = await c.call_tool(
+            "ise_notify_guest", {**args, "confirm": preview["confirm"]}, raise_on_error=False
+        )
+    return preview, done
+
+
 async def test_notify_guest_email_and_sms(mock: respx.MockRouter) -> None:
     mock_config(mock)
     mock_guest(mock)
+    mock_smtp(mock, useDefaultFromAddress=True)
     email = mock.put(f"/ers/config/guestuser/email/{GID}/portalId/{PORTAL_ID}").respond(204)
     preview, done = await two_step(
         "ise_notify_guest",
@@ -605,3 +631,74 @@ def test_reset_password_value_shapes() -> None:
         reset_password_value({"OperationResult": {"resultValue": {"name": "password", "value": "x"}}}) == "x"
     )
     assert reset_password_value(None) is None and reset_password_value({}) is None
+
+
+async def test_notify_preview_reads_smtp_settings(mock: respx.MockRouter) -> None:
+    """#183: the preview shows ISE's guest SMTP settings and warns about what would stop the email."""
+    mock_config(mock)
+    mock_guest(mock)
+    mock_smtp(mock)  # as recorded: server set, useDefaultFromAddress off
+    preview, _ = await notify_confirm({"user": "mcp-guest-alice", "sender_email": "desk@example.com"})
+    assert preview["preview"]["smtp"] == {"server": "192.0.2.25", "port": "25", "connection_timeout_s": "60"}
+    warnings = json.dumps(preview["preview"]["warnings"])
+    assert "useDefaultFromAddress off" in warnings and "even with sender_email" in warnings
+    assert "90 s" in json.dumps(preview["side_effects"])
+    assert not preview.get("blockers")
+    mock_smtp(mock, smtpServer="", notificationEnabled=False, useDefaultFromAddress=True)
+    preview, _ = await notify_confirm({"user": "mcp-guest-alice"})
+    warnings = json.dumps(preview["preview"]["warnings"])
+    assert "no SMTP server" in warnings and "Administration > System > Settings > SMTP Server" in warnings
+    assert "turned off" in warnings and "from-address" not in warnings
+    assert preview["preview"]["smtp"]["default_from"] == "donotreply@example.com"
+
+
+async def test_notify_preview_without_smtp_read(mock: respx.MockRouter) -> None:
+    """An unreadable settings object doesn't stop the preview; it says the check didn't run."""
+    mock_config(mock)
+    mock_guest(mock)
+    mock.get("/ers/config/guestsmtpnotificationsettings").respond(403)
+    preview, _ = await notify_confirm({"user": "mcp-guest-alice"})
+    assert "not checked" in json.dumps(preview["preview"]["warnings"])
+    assert "smtp" not in preview["preview"]
+
+
+async def test_notify_sender_not_configured_hint(mock: respx.MockRouter) -> None:
+    """#183: the recorded 400 gets the fix (SMTP server + default from-address; sender_email isn't enough)."""
+    mock_config(mock)
+    mock_guest(mock)
+    mock_smtp(mock)
+    mock.put(f"/ers/config/guestuser/email/{GID}/portalId/{PORTAL_ID}").respond(
+        400, json=SMTP["sender_not_configured_400"]
+    )
+    _, done = await notify_confirm({"user": "mcp-guest-alice", "sender_email": "desk@example.com"})
+    text = done.content[0].text
+    assert done.is_error and "'Sender Email' address is not configured" in text
+    assert "default from-address" in text and "sender_email alone was not enough" in text
+
+
+async def test_notify_timeout_names_smtp_and_is_not_retried(mock: respx.MockRouter) -> None:
+    """#183: the PUT waits past ISE's 60 s SMTP connect, is sent once, and a timeout names the SMTP server."""
+    mock_config(mock)
+    mock_guest(mock)
+    mock_smtp(mock, useDefaultFromAddress=True)
+    put = mock.put(f"/ers/config/guestuser/email/{GID}/portalId/{PORTAL_ID}").mock(
+        side_effect=httpx.ReadTimeout("timed out")
+    )
+    _, done = await notify_confirm({"user": "mcp-guest-alice"}, retries=2)
+    text = done.content[0].text
+    assert done.is_error and "trying to reach its SMTP server" in text
+    assert "Administration > System > Settings > SMTP Server" in text and "may still arrive" in text
+    assert put.call_count == 1
+    assert put.calls.last.request.extensions["timeout"]["read"] == 90.0
+    # A longer SMTP connectionTimeout raises the HTTP timeout with it.
+    mock_smtp(mock, useDefaultFromAddress=True, connectionTimeout="120")
+    await notify_confirm({"user": "mcp-guest-alice"})
+    assert put.calls.last.request.extensions["timeout"]["read"] == 150.0
+
+
+def test_smtp_timeout_and_warning_helpers() -> None:
+    from ise_mcp.tools.guest import NOTIFY_TIMEOUT, smtp_timeout, smtp_warnings
+
+    assert smtp_timeout(None) == NOTIFY_TIMEOUT == smtp_timeout({"connectionTimeout": "bad"})
+    ok = {"smtpServer": "192.0.2.25", "useDefaultFromAddress": True, "defaultFromAddress": "a@example.com"}
+    assert smtp_warnings(ok, None) == []

@@ -223,12 +223,24 @@ class IseApp:
         params: dict[str, Any] | None = None,
         json: Any = None,
         expect: Any = "json",
+        timeout: float | None = None,  # noqa: ASYNC109 - per-request HTTP timeout
+        retry: bool | None = None,
     ) -> Any:
-        """An ERS call (guestuser) made with the sponsor account, CSRF handled like ers_request."""
+        """An ERS call (guestuser) made with the sponsor account, CSRF handled like ers_request.
+        `timeout` overrides the HTTP timeout (a guest notification waits on ISE's SMTP connect);
+        `retry=False` stops core retrying a PUT that timed out (it may have sent the email)."""
         client = self.require_sponsor()
         try:
             return await self._csrf_call(
-                client, "_sponsor_csrf", method, path, params=params, json=json, expect=expect, timeout=None
+                client,
+                "_sponsor_csrf",
+                method,
+                path,
+                params=params,
+                json=json,
+                expect=expect,
+                timeout=timeout,
+                retry=retry,
             )
         except AuthError as e:
             raise self.sponsor_refused(e) from None
@@ -251,12 +263,20 @@ class IseApp:
         json: Any,
         expect: Any,
         timeout: float | None,  # noqa: ASYNC109 - per-request HTTP timeout
+        retry: bool | None = None,
     ) -> Any:
         token = getattr(self, token_attr)
         headers = {"X-CSRF-Token": token} if token and method.upper() != "GET" else None
         try:
             return await client.request(
-                method, path, params=params, json=json, headers=headers, expect=expect, timeout=timeout
+                method,
+                path,
+                params=params,
+                json=json,
+                headers=headers,
+                expect=expect,
+                timeout=timeout,
+                retry=retry,
             )
         except AuthError as e:
             if method.upper() == "GET" or "csrf" not in str(e).lower():
@@ -270,6 +290,7 @@ class IseApp:
                 headers={"X-CSRF-Token": getattr(self, token_attr) or ""},
                 expect=expect,
                 timeout=timeout,
+                retry=retry,
             )
 
     async def _fetch_csrf(self, client: ApiClient | None = None, token_attr: str = "_csrf") -> None:

@@ -23,6 +23,11 @@ ERS quirks (ISE 3.5, checked live):
   canSendSmsNotifications, canApproveSelfregGuests) decide whether ISE accepts each. The reset needs
   canViewGuestPasswords too, because it returns the new password (ISE 3.5, #182): without it ISE answers
   400 "Sponsor user does not have permission to reset/view passwords on guest accounts".
+- Guest email (#183, ISE 3.5): ISE contacts its SMTP server inside the `email/...` request, waiting up to
+  the guest SMTP settings' connectionTimeout (default 60 s; ERS refuses less), so the call gets a longer
+  HTTP timeout and is never retried. With no default from-address in /ers/config/guestsmtpnotificationsettings
+  (useDefaultFromAddress) ISE answers 400 "'Sender Email' address is not configured" and did not take
+  the body's senderEmail instead.
 - Portal pages, themes and most portal settings stay in the GUI; the tools read the key settings.
 """
 
@@ -47,6 +52,8 @@ from ise_mcp._core import (
     Plan,
     ResponseFormat,
     ToolRegistrar,
+    UpstreamError,
+    UpstreamTimeout,
     ValidationFailed,
     compact,
     get_client,
@@ -293,6 +300,88 @@ def portal_row(p: dict[str, Any], kind: str, sequences: dict[str, str]) -> dict[
         "id": p.get("id"),
     }
     return {k: v for k, v in row.items() if v not in (None, "", [])}
+
+
+# A guest notification waits on ISE's SMTP connect (connectionTimeout, 60 s by default): stay above it.
+NOTIFY_TIMEOUT = 90.0
+SMTP_GUI = "Administration > System > Settings > SMTP Server"
+SENDER_HINT = (
+    "ISE has no sender address for guest email. Set an SMTP server and a default from-address with "
+    "'use default from-address' on (Work Centers > Guest Access > Settings > Guest Email Settings, ERS "
+    "guestsmtpnotificationsettings; SMTP server: " + SMTP_GUI + "), or the sponsor portal's notification "
+    "sender. sender_email alone was not enough on ISE 3.5."
+)
+
+
+async def guest_smtp_settings(app: IseApp) -> dict[str, Any] | None:
+    """ISE's guest SMTP notification settings (one object, admin ERS), or None when unreadable."""
+    try:
+        page = await app.ers_request("GET", "/ers/config/guestsmtpnotificationsettings")
+        items = ((page or {}).get("SearchResult") or {}).get("resources") or []
+        if not items or not isinstance(items[0], dict) or not items[0].get("id"):
+            return None
+        sid = quote(str(items[0]["id"]), safe="")
+        data = await app.ers_request("GET", f"/ers/config/guestsmtpnotificationsettings/{sid}")
+    except UpstreamError:
+        return None
+    body = (data or {}).get("ERSGuestSmtpNotificationSettings")
+    return body if isinstance(body, dict) else None
+
+
+def smtp_warnings(smtp: dict[str, Any] | None, sender_email: str | None) -> list[str]:
+    """What in the guest SMTP settings would stop an email (advisory: ISE has the last word)."""
+    if smtp is None:
+        return ["Couldn't read ISE's guest SMTP settings (guestsmtpnotificationsettings); not checked"]
+    out: list[str] = []
+    if not str(smtp.get("smtpServer") or "").strip():
+        out.append(f"ISE has no SMTP server set ({SMTP_GUI}): the email can't be sent")
+    if smtp.get("notificationEnabled") is False:
+        out.append("Guest email notification is turned off in ISE's guest email settings")
+    if not smtp.get("useDefaultFromAddress") or not smtp.get("defaultFromAddress"):
+        out.append(
+            "No default from-address in use (useDefaultFromAddress off): ISE 3.5 may refuse with "
+            "'Sender Email address is not configured'" + (" even with sender_email" if sender_email else "")
+        )
+    return out
+
+
+def smtp_timeout(smtp: dict[str, Any] | None) -> float:
+    """The HTTP timeout for a guest email: above ISE's SMTP connectionTimeout."""
+    try:
+        connect = float((smtp or {}).get("connectionTimeout") or 0)
+    except (TypeError, ValueError):
+        connect = 0.0
+    return max(NOTIFY_TIMEOUT, connect + 30.0)
+
+
+async def send_notification(
+    app: IseApp,
+    path: str,
+    body: Any,
+    *,
+    via: str,
+    timeout: float,  # noqa: ASYNC109 - per-request HTTP timeout
+) -> Any:
+    """PUT guestuser email/sms once (no retry: a timed-out request may still have sent it), with the
+    SMTP failures put in plain words."""
+    try:
+        return await app.sponsor_request("PUT", path, json=body, timeout=timeout, retry=False)
+    except UpstreamTimeout:
+        where = (
+            f"ISE was trying to reach its SMTP server; check {SMTP_GUI} (address, port, TLS) and that "
+            "ISE can reach it"
+            if via == "email"
+            else "ISE was trying to reach its SMS gateway (Work Centers > Guest Access > Settings > SMS "
+            "Gateway Providers)"
+        )
+        raise UpstreamTimeout(
+            f"ISE did not answer the guest {via} within {timeout:.0f} s: {where}. The {via} may still "
+            "arrive; check ISE's notification log before sending again."
+        ) from None
+    except ValidationFailed as e:
+        if "sender email" in str(e).lower():
+            raise ValidationFailed(f"{e} {SENDER_HINT}", e.status_code) from None
+        raise
 
 
 async def sponsor_portal_id(app: IseApp) -> str:
@@ -1019,7 +1108,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         """Send a guest their account details (username, password, validity) by email or SMS as the
         sponsor, with the sponsor portal's notification template ("resend my credentials"). ISE needs an
         SMTP server (email) or an SMS gateway (sms) configured, and SMS needs the sponsor group's 'send SMS
-        notifications' permission; ISE's notification log shows the delivery. Preview-first."""
+        notifications' permission; ISE's notification log shows the delivery. Email also needs a default
+        from-address in ISE's guest email settings (sender_email alone didn't satisfy ISE 3.5); the
+        preview reads those settings and warns. ISE contacts the SMTP server inside the request, so the
+        call waits up to ~90 s. Preview-first."""
         app: IseApp = get_client(ctx)
         if sender_email and via != "email":
             raise InvalidRequest("sender_email goes with via='email'")
@@ -1041,6 +1133,23 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             if sender_email
             else None
         )
+        smtp = await guest_smtp_settings(app) if via == "email" else None
+        warnings = smtp_warnings(smtp, sender_email) if via == "email" else []
+        timeout = smtp_timeout(smtp) if via == "email" else NOTIFY_TIMEOUT
+        smtp_view = (
+            compact(
+                {
+                    "server": smtp.get("smtpServer") or None,
+                    "port": smtp.get("smtpPort"),
+                    "connection_timeout_s": smtp.get("connectionTimeout"),
+                    "default_from": smtp.get("defaultFromAddress")
+                    if smtp.get("useDefaultFromAddress")
+                    else None,
+                }
+            )
+            if smtp
+            else None
+        )
         return await preview_or_apply(
             ctx,
             tool="ise_notify_guest",
@@ -1055,15 +1164,18 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                         "status": status,
                         "sender_email": sender_email,
                         "sponsor_portal": portal,
+                        "smtp": smtp_view,
+                        "warnings": warnings or None,
                     }
                 ),
                 blockers=blockers,
                 side_effects=[
                     f"ISE sends an {via} with the portal's template (it usually includes the password)",
+                    f"ISE delivers it within the request: the call waits up to {timeout:.0f} s",
                 ],
                 fingerprint=fingerprint(current),
             ),
-            apply=lambda: app.sponsor_request("PUT", path, json=body),
+            apply=lambda: send_notification(app, path, body, via=via, timeout=timeout),
         )
 
     @reg.write(title="Approve or deny a self-registered guest")
