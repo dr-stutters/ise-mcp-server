@@ -17,6 +17,7 @@ from ise_mcp._core import (
     Plan,
     ResponseFormat,
     ToolRegistrar,
+    UpstreamError,
     field_changes,
     get_client,
     preview_or_apply,
@@ -97,6 +98,59 @@ async def _default_cell(
         "default_rule": cell.get("defaultRule"),
         "status": cell.get("matrixCellStatus"),
     }
+
+
+# --- Matrix work-process settings (GET /api/v1/trustsec/matrix-workflow-settings) ---------------
+
+WORKFLOW_SETTINGS = "/api/v1/trustsec/matrix-workflow-settings"
+WORKFLOW_UNREADABLE = (
+    "ISE's matrix work-process settings could not be read ({error}): the cells are those ERS returns "
+    "(the Production/default matrix). If this ISE uses several matrices, a staging/production work "
+    "process or DEFCON matrices, check Work Centers > TrustSec > Settings > Work Process Settings."
+)
+
+
+async def matrix_workflow(app: IseApp) -> dict[str, Any] | str:
+    """The matrix mode, work process and DEFCON setting, or why they could not be read (older ISE
+    releases and some admin roles answer 404/403)."""
+    try:
+        data = await app.openapi.get(WORKFLOW_SETTINGS)
+    except UpstreamError as e:
+        return WORKFLOW_UNREADABLE.format(error=str(e).splitlines()[0] if str(e) else type(e).__name__)
+    settings = data.get("response") if isinstance(data, dict) and "response" in data else data
+    if not isinstance(settings, dict):
+        return WORKFLOW_UNREADABLE.format(error="unexpected answer")
+    approval = settings.get("approvalWorkflow") or {}
+    return {
+        "mode": settings.get("matrixMode"),
+        "work_process": bool(approval.get("enableApprovalWorkflow")),
+        "defcons": bool(settings.get("useDefcons")),
+    }
+
+
+def matrix_warnings(workflow: dict[str, Any], nad: str | None) -> list[str]:
+    """Why an answer read from ERS egressmatrixcell may not be the policy a device enforces."""
+    warnings = []
+    if str(workflow.get("mode") or "").upper().startswith("MULTIPLE"):
+        warnings.append(
+            "ISE runs in multiple-matrix mode: network devices can be assigned to different matrices, and "
+            "these cells may come from the Production/default matrix, not the one a given switch "
+            "enforces. Check which matrix the device is assigned to (Work Centers > TrustSec > TrustSec "
+            "Policy > Matrices) and compare 'show cts role-based permissions' on the switch."
+            + (f" Name the matrix {nad!r} belongs to before trusting a Permit/Deny for it." if nad else "")
+        )
+    if workflow.get("work_process"):
+        warnings.append(
+            "The staging/production work process is on: devices enforce the Production matrix, edits "
+            "go to Staging until approved and deployed, so staged cells awaiting approval may differ "
+            "from these."
+        )
+    if workflow.get("defcons"):
+        warnings.append(
+            "DEFCON matrices are enabled: while one is activated it overrides the Production matrix on "
+            "the devices."
+        )
+    return warnings
 
 
 # --- TrustSec device report (GET /api/v1/trustsec/policy/device-report) -------------------------
@@ -317,6 +371,13 @@ def register(reg: ToolRegistrar) -> None:
                 "enforce"
             ),
         ] = None,
+        nad: Annotated[
+            str | None,
+            Field(
+                description="The network device the question is about (name, may be partial, id or IP): "
+                "with several matrices the answer is flagged until a matrix is named"
+            ),
+        ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
         offset: Annotated[int, Field(ge=0)] = 0,
         response_format: ResponseFormat = "markdown",
@@ -326,8 +387,13 @@ def register(reg: ToolRegistrar) -> None:
         traffic passes, or DISABLED). Answers 'can Employees talk to Development_Servers?' and, with
         status='MONITOR', 'which cells are still in monitor mode?'. Cells not listed fall back to the
         ANY-ANY default; given both a source and a destination with no cell, the result's 'effective'
-        field shows that default."""
+        field shows that default. The result's 'matrix' field gives ISE's matrix mode, work process
+        (staging/production) and DEFCON setting; 'warnings' says when the cells may not be the matrix a
+        device enforces (multiple-matrix mode, staging, DEFCON)."""
         app: IseApp = get_client(ctx)
+        nad_name: str | None = None
+        if nad:
+            nad_name = str((await resolve_nad(app, nad, fuzzy=True)).get("name"))
         # Narrow server-side by SGT name first so a large matrix isn't fetched cell by cell.
         filters = []
         if source:
@@ -381,6 +447,20 @@ def register(reg: ToolRegistrar) -> None:
             }
         if source and destination and not rows and not status:
             extra = {**(extra or {}), "effective": await _default_cell(app, sgts, acls, source, destination)}
+        workflow = await matrix_workflow(app)
+        if isinstance(workflow, str):
+            extra = {**(extra or {}), "matrix_note": workflow}
+        else:
+            extra = {**(extra or {}), "matrix": workflow}
+            if warnings := matrix_warnings(workflow, nad_name):
+                extra["warnings"] = warnings
+                if nad_name and str(workflow.get("mode") or "").upper().startswith("MULTIPLE"):
+                    extra["matrix_required"] = (
+                        f"Which matrix is {nad_name!r} assigned to? This tool reads the Production/default "
+                        "matrix only."
+                    )
+        if nad_name:
+            extra["nad"] = nad_name
         return list_result(
             page_of(rows, limit=limit, offset=offset),
             fmt=response_format,

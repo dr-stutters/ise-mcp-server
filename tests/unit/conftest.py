@@ -40,6 +40,10 @@ def mock() -> Iterator[respx.MockRouter]:
         router.get("/admin/API/mnt/Version", name="mntversion").respond(
             text=xml("<product><version>3.5.0.527</version></product>")
         )
+        # TrustSec matrix work process (ise_get_egress_matrix): one matrix, as the lab answers.
+        router.get("/api/v1/trustsec/matrix-workflow-settings", name="matrix_workflow").respond(
+            json=fixture_json("matrix_workflow_settings.json")
+        )
         yield router
 
 
