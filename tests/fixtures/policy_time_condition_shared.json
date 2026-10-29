@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "response": {
+    "conditionType": "TimeAndDateCondition",
+    "isNegate": false,
+    "name": "mcp-all-week",
+    "id": "00000000-0000-4000-8000-000000000167",
+    "description": "Lab time condition (all week, all day)",
+    "hoursRange": {
+      "startTime": "00:00",
+      "endTime": "23:59"
+    },
+    "hoursRangeException": null,
+    "weekDays": [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday"
+    ],
+    "weekDaysException": [],
+    "datesRange": null,
+    "datesRangeException": null
+  }
+}

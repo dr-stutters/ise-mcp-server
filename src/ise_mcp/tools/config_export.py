@@ -385,10 +385,16 @@ class Export:
 
     async def _conditions(self) -> list[dict[str, Any]]:
         """Library, time-and-date and network conditions of both policy kinds, as ise_set_condition's
-        arguments (kind, type, name, description, conditions/match | time | network)."""
-        from ise_mcp.tools.conditions import condition_view, read_conditions  # noqa: PLC0415 - cycle
+        arguments (kind, type, name, description, conditions/match | time | network). ISE 3.5 returns one
+        object from both kinds' lists (same id): it is written once, with kind `shared`."""
+        from ise_mcp.tools.conditions import (  # noqa: PLC0415 - cycle
+            SHARED,
+            condition_view,
+            read_conditions,
+        )
 
         rows: list[dict[str, Any]] = []
+        by_id: dict[str, dict[str, Any]] = {}
         for kind in KINDS:
             try:
                 existing = await read_conditions(self.app, kind)
@@ -397,7 +403,15 @@ class Export:
                 continue
             self.raw_conditions[kind] = existing
             for ctype, items in existing.items():
-                rows += [{"kind": kind, **condition_view(ctype, c)} for c in items]
+                for c in items:
+                    cid = str(c.get("id") or "")
+                    if cid and cid in by_id:
+                        by_id[cid]["kind"] = SHARED
+                        continue
+                    row = {"kind": kind, **condition_view(ctype, c)}
+                    rows.append(row)
+                    if cid:
+                        by_id[cid] = row
         return sorted(rows, key=lambda r: (r["kind"], _name_key(r)))
 
     async def _simple(
