@@ -681,8 +681,9 @@ first). `ise_status` and `ise-mcp-server check` show whether ISE accepts it (the
 Then `ise_create_guest_user` -> `ise_list_guest_users` / `ise_get_guest_user` -> `ise_extend_guest_user`,
 `ise_update_guest_user`, `ise_suspend_guest_user` / `ise_reinstate_guest_user`, `ise_delete_guest_user`.
 Service desk: `ise_reset_guest_password` (ISE generates the new password), `ise_notify_guest` (resend the
-account details by email or SMS with the sponsor portal's template; needs ISE's SMTP server or SMS
-gateway), and `ise_list_guest_users status=PENDING_APPROVAL` -> `ise_approve_guest` (approve, or
+account details by email or SMS with the sponsor portal's template; needs ISE's SMTP server with a default
+from-address, which the preview checks, or an SMS gateway; ISE delivers within the request, so it waits up to
+~90 s), and `ise_list_guest_users status=PENDING_APPROVAL` -> `ise_approve_guest` (approve, or
 `approve=false` to deny, a self-registered guest). Each needs the matching sponsor group permission;
 the password reset needs both 'reset' and 'view guest passwords' (new groups from `ise_set_sponsor_group` get both).
 The guest's password is returned once, on confirm of `ise_create_guest_user` (random unless given) or

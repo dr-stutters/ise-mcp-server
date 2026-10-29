@@ -1,0 +1,30 @@
+{
+  "_source": "ISE 3.5 (lab), 2026-10-28/29: guest SMTP settings GET and the ise_notify_guest 400 (#183); documentation addresses",
+  "settings_list": {"SearchResult": {"total": 1, "resources": [{"id": "9ecb5340-8c01-11e6-996c-525400b48521"}]}},
+  "settings": {
+    "ERSGuestSmtpNotificationSettings": {
+      "id": "9ecb5340-8c01-11e6-996c-525400b48521",
+      "smtpServer": "192.0.2.25",
+      "notificationEnabled": true,
+      "useDefaultFromAddress": false,
+      "defaultFromAddress": "donotreply@example.com",
+      "smtpPort": "25",
+      "connectionTimeout": "60",
+      "useTLSorSSLEncryption": false,
+      "usePasswordAuthentication": false,
+      "password": ""
+    }
+  },
+  "sender_not_configured_400": {
+    "ERSResponse": {
+      "operation": "PUT-update-guestuser",
+      "messages": [
+        {
+          "title": "Email was not sent, 'Sender Email' address is not configured. 'Sender Email' should be configured in sponser portal or send is a request continent",
+          "type": "ERROR",
+          "code": "Application resource validation exception"
+        }
+      ]
+    }
+  }
+}
