@@ -366,7 +366,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_get_backup_status` | Status of the last configuration backup (name, repository, start/end time, status, progress). |
 | `ise_get_dacl` | One downloadable ACL with its full ACE text (one ACE per line), IP version and description. |
 | `ise_get_definition` | Describe a Cisco ISE API operation (parameters, request fields, required fields) or a schema (fields with types and enums). |
-| `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status (ENABLED, MONITOR: hits counted, traffic passes, or DISABLED). |
+| `ise_get_egress_matrix` | The TrustSec egress policy matrix as cells: source SGT -> destination SGT, the SGACLs applied, the final catch-all rule (permit/deny), and cell status (ENABLED, MONITOR: hits counted, traffic passes, or DISABLED). Reads the matrix work-process settings and warns when the cells may not be the matrix a device enforces (multiple matrices, staging/production, DEFCON); `nad=` asks for the matrix in multiple-matrix mode. |
 | `ise_get_guest_locations` | Guest locations (each carries a time zone in the GUI; guest dates are in that local time) and the guest SSIDs sponsors can pick. |
 | `ise_get_guest_user` | One guest account: status (with what it means), guest type, validity window, location/SSID, sponsor, contact details, visit reason. |
 | `ise_get_internal_user` | One internal user: enabled state, identity group names, names/email, password store, expiry, created/modified dates and custom attributes. |

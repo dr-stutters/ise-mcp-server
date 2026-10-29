@@ -167,6 +167,17 @@ to deny.
    The preview shows the SGTs, SGACLs, catch-all and status; the pair then falls to the ANY-ANY default, so
    push again. The ANY-ANY cell can't be deleted (use `ise_set_default_egress_rule`).
 
+### 3c. Several matrices, staging and DEFCON
+
+`ise_get_egress_matrix` also reads `GET /api/v1/trustsec/matrix-workflow-settings` and returns it as
+`matrix` (`mode` SINGLE_MATRIX or MULTIPLE_MATRICES, `work_process`, `defcons`). The cells come from ERS
+`egressmatrixcell`, which answers for the Production/default matrix, so the result carries `warnings`
+when that may not be what a switch enforces: multiple-matrix mode (devices assigned to other matrices),
+the staging/production work process (staged edits not yet approved), or DEFCON matrices (an activated
+one overrides Production). Name the device with `nad=` and, in multiple-matrix mode, the result asks
+which matrix it is assigned to (`matrix_required`) instead of letting a Permit stand unqualified. On an
+ISE that does not answer that endpoint (404/403) the cells are still returned, with a `matrix_note`.
+
 ## 4. When enforcement does not happen
 
 Work down the list; `ise_trustsec_device_report` names the failing step and the hint for it.
