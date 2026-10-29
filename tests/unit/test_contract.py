@@ -63,10 +63,19 @@ PROMPT_SAMPLES = {
     },
     "ise_deployment_health_review": {"cert_warn_days": "60", "site": "Global/SYD/Bldg-1", "role": "ACCESS"},
     "ise_phased_8021x_rollout": {"ndg": "SYD#Bldg-1", "phase": "closed", "switch": "lab/sw1", "days": "3"},
+    "ise_policy_change_review": {
+        "policy_set": "Wired",
+        "rule": "Employees",
+        "change": "reorder",
+        "rank": "0",
+        "nads": "syd-acc-sw01,192.0.2.21",
+        "flows": "wired-dot1x,wired-mab",
+        "minutes": "720",
+    },
 }
 # Prompts under the core snapshot kit (tests/snapshots/prompts/<name>.md). The kit reports any other
 # snapshot file as stale, so each snapshot test compares this whole set.
-SNAPSHOT_PROMPTS = ("ise_onboard_nad", "ise_deployment_health_review")
+SNAPSHOT_PROMPTS = ("ise_onboard_nad", "ise_deployment_health_review", "ise_policy_change_review")
 # win = the Windows_Server MCP (no manifest: its references are checked for `uses` only).
 KNOWN = {"cml", "ise", "fmc", "catc", "catsdwan", "win"}
 # Every fmc_*/catc_*/catsdwan_* tool a prompt references must exist in that server's manifest
