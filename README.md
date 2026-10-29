@@ -50,6 +50,9 @@ Tested against ISE 3.5.0.527 (patches 3 and 4). It should work on 3.1 and later.
 - **Prompt `ise_deployment_health_review`** (read tier; fmc and catc rows when connected): a weekly or pre-change
   review as one ranked report: deployment health, certificate expiry across ISE, FMC and Catalyst Center with the
   renewal path per row, licence, pxGrid, AD join, SXP, the admin access review and NAD coverage of a site.
+- **Prompt `ise_cert_renewal`** (write tier; signing through the Windows_Server MCP when connected): an expiring
+  certificate renewed in a change window: CSR with the same subject, `win_sign_csr` or any CA, the chain in the
+  trust store, the bind (Admin restarts the application server: dangerous tier, previewed), then EAP-TLS checked.
 - **Certificate lifecycle with any CA**: CSR -> export -> sign -> trust -> bind, plus certificate profiles and
   identity sequences for EAP-TLS.
 - **TrustSec writes**: static IP-SGT mappings, SXP connections/bindings, the TrustSec CoA push and SSH deploy.
@@ -300,7 +303,7 @@ the spec cache. Shared hosts (TLS, several deployments, per-user tokens, upgrade
 
 ## Tools
 
-188 tools and 14 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
+188 tools and 15 prompts with writes and dangerous enabled (regenerate with `uv run python scripts/tool_table.py`).
 With the defaults (read-only), the 96 read tools plus `ise_api_call` (GET-only) are registered. Everything
 is queried from ISE when called; the server never receives or buffers events (pull-only).
 
@@ -507,7 +510,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_set_default_egress_rule` | Change the TrustSec matrix default (the ANY-ANY egress cell): the catch-all, SGACLs and status that apply to every source/destination SGT pair without an explicit cell. |
 | `ise_update_node_services` | Turn services on or off on an ISE node: DeviceAdmin (TACACS+ on port 49, needed before any device-admin policy works), Session (RADIUS: the node is a PSN), Profiler, pxGrid, SXP, PassiveIdentity. |
 
-### Prompts (14)
+### Prompts (15)
 
 | Prompt | What it does |
 |---|---|
@@ -519,6 +522,7 @@ is queried from ISE when called; the server never receives or buffers events (pu
 | `ise_onboard_sdwan_edges` | Bring a Catalyst SD-WAN site's edges into ISE: one location group per site, a NAD per edge at its service-VPN loopback (AAA rides the overlay from a stable source whichever transport is up), a device-admin policy for the edges, then the edges' AAA parcel through catsdwan_set_feature_parcel with that loopback as source, a config-group deploy preview, and a TACACS+ and RADIUS test login checked in ISE. |
 | `ise_deployment_health_review` | A weekly or pre-change review of the whole ISE deployment as one ranked report with next steps: ise_deployment_health (nodes, redundancy, patches, backup, certificates, licence, AD, admins), then certificate expiry (system and trusted), licence compliance, pxGrid (persona, certificate, pending clients), AD join per node, SXP connections and bindings, the admin access review (Super Admins, never-disabled, external), FMC's certificates and Catalyst Center's trust of the ISE certificate sorted by days left with the renewal path per row, and NAD coverage of a Catalyst Center site. |
 | `ise_phased_8021x_rollout` | Roll wired 802.1X out by Cisco's phases for one location NDG: a readiness gate from MnT (who fails, who only gets in by the open policy's Default rule, MAB endpoints with no profile or static group) and each switch's current mode from Catalyst Center, then per phase an ise_snapshot, the ISE side (monitor permits and logs, low-impact adds dACLs, closed makes the Default rule DenyAccess) through the preview-first write tools, the switch CLI printed or staged as a previewed template (never pushed), ise_compare_snapshot and the rollback. |
+| `ise_cert_renewal` | Renew an expiring ISE system certificate the way a change window does it: find what expires (ise_list_certificates) and the EAP-TLS baseline, generate a CSR with the same subject and SANs (ise_generate_csr, ise_export_csr), sign it at the lab CA with win_sign_csr (Windows_Server MCP; without it any CA, marked skipped), import the issuing chain (ise_import_trusted_cert), bind the signed certificate in the change window (ise_bind_certificate: the Admin role restarts the application server, dangerous and previewed), then verify the new certificate is in service and EAP-TLS still works (ise_get_auth_history, ise_recent_auth_failures). |
 | `suite_access_review` | Who can change what, on every connected platform: admin accounts, roles and the external groups that grant them on ISE, Catalyst Center, FMC, SD-WAN Manager and CML, with Active Directory resolving those groups to people. |
 | `suite_asbuilt_drift` | Has the documentation drifted from the wiring? |
 | `suite_change_check` | Did anything else break? |

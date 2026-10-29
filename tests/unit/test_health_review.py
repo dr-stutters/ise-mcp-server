@@ -106,7 +106,7 @@ async def test_prompt_validates(args: dict[str, str]) -> None:
 
 async def test_every_named_tool_exists() -> None:
     # Every tool the prompt names (meta `tools` and backticked in the body) is an ISE tool registered on
-    # an all-tiers server or a tool in the peer server's committed manifest (win_* has no manifest).
+    # an all-tiers server or a tool in the peer server's committed manifest (win_*: hand-written win.json).
     server = make_server(mcp_enable_writes=True, mcp_enable_dangerous=True)
     async with Client(server) as c:
         own = {t.name for t in await c.list_tools()}
@@ -116,7 +116,7 @@ async def test_every_named_tool_exists() -> None:
         re.findall(r"`((?:ise|fmc|catc|win)_[a-z0-9_]+)`", body)
     )
     peers = {name for tools in EXTERNAL.values() for name in tools}
-    missing = sorted(n for n in named if not n.startswith("win_") and n not in own and n not in peers)
+    missing = sorted(n for n in named if n not in own and n not in peers)
     assert not missing, missing
     assert {"fmc_list_certificates", "catc_get_policy_servers", "catc_list_devices"} <= named
 
