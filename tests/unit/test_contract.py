@@ -63,6 +63,15 @@ PROMPT_SAMPLES = {
     },
     "ise_deployment_health_review": {"cert_warn_days": "60", "site": "Global/SYD/Bldg-1", "role": "ACCESS"},
     "ise_phased_8021x_rollout": {"ndg": "SYD#Bldg-1", "phase": "closed", "switch": "lab/sw1", "days": "3"},
+    "ise_policy_change_review": {
+        "policy_set": "Wired",
+        "rule": "Employees",
+        "change": "reorder",
+        "rank": "0",
+        "nads": "syd-acc-sw01,192.0.2.21",
+        "flows": "wired-dot1x,wired-mab",
+        "minutes": "720",
+    },
     "ise_guest_onboarding": {
         "username": "visitor01",
         "guest_type": "Daily (default)",
@@ -88,6 +97,7 @@ PROMPT_SAMPLES = {
 SNAPSHOT_PROMPTS = (
     "ise_onboard_nad",
     "ise_deployment_health_review",
+    "ise_policy_change_review",
     "ise_guest_onboarding",
     "ise_cert_renewal",
 )

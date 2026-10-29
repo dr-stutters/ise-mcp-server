@@ -343,6 +343,38 @@
         "cml"
       ]
     },
+    "ise_policy_change_review": {
+      "arguments": [
+        "policy_set",
+        "rule",
+        "nads",
+        "change",
+        "rank",
+        "section",
+        "flows",
+        "minutes"
+      ],
+      "references": [
+        "ise_export_config",
+        "ise_diff_config",
+        "ise_list_policy_sets",
+        "ise_get_policy_set",
+        "ise_policy_explain",
+        "ise_get_nad",
+        "ise_get_auth_list",
+        "ise_get_authz_profile",
+        "ise_get_dacl",
+        "ise_list_conditions",
+        "ise_update_policy_rule",
+        "ise_create_authz_rule",
+        "ise_delete_policy_rule"
+      ],
+      "rendered": false,
+      "tier": "read",
+      "uses": [
+        "ise"
+      ]
+    },
     "ise_quarantine_host": {
       "arguments": [
         "reason",
