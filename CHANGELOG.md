@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.25.0 (2026-10-29)
+
+A policy change review prompt, a window-only `ise_incident_timeline`, retries for ISE 3.5's generic 500 on reads, and guest
+service-desk follow-ups (sponsor-group password permission, SMTP timeouts). Core stays 0.20.0. 188 tools (96 read, 68 write,
+24 dangerous) and seventeen prompts.
+
+### Added
+- Prompt `ise_policy_change_review`: export a baseline, explain sample logins before and after, the change as a preview, diff
+  against the baseline, and who gains or loses access (I46, #12, #178).
+- `ise_incident_timeline` window-only mode (`window_start`/`window_end`, host optional) merging ISE auths by NAD/user, FMC
+  activity and FTD logging, Catalyst Center activity and switch logging, CML lab events, and optional NetBox and AD
+  group-change sections (I69, #47, #188).
+
+### Changed
+- `ise_set_sponsor_group` creates sponsor groups with 'view guest passwords' on (ISE's default; the password reset needs it)
+  and warns when reset is on without view; sponsor-group password flags are no longer masked in previews (I72, #182, #185).
+- `ise_notify_guest`'s preview checks ISE's guest SMTP settings (I72, #183, #187).
+
+### Fixed
+- ISE 3.5's generic HTTP 500 "Bad Request. Please see logs" (and SQLException / NSFEntityRetrievalException) on policy and
+  TrustSec reads is now retried with backoff; a POST failing with ISE's DB wording says a rerun is safe (I57, #176, #186).
+- `ise_reset_guest_password`'s permission error names the fix (I72, #182, #185).
+- `ise_notify_guest` waits past ISE's 60 s SMTP connect and sends once, says on a timeout that ISE was trying to reach its SMTP
+  server, and maps the 'Sender Email not configured' 400 to the fix (I72, #183, #187).
+
 ## 0.24.0 (2026-10-29)
 
 Two workflow prompts (sponsored guest onboarding and certificate renewal), `ISE_TOOLSETS` to load only some tool areas, and
