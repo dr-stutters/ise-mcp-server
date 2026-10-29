@@ -72,6 +72,17 @@ PROMPT_SAMPLES = {
         "flows": "wired-dot1x,wired-mab",
         "minutes": "720",
     },
+    "ise_guest_onboarding": {
+        "username": "visitor01",
+        "guest_type": "Daily (default)",
+        "email": "visitor01@example.com",
+        "phone": "+15555550123",
+        "location": "San Jose",
+        "notify": "email",
+        "access": "wireless",
+        "nad": "wlc1",
+        "mac": "aa:bb:cc:dd:ee:ff",
+    },
     "ise_cert_renewal": {
         "role": "eap",
         "node": "ise-psn1",
@@ -87,6 +98,7 @@ SNAPSHOT_PROMPTS = (
     "ise_onboard_nad",
     "ise_deployment_health_review",
     "ise_policy_change_review",
+    "ise_guest_onboarding",
     "ise_cert_renewal",
 )
 # win = the Windows_Server MCP (hand-written manifest tests/manifests/win.json, I52).
