@@ -32,6 +32,7 @@ from ise_mcp.tools import (
     endpoint_summary,
     endpoints,
     guest,
+    guest_onboarding,
     health,
     health_review,
     hitcounts,
@@ -119,7 +120,8 @@ ise_test_pxgrid_direct -> ise_pxgrid_direct_status, then authz rules on '<connec
 Guest access: ise_list_guest_types /
 ise_list_sponsor_groups / ise_list_guest_portals (admin); guest accounts (ise_create_guest_user,
 ise_extend_guest_user, ise_suspend_guest_user, ...) run as the sponsor set in ISE_SPONSOR_USERNAME
-(ise_status shows guest_sponsor). Backups (before Catalyst Center's group-based policy migration or an
+(ise_status shows guest_sponsor); one guest end to end (create, credentials, verify the session): prompt
+ise_guest_onboarding. Backups (before Catalyst Center's group-based policy migration or an
 upgrade): ise_list_repositories (none? ise_set_repository, password from an ISE_REPOSITORY_* variable) ->
 ise_create_backup (dangerous; key from ISE_BACKUP_ENCRYPTION_KEY) ->
 ise_get_backup_status; restores are GUI-only. Before a patch or upgrade:
@@ -194,6 +196,7 @@ def create_server(
             sdwan_onboard.register,
             health_review.register,
             dot1x_rollout.register,
+            guest_onboarding.register,
             cert_renewal.register,
             config_export.register,
             config_import.register,
