@@ -445,7 +445,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         country: Annotated[str | None, Field(description="Subject C (2 letters)")] = None,
         key_type: Annotated[Literal["RSA", "ECDSA"], Field(description="Key type")] = "RSA",
         key_length: Annotated[
-            Literal["2048", "4096", "256", "384"], Field(description="RSA 2048/4096 or ECDSA 256/384")
+            Literal[2048, 4096, 256, 384] | Literal["2048", "4096", "256", "384"],
+            Field(description="RSA 2048/4096 or ECDSA 256/384 (a number or a string)"),
         ] = "2048",
         digest: Annotated[Literal["SHA-256", "SHA-384", "SHA-512"], Field(description="Signature hash")] = (
             "SHA-256"
@@ -456,9 +457,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         service changes: the CSR waits until a CA-signed certificate is bound to it with
         ise_bind_certificate. Next: ise_export_csr -> sign it at your CA. Preview-first."""
         app: IseApp = get_client(ctx)
-        if key_type == "RSA" and key_length not in ("2048", "4096"):
+        bits = str(key_length)  # ISE's keyLength is a string; a model often passes 2048
+        if key_type == "RSA" and bits not in ("2048", "4096"):
             raise InvalidRequest("RSA keys are 2048 or 4096 bits")
-        if key_type == "ECDSA" and key_length not in ("256", "384"):
+        if key_type == "ECDSA" and bits not in ("256", "384"):
             raise InvalidRequest("ECDSA keys are 256 or 384 bits")
         if country is not None and not re.fullmatch(r"[A-Za-z]{2}", country):
             raise InvalidRequest("country is a 2-letter code")
@@ -474,7 +476,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "usedFor": usage,
             "subjectCommonName": common_name,
             "keyType": key_type,
-            "keyLength": key_length,
+            "keyLength": bits,
             "digestType": digest,
             "allowWildCardCert": common_name.startswith("*."),
         }
@@ -499,7 +501,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "org_unit": org_unit,
             "country": country,
             "key_type": key_type,
-            "key_length": key_length,
+            "key_length": bits,
             "digest": digest,
         }
         return await preview_or_apply(

@@ -88,7 +88,7 @@ def register(reg: ToolRegistrar) -> None:
         ] = "",
     ) -> str:
         """Renew an expiring ISE system certificate the way a change window does it: find what expires
-        (ise_list_certificates) and the EAP-TLS baseline, generate a CSR with the same subject and SANs
+        (ise_list_certificates) and the EAP-TLS baseline, generate a CSR with the same subject and key
         (ise_generate_csr, ise_export_csr), sign it at the lab CA with win_sign_csr (Windows_Server MCP;
         without it any CA, marked skipped), import the issuing chain (ise_import_trusted_cert), bind the
         signed certificate in the change window (ise_bind_certificate: the Admin role restarts the
@@ -165,10 +165,10 @@ CA they run, and wait for the signed certificate and the CA chain as PEM.
 
 1. What expires. {tool_ref("ise_list_certificates")} with kind="system"{node_arg},
    expiring_within_days={days}, response_format="json". Keep the rows whose used_by has "{used_by}":
-   name, id, node, issued_to, issued_by, expires, days_left. None: say "nothing to renew within {days}
-   days" with the current {used_by} certificate's expiry (the same call without expiring_within_days)
-   and stop. Also {tool_ref("ise_list_certificates")} with kind="trusted", expiring_within_days={days}:
-   an expiring issuing CA is renewed with the leaf (step 6).
+   name, id, node, issued_to, issued_by, expires, days_left, key_size, signature_algorithm. None: say
+   "nothing to renew within {days} days" with the current {used_by} certificate's expiry (the same
+   call without expiring_within_days) and stop. Also {tool_ref("ise_list_certificates")} with
+   kind="trusted", expiring_within_days={days}: an expiring issuing CA is renewed with the leaf (step 6).
 
 2. Baseline before the change. {baseline}
    Then {tool_ref("ise_recent_auth_failures")} with since_minutes=60: the failure count and reasons now,
@@ -176,9 +176,11 @@ CA they run, and wait for the signed certificate and the CA chain as PEM.
 
 3. CSR. {tool_ref("ise_list_csrs")}{node_arg.replace(", ", " with ")}: a pending {usage} CSR for the node
    can be reused. Otherwise {tool_ref("ise_generate_csr")} with usage="{usage}", {nodes_arg},
-   common_name=<the CN of the certificate from step 1, or "$FQDN$">, san_dns=<its DNS names: the node
-   FQDN plus any alias clients use>, key_type and key_length as before (RSA 2048 at least),
-   digest="SHA-256". Preview first; generating a CSR changes nothing in service.
+   common_name=<the CN of the certificate from step 1, or "$FQDN$">, san_dns=<the node FQDN (issued_to
+   from step 1) plus the aliases the user names: ISE's REST API does not return the old certificate's
+   SANs, so ask which names clients use>, key_type="ECDSA" only when step 1's signature_algorithm is
+   ECDSA (else "RSA"), key_length=<step 1's key_size, at least 2048 for RSA>, digest="SHA-256".
+   Preview first; generating a CSR changes nothing in service.
 
 4. Export. {tool_ref("ise_list_csrs")} for the new CSR's id, then {tool_ref("ise_export_csr")} with
    csr=<that id>{node_arg}: the csr_pem.

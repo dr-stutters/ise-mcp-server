@@ -130,3 +130,13 @@ async def test_validates(args: dict[str, str]) -> None:
     async with Client(make_server(mcp_enable_writes=True)) as c:
         with pytest.raises(Exception):  # noqa: B017 - FastMCP wraps the InvalidRequest / validation error
             await c.get_prompt(NAME, args)
+
+
+async def test_csr_step_names_the_key_and_where_sans_come_from() -> None:
+    """#190: step 1 keeps key_size/signature_algorithm; step 3 takes SANs from issued_to + user aliases."""
+    text = await render(SAMPLE, mcp_enable_writes=True)
+    assert "days_left, key_size, signature_algorithm" in text
+    assert "key_length=<step 1's key_size, at least 2048 for RSA>" in text
+    assert "san_dns=<the node FQDN (issued_to from step 1) plus the aliases the user names" in text
+    assert "does not return the old certificate's SANs" in text
+    assert "san_dns=<its DNS names" not in text
