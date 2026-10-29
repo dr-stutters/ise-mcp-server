@@ -12,8 +12,15 @@ nothing is subscribed (ADR-003). OpenAPI `/api/v1/pxgrid-direct`:
   attributeMapping, fullsyncSchedule / deltasyncSchedule, coaType, skipCertificateValidations);
 - `POST /test-connector` (TestConnectorRequest): fetches the URL with the given credentials and answers the
   data or the error, changes nothing;
-- `GET /syncNowStatus/{connectorName}` (syncStatus INPROGRESS / QUEUED / SYNC COMPLETED / ERRORED) and
-  `GET /push/{connectorName}/{uniqueId}` (one record as ISE holds it).
+- `GET /syncNowStatus/{connectorName}` (syncStatus INPROGRESS / QUEUED / SYNC COMPLETED / ERRORED, and
+  SCH_INPROGRESS for a scheduled sync) and `GET /push/{connectorName}/{uniqueId}` (one record as ISE holds
+  it).
+
+What ISE 3.5 accepts (live, #170) differs from its spec: a create or update carries `flexibleUrl` only (ISE
+answers 400 when `url` is there too, though its GET returns both), an attribute mapping is
+`{jsonAttribute, dictionaryAttribute, includeInDictionary}` (not the spec's name/dictionaryName; ISE stores
+the JSON side as `$.<attribute>`), and `startDate` is rounded up to the next 5-minute mark. A sync keyed on
+a numeric unique id (a JSON number, such as NetBox `id`) stays SCH_INPROGRESS: key on a string attribute.
 
 The CMDB credential (a NetBox API token, a basic-auth password) never travels as a tool argument: it comes
 from a server environment variable named `ISE_PXGRID_DIRECT_...` (or its `_FILE` twin), is sent to ISE
@@ -25,7 +32,7 @@ only, and is never shown. Previews and diffs say whether a credential is set or 
 import json
 import os
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlsplit
@@ -62,6 +69,12 @@ _NAME = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 COA = {"none": "nocoa", "reauth": "reauth", "port_bounce": "portbounce"}
 UNITS = ("hours", "days", "weeks")
 SYNC_DONE = {"SYNC COMPLETED", "COMPLETED", "SUCCESS"}
+SYNC_RUNNING = {"INPROGRESS", "IN_PROGRESS", "QUEUED", "SCH_INPROGRESS", "SCH_QUEUED"}
+NUMERIC_ID_HINT = (
+    "ISE 3.5 leaves a sync keyed on a numeric unique id (a JSON number, such as NetBox 'id') at "
+    "SCH_INPROGRESS: key the connector on a string attribute (NetBox 'name' or 'serial', or a custom field)"
+)
+START_FMT = "%Y-%m-%dT%H:%M:%S"
 TEST_DATA_CHARS = 4000  # the test answers the CMDB's whole page: keep a sample
 
 
@@ -132,6 +145,27 @@ def _fetch(c: dict[str, Any], which: str) -> dict[str, Any]:
     return f if isinstance(f, dict) else {}
 
 
+def _json_path(value: Any) -> str | None:
+    """A mapping's record attribute as the user names it: ISE stores 'role' as '$.role'."""
+    if value is None:
+        return None
+    text = str(value)
+    return text[2:] if text.startswith("$.") else text
+
+
+def _mapping(attrs: dict[str, Any]) -> dict[str, Any]:
+    """Dictionary attribute -> record attribute, from ISE's live shape (jsonAttribute / dictionaryAttribute)
+    or the spec's (name / dictionaryName)."""
+    out: dict[str, Any] = {}
+    for m in attrs.get("attributeMapping") or []:
+        if not isinstance(m, dict):
+            continue
+        key = m.get("dictionaryAttribute") or m.get("dictionaryName")
+        if key:
+            out[str(key)] = _json_path(m.get("jsonAttribute") or m.get("name"))
+    return out
+
+
 def _secret_set(c: dict[str, Any]) -> bool:
     url = c.get("url") or {}
     bulk = _fetch(c, "bulk")
@@ -176,11 +210,7 @@ def connector_view(c: dict[str, Any]) -> dict[str, Any]:
         "unique_id": attrs.get("uniqueIdentifier"),
         "correlation_id": attrs.get("correlationIdentifier"),
         "version_id": attrs.get("versionIdentifier") or None,
-        "attributes": {
-            str(m.get("dictionaryName")): m.get("name")
-            for m in attrs.get("attributeMapping") or []
-            if isinstance(m, dict)
-        },
+        "attributes": _mapping(attrs),
         "full_sync": _schedule(c.get("fullsyncSchedule")),
         "incremental_sync": _schedule(c.get("deltasyncSchedule")),
         "coa": {v: k for k, v in COA.items()}.get(str(c.get("coaType")), c.get("coaType")),
@@ -225,16 +255,25 @@ def _sched(interval: int | None, unit: str | None, start: str | None) -> dict[st
     return out or None
 
 
+def _round5(at: datetime) -> datetime:
+    """Up to the next 5-minute mark, as ISE rounds a schedule's startDate."""
+    at = at.replace(microsecond=0)
+    if at.second or at.minute % 5:
+        at = at.replace(second=0) + timedelta(minutes=5 - at.minute % 5)
+    return at
+
+
 def _start(value: str | None) -> str:
+    """A schedule's startDate on ISE's 5-minute grid (default: now, rounded up)."""
     if value is None:
-        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+        return _round5(datetime.now(UTC)).strftime(START_FMT)
     try:
-        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+        at = datetime.strptime(value, START_FMT)
     except ValueError:
         raise InvalidRequest(
             f"start is 'YYYY-MM-DDTHH:MM:SS' (ISE's time zone), e.g. '2026-11-01T02:00:00': {value!r}"
         ) from None
-    return value
+    return _round5(at).strftime(START_FMT)
 
 
 def _redacted(value: Any, secrets: list[str]) -> Any:
@@ -246,8 +285,14 @@ def _redacted(value: Any, secrets: list[str]) -> Any:
     return text if isinstance(value, str) else json.loads(text)
 
 
-def _sample(data: Any, top: str | None) -> dict[str, Any]:
-    """Records count and a short sample of the test's `data` (a JSON string of the CMDB's answer)."""
+def _is_page(d: dict[str, Any]) -> bool:
+    """A CMDB page (records in a list under some key) rather than one record."""
+    return any(isinstance(v, list) and v and all(isinstance(x, dict) for x in v) for v in d.values())
+
+
+def _sample(data: Any, top: str | None, unique_id: str | None = None) -> dict[str, Any]:
+    """Records count and a short sample of the test's `data`: a JSON string of the CMDB's page, or (ISE
+    3.5) of one record."""
     parsed: Any = data
     if isinstance(data, str):
         try:
@@ -255,14 +300,26 @@ def _sample(data: Any, top: str | None) -> dict[str, Any]:
         except ValueError:
             return {"data": data[:TEST_DATA_CHARS], "data_truncated": len(data) > TEST_DATA_CHARS}
     records = parsed
+    out: dict[str, Any] = {}
     if top and isinstance(parsed, dict):
         records = parsed.get(top)
-    out: dict[str, Any] = {}
+        if records is None and not _is_page(parsed):
+            # ISE 3.5 answers the first record itself, already taken out of the top-level object.
+            records = [parsed]
+            out["data_note"] = "ISE's test answered one record (taken from the top-level object)"
     if isinstance(records, list):
         out["records"] = len(records)
         out["first_record"] = records[0] if records else None
         if isinstance(parsed, dict) and "count" in parsed:
             out["source_count"] = parsed.get("count")
+        key = _json_path(unique_id)
+        first = records[0] if records else None
+        if key and isinstance(first, dict):
+            value = first.get(key)
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                out["warning"] = f"unique_id {key!r} is a number ({value}) in the record: {NUMERIC_ID_HINT}"
+            elif key not in first:
+                out["warning"] = f"The first record has no unique_id attribute {key!r}: check the setting"
     else:
         text = json.dumps(parsed, default=str)
         out["data"] = text[:TEST_DATA_CHARS]
@@ -276,7 +333,16 @@ def _sync_status(data: Any) -> dict[str, Any]:
     d = _unwrap(data)
     c = d.get("connector") if isinstance(d, dict) and isinstance(d.get("connector"), dict) else d
     status = (c or {}).get("syncStatus") if isinstance(c, dict) else None
-    return {"sync_status": status, "sync_completed": str(status or "").upper() in SYNC_DONE}
+    upper = str(status or "").upper()
+    out: dict[str, Any] = {"sync_status": status, "sync_completed": upper in SYNC_DONE}
+    if upper in SYNC_RUNNING:
+        out["sync_running"] = True
+        if upper.startswith("SCH_"):
+            out["sync_hint"] = (
+                "A scheduled sync is running; ISE refuses Sync Now until it ends. If it stays here for more "
+                f"than 15 minutes: {NUMERIC_ID_HINT}"
+            )
+    return out
 
 
 # --- tools --------------------------------------------------------------------------------------
@@ -435,7 +501,12 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             "error": _redacted(res.get("error"), secrets) if res.get("error") else None,
         }
         if res.get("data") is not None:
-            out.update(_redacted(_sample(res.get("data"), attrs.get("topLevelObject")), secrets))
+            out.update(
+                _redacted(
+                    _sample(res.get("data"), attrs.get("topLevelObject"), attrs.get("uniqueIdentifier")),
+                    secrets,
+                )
+            )
         if not out["passed"] and not secret_env and view["credential_set"]:
             out["hint"] = "ISE didn't return the saved credential: pass secret_env to test with it"
         return object_result(out, fmt=response_format)
@@ -493,7 +564,11 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         ] = None,
         unique_id: Annotated[
             str | None,
-            Field(description="Record attribute that is unique per record (NetBox 'id'; required to create)"),
+            Field(
+                description="Record attribute that is unique per record, holding a string (NetBox 'name' "
+                "or 'serial'; not NetBox 'id': ISE 3.5 doesn't finish a sync keyed on a number; required to "
+                "create)"
+            ),
         ] = None,
         correlation_id: Annotated[
             str | None,
@@ -530,8 +605,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         start: Annotated[
             str | None,
             Field(
-                description="First sync 'YYYY-MM-DDTHH:MM:SS' (default now: ISE runs the first full "
-                "sync at once)"
+                description="First sync 'YYYY-MM-DDTHH:MM:SS', rounded up to the next 5 minutes as ISE "
+                "does (default now: ISE runs the first full sync within 5 minutes)"
             ),
         ] = None,
         coa: Annotated[
@@ -548,6 +623,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         """Create a pxGrid Direct connector (ISE pulls a REST CMDB such as NetBox on a schedule and adds the
         mapped record attributes to the matching endpoints, for authorization rules on
         '<connector>:<attribute>'), or update the one with this name: given fields change, others are kept.
+        Key the connector on a string attribute: ISE 3.5 doesn't finish a sync keyed on a numeric id.
         The token or password comes from a server environment variable (secret_env) and is never shown.
         Preview-first with a diff; no_change when nothing would change. Then ise_test_pxgrid_direct and
         ise_pxgrid_direct_status."""
@@ -603,6 +679,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             raise InvalidRequest("token_header goes with auth='apikey'")
         blockers: list[str] = []
         side: list[str] = []
+        if start is not None and start_at != start:
+            side.append(f"ISE starts syncs on 5-minute marks: start {start} becomes {start_at}")
 
         # Patch: only what the call names (plus what a change of auth or URL needs to stay consistent).
         patch: dict[str, Any] = {}
@@ -618,7 +696,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         }
         if attributes is not None:
             attrs_patch["attributeMapping"] = [
-                {"name": src, "dictionaryName": dict_name, "includeInDictionary": True}
+                {"jsonAttribute": src, "dictionaryAttribute": dict_name, "includeInDictionary": True}
                 for dict_name, src in attributes.items()
             ]
         if attrs_patch:
@@ -676,27 +754,22 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                     elif " " in keep:
                         keep = keep.split(" ", 1)[1]
             cred = secret if secret is not None else keep
+            # flexibleUrl only: ISE 3.5 answers 400 to a body carrying `url` as well.
             flex: dict[str, Any] = {"bulk": _fetch_url(str(b_url), a, user, cred, header, key_scheme)}
             if i_url:
                 flex["incremental"] = _fetch_url(str(i_url), a, user, cred, header, key_scheme)
-            url: dict[str, Any] = {"bulkUrl": b_url, "authenticationType": a}
-            if i_url:
-                url["incrementalUrl"] = i_url
-            if a == "basic":
-                url["userName"] = user or ""
-                if cred is not None:
-                    url["password"] = cred
-            patch["url"] = url
             patch["flexibleUrl"] = flex
             if existing and a != old.get("auth") and secret is None:
                 blockers.append(f"Changing auth to {a} needs the new credential: give secret_env")
 
         if existing:
             base = dict(existing)
-            desired = deep_merge(base, {k: v for k, v in patch.items() if k not in ("url", "flexibleUrl")})
-            for k in ("url", "flexibleUrl"):
-                if k in patch:
-                    desired[k] = patch[k]  # replaced whole: no stale credential of the other auth type
+            desired = deep_merge(base, {k: v for k, v in patch.items() if k != "flexibleUrl"})
+            if "flexibleUrl" in patch:
+                desired["flexibleUrl"] = patch["flexibleUrl"]  # whole: no stale credential of the other auth
+            if _fetch(desired, "bulk"):
+                # ISE's GET returns the legacy `url` block too; a PUT carrying both is refused (400).
+                desired.pop("url", None)
             if "attributes" in patch and "attributeMapping" in patch["attributes"]:
                 desired["attributes"]["attributeMapping"] = patch["attributes"]["attributeMapping"]
             changes = field_changes(connector_view(base), connector_view(desired))
@@ -778,9 +851,10 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
             side.append(
                 "Plain http: the CMDB credential and records cross the network unencrypted (use https)"
             )
+        https = bool(bulk_url) and urlsplit(str(bulk_url)).scheme == "https"
         if body["skipCertificateValidations"]:
             side.append("ISE won't validate the CMDB's certificate: anyone on the path can feed it records")
-        else:
+        elif https:
             side.append(
                 "ISE must trust the CMDB's certificate chain (System Certificates > Trusted Certificates)"
             )
@@ -825,7 +899,17 @@ async def delete_pxgrid_direct_connector(
     )
 
     async def apply() -> Any:
-        await app.openapi.delete(f"{CONFIG}/{quote(cname, safe='')}")
+        try:
+            await app.openapi.delete(f"{CONFIG}/{quote(cname, safe='')}")
+        except UpstreamError as e:
+            if e.status_code != 500:
+                raise
+            # Seen live (#170): a 500 while a scheduled sync hangs; a fresh preview + confirm then deleted it.
+            raise UpstreamError(
+                f"{e} ISE answers 500 while a sync is still running or just ended: check "
+                f"ise_pxgrid_direct_status(name='{cname}'), then preview the delete again and confirm it",
+                500,
+            ) from e
         return {"deleted": cname}
 
     return await preview_or_apply(

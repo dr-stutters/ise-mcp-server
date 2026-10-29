@@ -2,7 +2,10 @@
 `{"response": [], "version": "1.0.0"}` (2026-10-28); the connector entities below follow the 3.5 OpenAPI
 'pxGrid Direct' group (ConnectorConfigInfo, ConnectorConfigInfoConnector, FetchUrl, ApiKeyProperties,
 AttributeMapping, Schedule, TestConnectorResponse, SyncNowConfigGetResponse) and are synthetic. URLs use
-example.com; the token is a made-up value."""
+example.com; the token is a made-up value.
+
+#170: `LIVE_GET`, the SCH_INPROGRESS sync status and the string test answer are the lab ISE 3.5 (3.5.0.527
+Patch 4) answers recorded on 2026-10-28 (run l14), scrubbed: documentation address, made-up MAC."""
 
 from __future__ import annotations
 
@@ -59,6 +62,77 @@ def connector(**over: Any) -> dict[str, Any]:
     return c
 
 
+# GET /connector-config/{name} on ISE 3.5 after a create (scrubbed): both `flexibleUrl` and `url`, the
+# mapping in jsonAttribute ('$.'-prefixed) / dictionaryAttribute form.
+LIVE_NAME = "mcp_r96_cmdb"
+LIVE_URL = "http://192.0.2.10:8080/api/devices.json"
+LIVE_GET: dict[str, Any] = {
+    "response": {
+        "connector": {
+            "connectorName": LIVE_NAME,
+            "description": "mcp-r96 scratch CMDB",
+            "connectorType": "urlfetcher",
+            "coaType": "nocoa",
+            "protocol": "http",
+            "skipCertificateValidations": False,
+            "enabled": True,
+            "flexibleUrl": {
+                "bulk": {
+                    "url": LIVE_URL,
+                    "method": "GET",
+                    "additionalHeaders": [],
+                    "authenticationType": "basic",
+                    "basicAuthProperties": {
+                        "userName": "mcp",
+                        "password": "********",
+                        "requestBody": "********",
+                    },
+                    "apiKeyProperties": None,
+                    "oauthProperties": None,
+                },
+                "incremental": None,
+            },
+            "url": {
+                "bulkUrl": LIVE_URL,
+                "incrementalUrl": None,
+                "authenticationType": "basic",
+                "userName": None,
+                "password": "********",
+            },
+            "fullsyncSchedule": {"intervalUnit": "hours", "interval": 24, "startDate": "2026-10-28T23:20:00"},
+            "deltasyncSchedule": None,
+            "attributes": {
+                "topLevelObject": "results",
+                "uniqueIdentifier": "id",
+                "versionIdentifier": "last_updated",
+                "correlationIdentifier": "mac",
+                "attributeMapping": [
+                    {
+                        "includeInDictionary": True,
+                        "jsonAttribute": "$.role",
+                        "dictionaryAttribute": "role",
+                        "coaSignificance": False,
+                    },
+                    {
+                        "includeInDictionary": True,
+                        "jsonAttribute": "$.site",
+                        "dictionaryAttribute": "site",
+                        "coaSignificance": False,
+                    },
+                ],
+            },
+            "groupArray": None,
+            "additionalProperties": None,
+        }
+    },
+    "version": "1.0.0",
+}
+
+
+def live_connector() -> dict[str, Any]:
+    return json.loads(json.dumps(LIVE_GET["response"]["connector"]))
+
+
 def listing(mock: respx.MockRouter, items: list[dict[str, Any]]) -> None:
     mock.get(CONFIG).respond(json={"response": [{"connector": c} for c in items], "version": "1.0.0"})
 
@@ -113,10 +187,11 @@ async def test_create_from_env_token_never_shown(
         "key": f"Token {TOKEN}",
     }
     assert sent["attributes"]["attributeMapping"][0] == {
-        "name": "role",
-        "dictionaryName": "role",
+        "jsonAttribute": "role",
+        "dictionaryAttribute": "role",
         "includeInDictionary": True,
     }
+    assert "url" not in sent  # ISE 3.5: 400 'Both flexibleUrl and url fields are present'
     assert sent["skipCertificateValidations"] is False
 
 
@@ -129,8 +204,8 @@ async def test_create_basic_auth(mock: respx.MockRouter, monkeypatch: pytest.Mon
     assert preview["preview"]["auth"] == "basic" and preview["preview"]["username"] == "ise-reader"
     assert done is not None
     sent = json.loads(route.calls.last.request.content)["connector"]
-    assert sent["url"]["userName"] == "ise-reader" and sent["url"]["password"] == TOKEN
-    assert sent["flexibleUrl"]["bulk"]["basicAuthProperties"]["password"] == TOKEN
+    assert "url" not in sent
+    assert sent["flexibleUrl"]["bulk"]["basicAuthProperties"] == {"userName": "ise-reader", "password": TOKEN}
     assert sent["coaType"] == "reauth"
 
 
@@ -175,8 +250,12 @@ async def test_update_mapping_keeps_saved_token(mock: respx.MockRouter) -> None:
     assert "credential" not in changes
     assert done is not None
     sent = json.loads(put.calls.last.request.content)["connector"]
-    assert [m["dictionaryName"] for m in sent["attributes"]["attributeMapping"]] == ["role", "tenant"]
+    assert sent["attributes"]["attributeMapping"] == [
+        {"jsonAttribute": "role", "dictionaryAttribute": "role", "includeInDictionary": True},
+        {"jsonAttribute": "tenant", "dictionaryAttribute": "tenant", "includeInDictionary": True},
+    ]
     assert sent["flexibleUrl"] == connector()["flexibleUrl"]  # untouched: the saved key goes back as is
+    assert "url" not in sent  # the GET's legacy block is dropped from the PUT
 
 
 async def test_update_url_sends_masked_key_back_unprefixed(mock: respx.MockRouter) -> None:
@@ -328,3 +407,149 @@ def test_view_never_holds_credentials() -> None:
     v = connector_view(connector())
     assert v["credential_set"] is True and v["token_header"] == "Authorization"
     assert "******" not in json.dumps(v)
+
+
+# --- #170: what ISE 3.5 really takes and returns -------------------------------------------------
+
+
+def test_view_reads_live_shape() -> None:
+    v = connector_view(live_connector())
+    assert v["attributes"] == {"role": "role", "site": "site"}  # '$.' stripped; no {'None': None}
+    assert v["bulk_url"] == LIVE_URL and v["auth"] == "basic" and v["username"] == "mcp"
+    assert v["credential_set"] is True and v["full_sync"] == "every 24 hours from 2026-10-28T23:20:00"
+    assert "********" not in json.dumps(v)
+
+
+async def test_status_on_live_get_shows_attributes(mock: respx.MockRouter) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    mock.get(f"/api/v1/pxgrid-direct/syncNowStatus/{LIVE_NAME}").respond(
+        json={
+            "response": {"connector": {"connectorName": LIVE_NAME, "syncStatus": "SCH_INPROGRESS"}},
+            "version": "1.0.0",
+        }
+    )
+    out = await call_tool(make_server(), "ise_pxgrid_direct_status", {"name": LIVE_NAME})
+    assert out["attributes"] == {"role": "role", "site": "site"}
+    assert out["sync_status"] == "SCH_INPROGRESS" and out["sync_completed"] is False
+    assert out["sync_running"] is True and "numeric unique id" in out["sync_hint"]
+
+
+async def test_update_live_mapping_is_no_change(mock: respx.MockRouter) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    put = mock.put(f"{CONFIG}/{LIVE_NAME}").respond(json={})
+    out, done = await two_step(
+        "ise_set_pxgrid_direct_connector", {"name": LIVE_NAME, "attributes": {"role": "role", "site": "site"}}
+    )
+    assert out["status"] == "no_change", out
+    assert done is None and not put.called
+
+
+async def test_update_live_put_drops_url(mock: respx.MockRouter) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    put = mock.put(f"{CONFIG}/{LIVE_NAME}").respond(json={})
+    preview, done = await two_step(
+        "ise_set_pxgrid_direct_connector",
+        {"name": LIVE_NAME, "attributes": {"role": "role", "owner": "owner"}},
+    )
+    assert preview["status"] == "preview", preview
+    assert preview["preview"]["changes"], preview
+    assert done is not None
+    sent = json.loads(put.calls.last.request.content)["connector"]
+    assert "url" not in sent and sent["flexibleUrl"]["bulk"]["url"] == LIVE_URL
+    assert [m["dictionaryAttribute"] for m in sent["attributes"]["attributeMapping"]] == ["role", "owner"]
+    assert all("name" not in m and "dictionaryName" not in m for m in sent["attributes"]["attributeMapping"])
+
+
+async def test_test_connector_string_record_numeric_id(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ISE_PXGRID_DIRECT_CMDB_PW", TOKEN)
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    record = {
+        "id": 9601,
+        "last_updated": "2026-10-28T23:10:00Z",
+        "mac": "00:00:5E:00:53:01",
+        "name": "mcp-r96-client",
+        "role": "lab-client",
+        "site": "branch-1",
+    }
+    mock.post("/api/v1/pxgrid-direct/test-connector").respond(
+        json={"response": {"status": "success", "data": json.dumps(record)}, "version": "1.0.0"}
+    )
+    out = await call_tool(
+        make_server(),
+        "ise_test_pxgrid_direct",
+        {"name": LIVE_NAME, "secret_env": "ISE_PXGRID_DIRECT_CMDB_PW"},
+    )
+    assert out["passed"] is True and out["records"] == 1 and out["first_record"] == record
+    assert "top_level_object" not in out.get("warning", "")
+    assert "is a number" in out["warning"] and "SCH_INPROGRESS" in out["warning"]
+    assert TOKEN not in json.dumps(out)
+
+
+async def test_test_connector_string_id_no_warning(mock: respx.MockRouter) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    record = {"id": "mcp-r96-9601", "mac": "00:00:5E:00:53:01", "role": "printer"}
+    mock.post("/api/v1/pxgrid-direct/test-connector").respond(
+        json={"status": "success", "data": json.dumps(record)}
+    )
+    out = await call_tool(make_server(), "ise_test_pxgrid_direct", {"name": LIVE_NAME})
+    assert out["records"] == 1 and "warning" not in out, out
+
+
+async def test_test_connector_wrong_top_level_still_warns(mock: respx.MockRouter) -> None:
+    listing(mock, [connector()])
+    page = {"count": 1, "result": [{"id": "a", "mac": "00:00:5E:00:53:01"}]}
+    mock.post("/api/v1/pxgrid-direct/test-connector").respond(
+        json={"status": "success", "data": json.dumps(page)}
+    )
+    out = await call_tool(make_server(), "ise_test_pxgrid_direct", {"name": NAME})
+    assert "No list under top_level_object 'results'" in out["warning"]
+
+
+async def test_create_http_no_cert_chain_line_and_start_rounded(
+    mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ISE_PXGRID_DIRECT_CMDB_PW", TOKEN)
+    listing(mock, [])
+    route = mock.post(CONFIG).respond(201, json={})
+    args = {
+        **CREATE,
+        "name": LIVE_NAME,
+        "bulk_url": LIVE_URL,
+        "secret_env": "ISE_PXGRID_DIRECT_CMDB_PW",
+        "username": "mcp",
+        "unique_id": "name",
+        "start": "2026-10-28T23:18:00",
+    }
+    preview, done = await two_step("ise_set_pxgrid_direct_connector", args)
+    assert preview["status"] == "preview", preview
+    side = " ".join(preview["side_effects"])
+    assert "Trusted Certificates" not in side and "Plain http" in side
+    assert "becomes 2026-10-28T23:20:00" in side
+    assert preview["preview"]["full_sync"] == "every 24 hours from 2026-10-28T23:20:00"
+    assert done is not None
+    sent = json.loads(route.calls.last.request.content)["connector"]
+    assert sent["fullsyncSchedule"]["startDate"] == "2026-10-28T23:20:00" and "url" not in sent
+
+
+def test_start_rounding() -> None:
+    from ise_mcp.tools.pxgrid_direct import _start
+
+    assert _start("2026-10-28T23:20:00") == "2026-10-28T23:20:00"
+    assert _start("2026-10-28T23:20:01") == "2026-10-28T23:25:00"
+    assert _start("2026-10-28T23:58:00") == "2026-10-29T00:00:00"
+    now = _start(None)
+    assert now.endswith(":00") and int(now[14:16]) % 5 == 0
+
+
+async def test_delete_500_gives_retry_hint(mock: respx.MockRouter) -> None:
+    mock.get(CONFIG).respond(json={"response": [LIVE_GET["response"]], "version": "1.0.0"})
+    mock.delete(f"{CONFIG}/{LIVE_NAME}").respond(500, json={"message": "Bad Request. Please see logs"})
+    server = make_server(mcp_enable_writes=True)
+    args = {"kind": "pxgrid_direct_connector", "target": LIVE_NAME}
+    async with Client(server) as c:
+        preview = (await c.call_tool("ise_delete_object", args)).structured_content
+        assert preview is not None and preview["preview"]["attributes"] == {"role": "role", "site": "site"}
+        with pytest.raises(ToolError, match="preview the delete again"):
+            await c.call_tool("ise_delete_object", {**args, "confirm": preview["confirm"]})
