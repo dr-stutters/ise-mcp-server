@@ -461,6 +461,88 @@ async def test_reset_password_without_value_and_blocked_when_pending(mock: respx
     assert blocked["status"] == "blocked" and "ise_approve_guest" in json.dumps(blocked["blockers"])
 
 
+# The 400 ISE 3.5 returned in the live proof of #50 (#182), with a documentation id.
+RESET_DENIED_400 = {
+    "ERSResponse": {
+        "operation": "PUT-resetpassword-guestuser",
+        "messages": [
+            {
+                "title": "ResetPassword request for GuestUser By ID (00000000-0000-4000-8000-000000000182) "
+                "failed due to Sponsor user does not have permission to reset/view passwords on guest "
+                "accounts",
+                "type": "ERROR",
+                "code": "CRUD operation exception",
+            }
+        ],
+        "link": {"rel": "related", "href": "https://ise.example.com/ers/config/guestuser/resetpassword"},
+    }
+}
+
+
+async def preview_only(name: str, args: dict[str, Any], **settings: Any) -> Any:
+    async with Client(make_server(mcp_enable_writes=True, **settings)) as c:
+        return (await c.call_tool(name, args)).structured_content
+
+
+async def test_reset_password_permission_400_names_the_fix(mock: respx.MockRouter) -> None:
+    mock_guest(mock)
+    mock.put(f"/ers/config/guestuser/resetpassword/{GID}").respond(400, json=RESET_DENIED_400)
+    args = {"user": "mcp-guest-alice"}
+    async with Client(make_server(mcp_enable_writes=True, **SPONSOR)) as c:
+        preview = (await c.call_tool("ise_reset_guest_password", args)).structured_content
+        r = await c.call_tool(
+            "ise_reset_guest_password", {**args, "confirm": preview["confirm"]}, raise_on_error=False
+        )
+    text = r.content[0].text
+    assert r.is_error and "reset/view passwords" in text
+    assert "ise_set_sponsor_group" in text and "'canViewGuestPasswords': true" in text
+    assert "sponsor1" in text and "sponsor-secret" not in text
+
+
+async def test_new_sponsor_group_can_view_passwords_and_flags_unmasked(mock: respx.MockRouter) -> None:
+    mock_choices(mock)
+    mock.get("/ers/config/sponsorgroup", params={"filter": "name.EQ.mcp-guest-new"}).respond(
+        json=ers_page([])
+    )
+    post = mock.post("/ers/config/sponsorgroup").respond(
+        201, headers={"Location": f"{BASE}/ers/config/sponsorgroup/sg-new"}
+    )
+    args = {
+        "name": "mcp-guest-new",
+        "member_groups": ["mcp-guest-sponsors"],
+        "guest_types": ["daily (default)"],
+        "locations": ["San Jose"],
+    }
+    preview, _ = await two_step("ise_set_sponsor_group", args)
+    assert {"canViewGuestPasswords", "canResetGuestPasswords"} <= set(preview["preview"]["permissions"])
+    assert "canViewGuestPasswords is off" not in json.dumps(preview)
+    sent = json.loads(post.calls.last.request.content)["SponsorGroup"]["otherPermissions"]
+    assert sent["canViewGuestPasswords"] is True and sent["canResetGuestPasswords"] is True
+    # Turning view off while reset stays on: the preview warns, and shows the booleans unmasked.
+    off = await preview_only(
+        "ise_set_sponsor_group", {**args, "permissions": {"canViewGuestPasswords": False}}
+    )
+    assert "canViewGuestPasswords is off" in json.dumps(off)
+
+
+async def test_sponsor_group_update_shows_password_flags(mock: respx.MockRouter) -> None:
+    mock_choices(mock)
+    mock.get("/ers/config/sponsorgroup", params={"filter": "name.EQ.mcp-guest-sponsors"}).respond(
+        json=ers_page([{"id": SG_ID, "name": "mcp-guest-sponsors"}])
+    )
+    body = copy.deepcopy(SG)
+    body["SponsorGroup"]["otherPermissions"].update(canViewGuestPasswords=True, canResetGuestPasswords=True)
+    mock.get(f"/ers/config/sponsorgroup/{SG_ID}").respond(json=body)
+    preview = await preview_only(
+        "ise_set_sponsor_group",
+        {"name": "mcp-guest-sponsors", "permissions": {"canViewGuestPasswords": False}},
+    )
+    change = preview["preview"]["changes"]["otherPermissions.canViewGuestPasswords"]
+    assert change == {"from": True, "to": False}
+    assert "********" not in json.dumps(preview["preview"]["changes"])
+    assert "canViewGuestPasswords is off" in json.dumps(preview)
+
+
 async def test_notify_guest_email_and_sms(mock: respx.MockRouter) -> None:
     mock_config(mock)
     mock_guest(mock)

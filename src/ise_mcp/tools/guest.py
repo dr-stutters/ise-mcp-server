@@ -20,7 +20,9 @@ ERS quirks (ISE 3.5, checked live):
   `email/{id}/portalId/{portalId}` and `sms/{id}/portalId/{portalId}` (send the account details with the
   portal's notification template; optional additionalData senderEmail), `approve/{id}` and `deny/{id}`
   (self-registered guests in PENDING_APPROVAL). The sponsor group's permissions (canResetGuestPasswords,
-  canSendSmsNotifications, canApproveSelfregGuests) decide whether ISE accepts each.
+  canSendSmsNotifications, canApproveSelfregGuests) decide whether ISE accepts each. The reset needs
+  canViewGuestPasswords too, because it returns the new password (ISE 3.5, #182): without it ISE answers
+  400 "Sponsor user does not have permission to reset/view passwords on guest accounts".
 - Portal pages, themes and most portal settings stay in the GUI; the tools read the key settings.
 """
 
@@ -45,11 +47,13 @@ from ise_mcp._core import (
     Plan,
     ResponseFormat,
     ToolRegistrar,
+    ValidationFailed,
     compact,
     get_client,
     object_result,
     preview_or_apply,
 )
+from ise_mcp._core.formatting import NOT_SECRET_KEYS
 from ise_mcp._core.http import page_of
 from ise_mcp.client import IseApp, unwrap
 from ise_mcp.tools._common import (
@@ -98,6 +102,15 @@ SPONSOR_PERMISSIONS = (
     "canReinstateSuspendedAccounts",
     "canApproveSelfregGuests",
     "limitApprovalToSponsorsGuests",
+)
+# Sponsor-group permission flags whose names match the core secret pattern ("password"): booleans, show them.
+NOT_SECRET_KEYS.update({"canViewGuestPasswords", "canResetGuestPasswords"})
+# ISE's 400 when the sponsor group lacks 'view guest passwords' (or 'reset'), and what fixes it (#182).
+RESET_DENIED = re.compile(r"does not have permission to reset/view passwords", re.IGNORECASE)
+RESET_HINT = (
+    "The sponsor group of {sponsor!r} needs both 'reset guest passwords' and 'view guest passwords' "
+    "(ISE returns the new password). Fix: ise_set_sponsor_group(name=<the sponsor's group>, "
+    "permissions={{'canViewGuestPasswords': true, 'canResetGuestPasswords': true}})"
 )
 GUEST_COLUMNS = ["username", "status", "guest_type", "valid_from", "valid_to", "sponsor", "company"]
 # Markdown columns (the rows carry more than 10 keys; json has them all). id and description stay visible.
@@ -222,6 +235,17 @@ def sponsor_group_row(g: dict[str, Any]) -> dict[str, Any]:
         "description": g.get("description"),
         "id": g.get("id"),
     }
+
+
+def reset_warning(group: dict[str, Any]) -> list[str]:
+    """#182: ISE refuses a password reset (ERS and sponsor portal) when 'view guest passwords' is off."""
+    other = group.get("otherPermissions") or {}
+    if other.get("canResetGuestPasswords") and not other.get("canViewGuestPasswords"):
+        return [
+            "canResetGuestPasswords is on but canViewGuestPasswords is off: ISE refuses password resets "
+            "(ise_reset_guest_password) until both are on"
+        ]
+    return []
 
 
 def guest_type_row(t: dict[str, Any], groups: dict[str, str]) -> dict[str, Any]:
@@ -917,8 +941,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         """Reset a guest account's password as the sponsor ("I lost my password"): ISE generates a new one
         under the guest password policy and the old one stops working. On confirm the result carries the
         new password, the only time it is shown (not in the preview or the audit log); hand it to the
-        guest or send it with ise_notify_guest. Needs the sponsor group's 'reset guest passwords'
-        permission. Preview-first."""
+        guest or send it with ise_notify_guest. Needs both of the sponsor group's 'reset guest passwords'
+        and 'view guest passwords' permissions (canResetGuestPasswords, canViewGuestPasswords; ISE refuses
+        the reset without the second). Preview-first."""
         app: IseApp = get_client(ctx)
         current = await resolve_guest(app, user)
         status = str(current.get("status") or "")
@@ -933,7 +958,14 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         gid = quote(str(current["id"]), safe="")
 
         async def apply() -> dict[str, Any]:
-            data = await app.sponsor_request("PUT", f"/ers/config/guestuser/resetpassword/{gid}")
+            try:
+                data = await app.sponsor_request("PUT", f"/ers/config/guestuser/resetpassword/{gid}")
+            except ValidationFailed as e:
+                if not RESET_DENIED.search(str(e)):
+                    raise
+                raise ValidationFailed(
+                    f"{e} {RESET_HINT.format(sponsor=app.sponsor_username)}", e.status_code
+                ) from None
             secret = reset_password_value(data)
             out: dict[str, Any] = {"username": name, "password": secret}
             out["note"] = (
@@ -1143,7 +1175,9 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
         """Create a sponsor group, or change one: map AD groups (ise_add_ad_groups first, so the join
         point offers them) or ISE identity groups as sponsors, pick the guest types and locations they may
         use, what they manage, and REST access. Only the given fields change on an existing group. A new
-        group defaults to own accounts, no REST access, the GUI's default permissions. Preview-first."""
+        group defaults to own accounts, no REST access, and the permissions of ISE's shipped sponsor
+        groups (view and reset guest passwords both on: ise_reset_guest_password needs both).
+        Preview-first."""
         app: IseApp = get_client(ctx)
         bad = sorted(set(permissions or {}) - set(SPONSOR_PERMISSIONS))
         if bad:
@@ -1202,7 +1236,8 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 },
                 "otherPermissions": {
                     "canUpdateGuestContactInfo": True,
-                    "canViewGuestPasswords": False,
+                    # On, like ISE's shipped sponsor groups: the ERS password reset needs it (#182).
+                    "canViewGuestPasswords": True,
                     "canSendSmsNotifications": False,
                     "canResetGuestPasswords": True,
                     "canExtendGuestAccounts": True,
@@ -1226,6 +1261,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 f"Create sponsor group {name}",
                 details=sponsor_group_row(desired),
                 blockers=blockers,
+                side_effects=reset_warning(desired),
             )
 
             async def apply() -> Any:
@@ -1241,6 +1277,7 @@ def register(reg: ToolRegistrar) -> None:  # noqa: C901 - one registration block
                 f"Update sponsor group {current.get('name')}",
                 details={"changes": changes},
                 blockers=blockers,
+                side_effects=reset_warning(desired),
                 fingerprint=fingerprint(current),
                 noop=noop,
                 noop_reason=f"Sponsor group {current.get('name')} already as requested" if noop else None,
