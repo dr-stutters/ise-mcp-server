@@ -516,6 +516,10 @@
       "tier": "dangerous",
       "title": "Apply ANC policy to an endpoint"
     },
+    "ise_approve_guest": {
+      "tier": "write",
+      "title": "Approve or deny a self-registered guest"
+    },
     "ise_approve_pxgrid_client": {
       "tier": "write",
       "title": "Approve a pxGrid client"
@@ -1000,6 +1004,10 @@
       "tier": "read",
       "title": "Per-NAD RADIUS latency and timeouts"
     },
+    "ise_notify_guest": {
+      "tier": "write",
+      "title": "Send a guest their account details"
+    },
     "ise_patch_readiness": {
       "tier": "write",
       "title": "Patch / upgrade / rollback readiness"
@@ -1043,6 +1051,10 @@
     "ise_reprofile_endpoint": {
       "tier": "dangerous",
       "title": "Reprofile an endpoint (CoA)"
+    },
+    "ise_reset_guest_password": {
+      "tier": "write",
+      "title": "Reset a guest's password"
     },
     "ise_reset_hitcounts": {
       "tier": "dangerous",
